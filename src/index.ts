@@ -73,6 +73,28 @@ printType(
   ast.fieldAccess(ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("test"))]), "y"),
 );
 
+// Test: pattern match on record - extract x field
+printType(
+  ast.match(ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("hello"))]), [
+    ast.case_(ast.precord([ast.pfield("x", ast.pvar("a"))]), ast.var_("a")),
+  ]),
+);
+
+// Test: pattern match on record - extract both fields, return y
+printType(
+  ast.match(ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.bool(true))]), [
+    ast.case_(ast.precord([ast.pfield("x", ast.pvar("a")), ast.pfield("y", ast.pvar("b"))]), ast.var_("b")),
+  ]),
+);
+
+// Test: nested record pattern
+printType(
+  ast.match(
+    ast.record([ast.field("inner", ast.record([ast.field("value", ast.num(99))]))]),
+    [ast.case_(ast.precord([ast.pfield("inner", ast.precord([ast.pfield("value", ast.pvar("v"))]))]), ast.var_("v"))],
+  ),
+);
+
 printType(
   ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
     ast.case_(ast.pcon("Just", ast.pvar("x")), ast.var_("x")),
