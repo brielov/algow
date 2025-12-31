@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Algow is an experimental Hindley-Milner type inference implementation (Algorithm W) in TypeScript. This is a learning project exploring how compilers and type systems work.
+Algow is an experimental Hindley-Milner type inference implementation (Algorithm W) in TypeScript. A learning project exploring how compilers and type systems work.
 
 ## Commands
 
@@ -17,30 +17,46 @@ bunx oxlint          # Run linter
 
 ## Architecture
 
-The type checker has three main components:
-
 ### `src/ast.ts` - Abstract Syntax Tree
 
-Defines expression types and smart constructors:
+**Expressions:**
 
-- **Literals**: `Num`, `Bool`, `Str`
-- **Bindings**: `Let` (polymorphic), `LetRec` (recursive)
-- **Functions**: `Abs` (lambda), `App` (application)
-- **Control**: `If`, `BinOp`
+- Literals: `Num`, `Bool`, `Str`
+- Bindings: `Let` (polymorphic), `LetRec` (recursive)
+- Functions: `Abs` (lambda), `App` (application)
+- Control: `If`, `BinOp`, `Match`
+- Data: `Tuple`
+
+**Patterns** (for pattern matching):
+
+- `PVar`, `PWildcard`, `PCon`, `PLit`
+
+**Type expressions** (for ADT declarations):
+
+- `TyVar`, `TyCon`, `TyApp`, `TyFun`
+
+**Data declarations:**
+
+- `DataDecl`, `ConDecl` — define ADTs like `data List a = Nil | Cons a (List a)`
 
 ### `src/infer.ts` - Type Inference Engine
 
-Implements Algorithm W with:
+**Internal types:**
 
-- **Types**: `TVar` (type variable), `TCon` (type constant), `TFun` (function type)
-- **Schemes**: Polymorphic types with quantified variables and constraints
-- **Type classes**: `Eq`, `Ord`, `Add` for operator overloading
-- **Core functions**: `infer()` is the entry point; internally uses `unify()`, `generalize()`, `instantiate()`
+- `TVar` (type variable), `TCon` (type constant), `TFun` (function type), `TApp` (type application)
+
+**Key functions:**
+
+- `infer(env, registry, expr)` — Main entry point
+- `processDataDecl(decl)` — Converts ADT declarations to constructor schemes
+- `checkExhaustiveness(registry, type, patterns)` — Validates pattern match coverage
+
+**Type classes:** `Eq`, `Ord`, `Add` for operator overloading
 
 ### `src/index.ts` - Entry Point
 
-Simple test harness for building and testing expressions.
+Test harness demonstrating type inference with ADT declarations for `List`, `Maybe`, `Either`.
 
 ## Runtime
 
-Use Bun, not Node.js. Bun auto-loads `.env` files. See `node_modules/bun-types/docs/**.mdx` for Bun API documentation.
+Use Bun, not Node.js.

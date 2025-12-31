@@ -10,12 +10,17 @@ A small, experimental type checker written in TypeScript. This is a learning pro
 - Let bindings with polymorphism
 - Binary operators (`+`, `-`, `*`, `/`, `<`, `>`, `==`, etc.)
 - Type classes for operator overloading (`Eq`, `Ord`, `Add`)
+- Parameterized types (`List a`, `Maybe a`, `Either a b`)
+- Algebraic data types (ADTs) with `dataDecl`
+- Pattern matching with `match` expressions
+- Exhaustiveness checking for pattern matches
+- Tuple syntax
 
 ## What's next
 
-- Algebraic data types (ADTs)
-- Pattern matching
-- Exhaustiveness checking
+- Lexer and parser
+- Runtime/interpreter for code execution
+- Record types
 
 ## Running
 
