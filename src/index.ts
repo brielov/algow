@@ -123,9 +123,21 @@ printType(
 // Test: nested tuple pattern
 printType(
   ast.match(ast.tuple(ast.tuple(ast.num(1), ast.num(2)), ast.str("nested")), [
-    ast.case_(ast.ptuple([ast.ptuple([ast.pvar("x"), ast.pvar("y")]), ast.pvar("z")]), ast.var_("x")),
+    ast.case_(
+      ast.ptuple([ast.ptuple([ast.pvar("x"), ast.pvar("y")]), ast.pvar("z")]),
+      ast.var_("x"),
+    ),
   ]),
 );
+
+// Test: row polymorphism - fn r => r.x (should work now!)
+printType(ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")));
+
+// Test: row polymorphism - applying field accessor to a record
+printType(ast.app(ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")), ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("hello"))])));
+
+// Test: row polymorphism - fn r => r.x + r.y (multiple field access)
+printType(ast.abs("r", ast.binOp("+", ast.fieldAccess(ast.var_("r"), "x"), ast.fieldAccess(ast.var_("r"), "y"))));
 
 printType(
   ast.match(ast.app(ast.var_("Just"), ast.num(42)), [

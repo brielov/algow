@@ -22,6 +22,7 @@ type Type =
   | {
       readonly kind: "TRecord";
       readonly fields: ReadonlyMap<string, Type>;
+      readonly row: Type | null; // null = closed record, TVar = open record
     }
   | {
       readonly kind: "TTuple";
@@ -32,9 +33,10 @@ const tvar = (name: string): Type => ({ kind: "TVar", name });
 const tcon = (name: string): Type => ({ kind: "TCon", name });
 const tfun = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret });
 const tapp = (con: Type, arg: Type): Type => ({ kind: "TApp", con, arg });
-const trecord = (fields: readonly [string, Type][]): Type => ({
+const trecord = (fields: readonly [string, Type][], row: Type | null = null): Type => ({
   kind: "TRecord",
   fields: new Map(fields),
+  row,
 });
 const ttuple = (elements: readonly Type[]): Type => ({ kind: "TTuple", elements });
 
@@ -95,7 +97,8 @@ const applySubst = (subst: Subst, type: Type): Type => {
       for (const [name, fieldType] of type.fields) {
         newFields.set(name, applySubst(subst, fieldType));
       }
-      return trecord([...newFields.entries()]);
+      const newRow = type.row ? applySubst(subst, type.row) : null;
+      return trecord([...newFields.entries()], newRow);
     }
     case "TTuple":
       return ttuple(type.elements.map((t) => applySubst(subst, t)));
@@ -168,23 +171,7 @@ const unify = (t1: Type, t2: Type): Subst => {
     return composeSubst(s1, s2);
   }
   if (t1.kind === "TRecord" && t2.kind === "TRecord") {
-    const fields1 = [...t1.fields.keys()].sort();
-    const fields2 = [...t2.fields.keys()].sort();
-
-    if (fields1.length !== fields2.length || !fields1.every((f, i) => f === fields2[i])) {
-      throw new Error(
-        `Record field mismatch: { ${fields1.join(", ")} } vs { ${fields2.join(", ")} }`,
-      );
-    }
-
-    let currentSubst: Subst = new Map();
-    for (const fieldName of fields1) {
-      const fieldType1 = applySubst(currentSubst, t1.fields.get(fieldName)!);
-      const fieldType2 = applySubst(currentSubst, t2.fields.get(fieldName)!);
-      const s = unify(fieldType1, fieldType2);
-      currentSubst = composeSubst(currentSubst, s);
-    }
-    return currentSubst;
+    return unifyRecords(t1, t2);
   }
   if (t1.kind === "TTuple" && t2.kind === "TTuple") {
     if (t1.elements.length !== t2.elements.length) {
@@ -220,6 +207,108 @@ const freshTypeVar = (): Type => {
   return tvar(`t${typeVarCounter++}`);
 };
 
+type TRecord = Extract<Type, { kind: "TRecord" }>;
+
+const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
+  const fields1 = new Set(t1.fields.keys());
+  const fields2 = new Set(t2.fields.keys());
+
+  // Find common fields and fields unique to each record
+  const commonFields = fields1.intersection(fields2);
+  const onlyIn1 = fields1.difference(fields2);
+  const onlyIn2 = fields2.difference(fields1);
+
+  // Unify common fields
+  let currentSubst: Subst = new Map();
+  for (const fieldName of commonFields) {
+    const fieldType1 = applySubst(currentSubst, t1.fields.get(fieldName)!);
+    const fieldType2 = applySubst(currentSubst, t2.fields.get(fieldName)!);
+    const s = unify(fieldType1, fieldType2);
+    currentSubst = composeSubst(currentSubst, s);
+  }
+
+  // Handle row variables for extra fields
+  const row1 = t1.row ? applySubst(currentSubst, t1.row) : null;
+  const row2 = t2.row ? applySubst(currentSubst, t2.row) : null;
+
+  // Build record types for the extra fields
+  const extraFields1: [string, Type][] = [...onlyIn1].map((f) => [
+    f,
+    applySubst(currentSubst, t1.fields.get(f)!),
+  ]);
+  const extraFields2: [string, Type][] = [...onlyIn2].map((f) => [
+    f,
+    applySubst(currentSubst, t2.fields.get(f)!),
+  ]);
+
+  if (onlyIn1.size === 0 && onlyIn2.size === 0) {
+    // No extra fields, just unify row variables
+    if (row1 && row2) {
+      const s = unify(row1, row2);
+      return composeSubst(currentSubst, s);
+    }
+    if (row1 && !row2) {
+      // row1 must be empty record
+      const s = unify(row1, trecord([]));
+      return composeSubst(currentSubst, s);
+    }
+    if (!row1 && row2) {
+      // row2 must be empty record
+      const s = unify(row2, trecord([]));
+      return composeSubst(currentSubst, s);
+    }
+    // Both closed, fields match
+    return currentSubst;
+  }
+
+  if (onlyIn1.size > 0 && onlyIn2.size === 0) {
+    // t1 has extra fields, t2 must absorb them via its row var
+    if (!row2) {
+      throw new TypeError(
+        `Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`,
+      );
+    }
+    // row2 = { extraFields1 | row1 }
+    const extraRecord = trecord(extraFields1, row1);
+    const s = unify(row2, extraRecord);
+    return composeSubst(currentSubst, s);
+  }
+
+  if (onlyIn2.size > 0 && onlyIn1.size === 0) {
+    // t2 has extra fields, t1 must absorb them via its row var
+    if (!row1) {
+      throw new TypeError(
+        `Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`,
+      );
+    }
+    // row1 = { extraFields2 | row2 }
+    const extraRecord = trecord(extraFields2, row2);
+    const s = unify(row1, extraRecord);
+    return composeSubst(currentSubst, s);
+  }
+
+  // Both have extra fields - both must be open
+  if (!row1) {
+    throw new TypeError(
+      `Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`,
+    );
+  }
+  if (!row2) {
+    throw new TypeError(
+      `Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`,
+    );
+  }
+
+  // Create fresh row variable for combined tail
+  const freshRow = freshTypeVar();
+  // row1 = { extraFields2 | freshRow }
+  const s1 = unify(row1, trecord(extraFields2, freshRow));
+  currentSubst = composeSubst(currentSubst, s1);
+  // row2 = { extraFields1 | freshRow }
+  const s2 = unify(applySubst(currentSubst, row2), trecord(extraFields1, freshRow));
+  return composeSubst(currentSubst, s2);
+};
+
 const instantiate = (scheme: Scheme): Type => {
   const freshVars = new Map<string, Type>();
   for (const name of scheme.vars) {
@@ -246,11 +335,12 @@ const freeTypeVars = (type: Type): Set<string> => {
     case "TApp":
       return freeTypeVars(type.con).union(freeTypeVars(type.arg));
     case "TRecord": {
-      const result = new Set<string>();
+      let result = new Set<string>();
       for (const fieldType of type.fields.values()) {
-        for (const v of freeTypeVars(fieldType)) {
-          result.add(v);
-        }
+        result = result.union(freeTypeVars(fieldType));
+      }
+      if (type.row) {
+        result = result.union(freeTypeVars(type.row));
       }
       return result;
     }
@@ -298,6 +388,13 @@ export const typeToString = (type: Type): string => {
       const entries: string[] = [];
       for (const [name, fieldType] of type.fields) {
         entries.push(`${name}: ${typeToString(fieldType)}`);
+      }
+      if (type.row) {
+        const rowStr = typeToString(type.row);
+        if (entries.length > 0) {
+          return `{ ${entries.join(", ")} | ${rowStr} }`;
+        }
+        return `{ | ${rowStr} }`;
       }
       return `{ ${entries.join(", ")} }`;
     }
@@ -373,8 +470,17 @@ const inferFieldAccess = (
   registry: ConstructorRegistry,
   expr: ast.FieldAccess,
 ): InferResult => {
-  const [subst, recordType, constraints] = inferExpr(env, registry, expr.record);
-  const resolvedType = applySubst(subst, recordType);
+  const [s1, recordType, constraints] = inferExpr(env, registry, expr.record);
+  const resolvedType = applySubst(s1, recordType);
+
+  // If it's a type variable, constrain it to be an open record with the field
+  if (resolvedType.kind === "TVar") {
+    const fieldType = freshTypeVar();
+    const rowVar = freshTypeVar();
+    const openRecord = trecord([[expr.field, fieldType]], rowVar);
+    const s2 = unify(resolvedType, openRecord);
+    return [composeSubst(s1, s2), applySubst(s2, fieldType), constraints];
+  }
 
   if (resolvedType.kind !== "TRecord") {
     throw new TypeError(
@@ -382,14 +488,25 @@ const inferFieldAccess = (
     );
   }
 
+  // Check if field exists directly
   const fieldType = resolvedType.fields.get(expr.field);
-  if (!fieldType) {
-    throw new TypeError(
-      `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`,
-    );
+  if (fieldType) {
+    return [s1, fieldType, constraints];
   }
 
-  return [subst, fieldType, constraints];
+  // Field not in known fields - check if record is open
+  if (resolvedType.row) {
+    // Constrain the row to contain this field
+    const newFieldType = freshTypeVar();
+    const newRowVar = freshTypeVar();
+    const s2 = unify(resolvedType.row, trecord([[expr.field, newFieldType]], newRowVar));
+    return [composeSubst(s1, s2), applySubst(s2, newFieldType), constraints];
+  }
+
+  // Closed record without the field
+  throw new TypeError(
+    `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`,
+  );
 };
 
 const inferRecord = (
@@ -586,6 +703,7 @@ const inferPattern = (
       const expectedResolved = applySubst(subst, expectedType);
 
       if (expectedResolved.kind === "TVar") {
+        // Build open record type from pattern fields
         const fieldTypes = new Map<string, Type>();
         let currentSubst = subst;
         const allBindings: PatternBindings = new Map();
@@ -600,7 +718,9 @@ const inferPattern = (
           }
         }
 
-        const recordType = trecord([...fieldTypes.entries()]);
+        // Create open record with row variable for additional fields
+        const rowVar = freshTypeVar();
+        const recordType = trecord([...fieldTypes.entries()], rowVar);
         const s = unify(applySubst(currentSubst, expectedType), recordType);
         return [composeSubst(currentSubst, s), allBindings];
       }
@@ -615,12 +735,26 @@ const inferPattern = (
       const allBindings: PatternBindings = new Map();
 
       for (const field of pattern.fields) {
-        const fieldType = expectedResolved.fields.get(field.name);
+        let fieldType = expectedResolved.fields.get(field.name);
+
+        if (!fieldType && expectedResolved.row) {
+          // Field not in known fields but record is open - constrain row
+          const newFieldType = freshTypeVar();
+          const newRowVar = freshTypeVar();
+          const s = unify(
+            applySubst(currentSubst, expectedResolved.row),
+            trecord([[field.name, newFieldType]], newRowVar),
+          );
+          currentSubst = composeSubst(currentSubst, s);
+          fieldType = applySubst(currentSubst, newFieldType);
+        }
+
         if (!fieldType) {
           throw new TypeError(
             `Record has no field '${field.name}'. Available: ${[...expectedResolved.fields.keys()].join(", ")}`,
           );
         }
+
         const [s, bindings] = inferPattern(env, field.pattern, fieldType, currentSubst);
         currentSubst = s;
         for (const [name, type] of bindings) {
@@ -655,9 +789,7 @@ const inferPattern = (
       }
 
       if (expectedResolved.kind !== "TTuple") {
-        throw new TypeError(
-          `Cannot match tuple pattern against ${typeToString(expectedResolved)}`,
-        );
+        throw new TypeError(`Cannot match tuple pattern against ${typeToString(expectedResolved)}`);
       }
 
       if (pattern.elements.length !== expectedResolved.elements.length) {
