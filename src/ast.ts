@@ -1,6 +1,18 @@
 // oxlint-disable no-thenable
 
-export type Expr = Con | Let | LetRec | Var | Abs | App | Tuple | If | BinOp | Match;
+export type Expr =
+  | Con
+  | Let
+  | LetRec
+  | Var
+  | Abs
+  | App
+  | Tuple
+  | Record
+  | FieldAccess
+  | If
+  | BinOp
+  | Match;
 
 export type Con = Num | Bool | Str;
 
@@ -53,6 +65,22 @@ export type App = {
 export type Tuple = {
   readonly kind: "Tuple";
   readonly elements: readonly Expr[];
+};
+
+export type Record = {
+  readonly kind: "Record";
+  readonly fields: readonly RecordField[];
+};
+
+export type RecordField = {
+  readonly name: string;
+  readonly value: Expr;
+};
+
+export type FieldAccess = {
+  readonly kind: "FieldAccess";
+  readonly record: Expr;
+  readonly field: string;
 };
 
 export type If = {
@@ -182,6 +210,20 @@ export const app = (func: Expr, param: Expr): App => ({
 export const tuple = (...elements: readonly Expr[]): Tuple => ({
   kind: "Tuple",
   elements,
+});
+
+export const record = (fields: readonly RecordField[]): Record => ({
+  kind: "Record",
+  fields,
+});
+export const field = (name: string, value: Expr): RecordField => ({
+  name,
+  value,
+});
+export const fieldAccess = (record: Expr, field: string): FieldAccess => ({
+  kind: "FieldAccess",
+  record,
+  field,
 });
 
 export const binOp = (op: Op, left: Expr, right: Expr): BinOp => ({

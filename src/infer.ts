@@ -18,12 +18,20 @@ type Type =
       readonly kind: "TApp";
       readonly con: Type;
       readonly arg: Type;
+    }
+  | {
+      readonly kind: "TRecord";
+      readonly fields: ReadonlyMap<string, Type>;
     };
 
 const tvar = (name: string): Type => ({ kind: "TVar", name });
 const tcon = (name: string): Type => ({ kind: "TCon", name });
 const tfun = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret });
 const tapp = (con: Type, arg: Type): Type => ({ kind: "TApp", con, arg });
+const trecord = (fields: readonly [string, Type][]): Type => ({
+  kind: "TRecord",
+  fields: new Map(fields),
+});
 
 const tNum = tcon("number");
 const tStr = tcon("string");
@@ -79,6 +87,13 @@ const applySubst = (subst: Subst, type: Type): Type => {
       return tfun(applySubst(subst, type.param), applySubst(subst, type.ret));
     case "TApp":
       return tapp(applySubst(subst, type.con), applySubst(subst, type.arg));
+    case "TRecord": {
+      const newFields = new Map<string, Type>();
+      for (const [name, fieldType] of type.fields) {
+        newFields.set(name, applySubst(subst, fieldType));
+      }
+      return trecord([...newFields.entries()]);
+    }
   }
 };
 
@@ -147,6 +162,25 @@ const unify = (t1: Type, t2: Type): Subst => {
     const s2 = unify(applySubst(s1, t1.arg), applySubst(s1, t2.arg));
     return composeSubst(s1, s2);
   }
+  if (t1.kind === "TRecord" && t2.kind === "TRecord") {
+    const fields1 = [...t1.fields.keys()].sort();
+    const fields2 = [...t2.fields.keys()].sort();
+
+    if (fields1.length !== fields2.length || !fields1.every((f, i) => f === fields2[i])) {
+      throw new Error(
+        `Record field mismatch: { ${fields1.join(", ")} } vs { ${fields2.join(", ")} }`,
+      );
+    }
+
+    let currentSubst: Subst = new Map();
+    for (const fieldName of fields1) {
+      const fieldType1 = applySubst(currentSubst, t1.fields.get(fieldName)!);
+      const fieldType2 = applySubst(currentSubst, t2.fields.get(fieldName)!);
+      const s = unify(fieldType1, fieldType2);
+      currentSubst = composeSubst(currentSubst, s);
+    }
+    return currentSubst;
+  }
   throw new TypeError(`Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`);
 };
 
@@ -191,6 +225,15 @@ const freeTypeVars = (type: Type): Set<string> => {
       return freeTypeVars(type.param).union(freeTypeVars(type.ret));
     case "TApp":
       return freeTypeVars(type.con).union(freeTypeVars(type.arg));
+    case "TRecord": {
+      const result = new Set<string>();
+      for (const fieldType of type.fields.values()) {
+        for (const v of freeTypeVars(fieldType)) {
+          result.add(v);
+        }
+      }
+      return result;
+    }
   }
 };
 
@@ -223,6 +266,13 @@ export const typeToString = (type: Type): string => {
           ? `(${typeToString(type.arg)})`
           : typeToString(type.arg);
       return `${typeToString(type.con)} ${arg}`;
+    }
+    case "TRecord": {
+      const entries: string[] = [];
+      for (const [name, fieldType] of type.fields) {
+        entries.push(`${name}: ${typeToString(fieldType)}`);
+      }
+      return `{ ${entries.join(", ")} }`;
     }
   }
 };
@@ -282,7 +332,54 @@ const inferExpr = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr):
       return inferVar(env, expr);
     case "Match":
       return inferMatch(env, registry, expr);
+    case "FieldAccess":
+      return inferFieldAccess(env, registry, expr);
+    case "Record":
+      return inferRecord(env, registry, expr);
   }
+};
+
+const inferFieldAccess = (
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.FieldAccess,
+): InferResult => {
+  const [subst, recordType, constraints] = inferExpr(env, registry, expr.record);
+  const resolvedType = applySubst(subst, recordType);
+
+  if (resolvedType.kind !== "TRecord") {
+    throw new TypeError(
+      `Cannot access field '${expr.field}' on non-record type: ${typeToString(resolvedType)}`,
+    );
+  }
+
+  const fieldType = resolvedType.fields.get(expr.field);
+  if (!fieldType) {
+    throw new TypeError(
+      `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`,
+    );
+  }
+
+  return [subst, fieldType, constraints];
+};
+
+const inferRecord = (
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Record,
+): InferResult => {
+  let subst: Subst = new Map();
+  let constraints: Constraint[] = [];
+  const fieldTypes = new Map<string, Type>();
+
+  for (const field of expr.fields) {
+    const [s, t, c] = inferExpr(applySubstEnv(subst, env), registry, field.value);
+    subst = composeSubst(subst, s);
+    constraints = [...applySubstConstraints(subst, constraints), ...c];
+    fieldTypes.set(field.name, applySubst(subst, t));
+  }
+
+  return [subst, trecord([...fieldTypes.entries()]), constraints];
 };
 
 const inferAbs = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Abs): InferResult => {

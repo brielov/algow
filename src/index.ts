@@ -60,6 +60,19 @@ printType(ast.app(ast.var_("Left"), ast.num(42)));
 // Test: Right "hello" => Either t0 string
 printType(ast.app(ast.var_("Right"), ast.str("hello")));
 
+// Test: simple record { x: 1, y: "hello" }
+printType(ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.str("hello"))]));
+
+// Test: field access { x: 42, y: "test" }.x => number
+printType(
+  ast.fieldAccess(ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("test"))]), "x"),
+);
+
+// Test: field access on y => string
+printType(
+  ast.fieldAccess(ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("test"))]), "y"),
+);
+
 printType(
   ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
     ast.case_(ast.pcon("Just", ast.pvar("x")), ast.var_("x")),
