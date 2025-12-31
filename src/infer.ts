@@ -1,68 +1,289 @@
+/**
+ * Type Inference Engine implementing Algorithm W (Hindley-Milner type inference).
+ *
+ * This module is the heart of the type checker. It takes an abstract syntax tree (AST)
+ * and determines the types of all expressions without requiring explicit type annotations.
+ *
+ * Key concepts:
+ *
+ * 1. TYPE INFERENCE vs TYPE CHECKING
+ *    - Type checking: verify that code matches given type annotations
+ *    - Type inference: discover types automatically from how values are used
+ *    Our system does inference - you write `fn x => x + 1` and we figure out it's `number -> number`
+ *
+ * 2. ALGORITHM W
+ *    Named after Robin Milner, this algorithm:
+ *    - Traverses the AST bottom-up
+ *    - Assigns fresh type variables to unknowns
+ *    - Collects constraints from how values are used
+ *    - Solves constraints via unification
+ *    - Produces the most general (principal) type
+ *
+ * 3. SUBSTITUTION
+ *    A substitution maps type variables to types. When we learn that `t0 = number`,
+ *    we record this and apply it to all types we're tracking. Substitutions compose:
+ *    if we later learn `t1 = t0`, we can derive `t1 = number`.
+ *
+ * 4. UNIFICATION
+ *    Given two types, find a substitution that makes them equal (or fail if impossible).
+ *    Example: unify(`t0 -> boolean`, `number -> t1`) yields `{t0 = number, t1 = boolean}`
+ *
+ * 5. GENERALIZATION & INSTANTIATION
+ *    - Generalization: turn a type with free variables into a polymorphic type scheme
+ *      `t0 -> t0` becomes `∀a. a -> a` (for all types a, a -> a)
+ *    - Instantiation: create fresh variables when using a polymorphic type
+ *      Using `∀a. a -> a` might give us `t5 -> t5` with a fresh variable
+ *
+ * 6. LET POLYMORPHISM
+ *    In `let id = fn x => x in (id 1, id "hello")`, the function `id` is used at
+ *    two different types. This works because `let` generalizes before adding to
+ *    the environment, allowing multiple instantiations. Lambda parameters don't
+ *    get this treatment - they're monomorphic within their scope.
+ *
+ * References:
+ * - "Algorithm W Step by Step" by Martin Grabmüller
+ * - "Write You a Haskell" by Stephen Diehl
+ * - "Types and Programming Languages" by Benjamin Pierce
+ */
+
 import * as ast from "./ast";
 
-type Type =
-  | {
-      readonly kind: "TVar";
-      readonly name: string;
-    }
-  | {
-      readonly kind: "TCon";
-      readonly name: string;
-    }
-  | {
-      readonly kind: "TFun";
-      readonly param: Type;
-      readonly ret: Type;
-    }
-  | {
-      readonly kind: "TApp";
-      readonly con: Type;
-      readonly arg: Type;
-    }
-  | {
-      readonly kind: "TRecord";
-      readonly fields: ReadonlyMap<string, Type>;
-      readonly row: Type | null; // null = closed record, TVar = open record
-    }
-  | {
-      readonly kind: "TTuple";
-      readonly elements: readonly Type[];
-    };
+// =============================================================================
+// INTERNAL TYPE REPRESENTATION
+// =============================================================================
 
+/**
+ * Internal representation of types during inference.
+ *
+ * This is separate from ast.TypeExpr because:
+ * - TypeExpr comes from user syntax (data declarations)
+ * - Type is the internal representation with additional features like row types
+ *
+ * Types form a tree structure that we manipulate during inference.
+ */
+type Type =
+  | TVar // Type variable: an unknown type to be determined
+  | TCon // Type constructor: a concrete type like `number` or `List`
+  | TFun // Function type: param -> return
+  | TApp // Type application: applying a type constructor to an argument
+  | TRecord // Record type: { field: type, ... } with optional row variable
+  | TTuple; // Tuple type: (type, type, ...)
+
+/**
+ * Type variable - represents an unknown type.
+ *
+ * During inference, we create fresh type variables for unknowns and later
+ * discover what they should be through unification. For example, in `fn x => x`,
+ * we assign `x` a fresh type variable `t0`, and the function gets type `t0 -> t0`.
+ *
+ * Type variables are named `t0`, `t1`, etc. for readability in output.
+ */
+type TVar = {
+  readonly kind: "TVar";
+  readonly name: string;
+};
+
+/**
+ * Type constructor - a concrete type name.
+ *
+ * Examples: `number`, `string`, `boolean`, `List`, `Maybe`
+ *
+ * Type constructors can be:
+ * - Base types (number, string, boolean) - used directly
+ * - Parameterized types (List, Maybe) - need type application
+ */
+type TCon = {
+  readonly kind: "TCon";
+  readonly name: string;
+};
+
+/**
+ * Function type - represents `param -> return`.
+ *
+ * All functions in our language take exactly one argument (curried style).
+ * A function of two arguments is represented as `a -> (b -> c)`.
+ *
+ * Function types are right-associative: `a -> b -> c` means `a -> (b -> c)`.
+ */
+type TFun = {
+  readonly kind: "TFun";
+  readonly param: Type;
+  readonly ret: Type;
+};
+
+/**
+ * Type application - applying a parameterized type to an argument.
+ *
+ * Example: `List number` is `TApp(TCon("List"), TCon("number"))`
+ *
+ * For multiple parameters, we use nested application (left-associative):
+ * `Either string number` is `TApp(TApp(TCon("Either"), TCon("string")), TCon("number"))`
+ */
+type TApp = {
+  readonly kind: "TApp";
+  readonly con: Type;
+  readonly arg: Type;
+};
+
+/**
+ * Record type - structural record with optional row polymorphism.
+ *
+ * Examples:
+ * - `{ x: number, y: string }` - closed record (row = null)
+ * - `{ x: number | ρ }` - open record (row = type variable)
+ *
+ * Row polymorphism allows functions to work on any record with certain fields:
+ * `fn r => r.x` has type `{ x: t | ρ } -> t` - works on any record with an `x` field.
+ *
+ * The `row` field:
+ * - null: closed record, no additional fields allowed
+ * - TVar: open record, may have additional unknown fields
+ * - TRecord: extended record (after unification)
+ */
+type TRecord = {
+  readonly kind: "TRecord";
+  readonly fields: ReadonlyMap<string, Type>;
+  readonly row: Type | null;
+};
+
+/**
+ * Tuple type - fixed-size heterogeneous collection.
+ *
+ * Example: `(number, string, boolean)` is a 3-tuple
+ *
+ * Unlike lists, tuples have:
+ * - Fixed arity (length) known at compile time
+ * - Potentially different types for each position
+ */
+type TTuple = {
+  readonly kind: "TTuple";
+  readonly elements: readonly Type[];
+};
+
+// =============================================================================
+// TYPE CONSTRUCTORS (Smart constructors for types)
+// =============================================================================
+
+/** Create a type variable */
 const tvar = (name: string): Type => ({ kind: "TVar", name });
+
+/** Create a type constructor (named type) */
 const tcon = (name: string): Type => ({ kind: "TCon", name });
+
+/** Create a function type */
 const tfun = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret });
+
+/** Create a type application */
 const tapp = (con: Type, arg: Type): Type => ({ kind: "TApp", con, arg });
+
+/**
+ * Create a record type.
+ * @param fields Array of [fieldName, fieldType] pairs
+ * @param row Optional row variable for open records (null for closed)
+ */
 const trecord = (fields: readonly [string, Type][], row: Type | null = null): Type => ({
   kind: "TRecord",
   fields: new Map(fields),
   row,
 });
+
+/** Create a tuple type */
 const ttuple = (elements: readonly Type[]): Type => ({ kind: "TTuple", elements });
 
+// =============================================================================
+// BUILT-IN TYPES
+// =============================================================================
+
+/** The number type (integers and floats) */
 const tNum = tcon("number");
+
+/** The string type */
 const tStr = tcon("string");
+
+/** The boolean type */
 const tBool = tcon("boolean");
+
+/** The List type constructor (needs type argument) */
 const tList = tcon("List");
+
+/** The Maybe type constructor (needs type argument) */
 const tMaybe = tcon("Maybe");
 
+/** Create a List type with element type */
 const tListOf = (elem: Type): Type => tapp(tList, elem);
+
+/** Create a Maybe type with element type */
 const tMaybeOf = (elem: Type): Type => tapp(tMaybe, elem);
 
+// =============================================================================
+// TYPE CLASSES (for operator overloading)
+// =============================================================================
+
+/**
+ * A type class constraint records that a type must support certain operations.
+ *
+ * Example: The expression `x == y` generates an Eq constraint on the operand type.
+ * Later, we verify that the concrete type actually supports equality.
+ */
 type Constraint = {
-  readonly class_: string;
-  readonly type: Type;
+  readonly class_: string; // The type class name (Eq, Ord, Add)
+  readonly type: Type; // The type that must be an instance
 };
 
+/**
+ * Type class instances - which concrete types support which operations.
+ *
+ * This is a simplified type class system. Real systems like Haskell's support:
+ * - User-defined type classes
+ * - Instance declarations
+ * - Superclass constraints
+ * - Default implementations
+ *
+ * Our system just tracks which built-in types support basic operations.
+ */
+const instances: Map<string, Set<string>> = new Map([
+  // Eq: types that support equality testing (==, !=)
+  ["Eq", new Set(["number", "string", "boolean"])],
+
+  // Ord: types that support ordering comparisons (<, >, <=, >=)
+  ["Ord", new Set(["number", "string"])],
+
+  // Add: types that support the + operator (addition or concatenation)
+  ["Add", new Set(["number", "string"])],
+]);
+
+// =============================================================================
+// TYPE SCHEMES (Polymorphic types)
+// =============================================================================
+
+/**
+ * A type scheme represents a polymorphic type with universally quantified variables.
+ *
+ * Written mathematically as: ∀a b c. constraints => type
+ *
+ * Example: The identity function `fn x => x` has scheme `∀a. a -> a`
+ * This means "for any type a, this is a function from a to a".
+ *
+ * Components:
+ * - vars: the quantified type variables (the "∀a b c" part)
+ * - constraints: type class constraints that must hold
+ * - type: the actual type with potentially free variables
+ *
+ * The vars list tells us which variables in `type` are universally quantified
+ * (and should get fresh names on instantiation) vs free (referring to outer scope).
+ */
 type Scheme = {
-  readonly vars: readonly string[];
-  readonly constraints: readonly Constraint[];
-  readonly type: Type;
+  readonly vars: readonly string[]; // Universally quantified variables
+  readonly constraints: readonly Constraint[]; // Type class constraints
+  readonly type: Type; // The type (may contain the quantified vars)
 };
 
-type PatternBindings = Map<string, Type>;
-export type ConstructorRegistry = Map<string, readonly string[]>;
-
+/**
+ * Create a type scheme.
+ * @param vars The quantified type variable names
+ * @param type The type
+ * @param constraints Optional type class constraints
+ */
 const scheme = (
   vars: readonly string[],
   type: Type,
@@ -73,25 +294,85 @@ const scheme = (
   type,
 });
 
+// =============================================================================
+// ENVIRONMENTS AND REGISTRIES
+// =============================================================================
+
+/**
+ * Type environment - maps variable names to their type schemes.
+ *
+ * The environment tracks what's in scope during type inference:
+ * - Built-in functions (map, filter, etc.)
+ * - Data constructors (Cons, Just, Nothing, etc.)
+ * - Let-bound variables
+ * - Function parameters
+ *
+ * Values bound by `let` get polymorphic schemes (can be used at multiple types).
+ * Function parameters get monomorphic schemes (single type within the function).
+ */
 type TypeEnv = Map<string, Scheme>;
+
+/**
+ * Substitution - maps type variable names to their resolved types.
+ *
+ * During inference, we discover relationships between types through unification.
+ * A substitution records these discoveries: "t0 should be number", "t1 should be t2", etc.
+ *
+ * Substitutions are applied to types to resolve variables to their known values.
+ * They compose: if s1 says t0=number and s2 says t1=t0, then s1∘s2 gives t1=number.
+ */
 type Subst = Map<string, Type>;
 
-const instances: Map<string, Set<string>> = new Map([
-  ["Eq", new Set(["number", "string", "boolean"])],
-  ["Ord", new Set(["number", "string"])],
-  ["Add", new Set(["number", "string"])],
-]);
+/**
+ * Maps variable names to types during pattern matching.
+ * When we match `Cons x xs`, we learn that x and xs have certain types.
+ */
+type PatternBindings = Map<string, Type>;
 
+/**
+ * Registry of constructors for each algebraic data type.
+ *
+ * Used for exhaustiveness checking: given a type name like "Maybe", we look up
+ * its constructors ["Nothing", "Just"] to verify all cases are covered.
+ */
+export type ConstructorRegistry = Map<string, readonly string[]>;
+
+// =============================================================================
+// SUBSTITUTION APPLICATION
+// =============================================================================
+
+/**
+ * Apply a substitution to a type, replacing type variables with their values.
+ *
+ * This is a fundamental operation in type inference. After unification discovers
+ * that t0 = number, we apply this substitution everywhere to propagate the knowledge.
+ *
+ * The operation is recursive: if type contains t0 and subst maps t0 to number,
+ * all occurrences of t0 in the type tree are replaced with number.
+ *
+ * @param subst The substitution to apply
+ * @param type The type to transform
+ * @returns The type with all substitutions applied
+ */
 const applySubst = (subst: Subst, type: Type): Type => {
   switch (type.kind) {
+    // Type constructors have no variables to substitute
     case "TCon":
       return type;
+
+    // Type variable: look up in substitution, return as-is if not found
     case "TVar":
       return subst.get(type.name) ?? type;
+
+    // Function type: substitute in both parameter and return types
     case "TFun":
       return tfun(applySubst(subst, type.param), applySubst(subst, type.ret));
+
+    // Type application: substitute in both constructor and argument
     case "TApp":
       return tapp(applySubst(subst, type.con), applySubst(subst, type.arg));
+
+    // Record type: substitute in all field types and the row variable
     case "TRecord": {
       const newFields = new Map<string, Type>();
       for (const [name, fieldType] of type.fields) {
@@ -100,12 +381,28 @@ const applySubst = (subst: Subst, type: Type): Type => {
       const newRow = type.row ? applySubst(subst, type.row) : null;
       return trecord([...newFields.entries()], newRow);
     }
+
+    // Tuple type: substitute in all element types
     case "TTuple":
       return ttuple(type.elements.map((t) => applySubst(subst, t)));
   }
 };
 
+/**
+ * Apply a substitution to a type scheme.
+ *
+ * Important: We must NOT substitute the scheme's quantified variables!
+ * Those are bound by the ∀ and should not be affected by outer substitutions.
+ *
+ * Example: If scheme is `∀a. a -> t0` and subst is {a = number, t0 = string},
+ * we should get `∀a. a -> string`, NOT `∀a. number -> string`.
+ *
+ * @param subst The substitution to apply
+ * @param scheme_ The scheme to transform (renamed to avoid shadowing)
+ * @returns The scheme with substitutions applied to free variables only
+ */
 const applySubstScheme = (subst: Subst, scheme_: Scheme): Scheme => {
+  // Filter out the quantified variables from the substitution
   const filtered: Subst = new Map();
   for (const [name, type] of subst) {
     if (!scheme_.vars.includes(name)) {
@@ -115,29 +412,63 @@ const applySubstScheme = (subst: Subst, scheme_: Scheme): Scheme => {
   return scheme(scheme_.vars, applySubst(filtered, scheme_.type));
 };
 
+/**
+ * Apply a substitution to all schemes in an environment.
+ *
+ * Used when we learn new type information that should propagate to the context.
+ *
+ * @param subst The substitution to apply
+ * @param env The environment to transform
+ * @returns New environment with substitutions applied
+ */
 const applySubstEnv = (subst: Subst, env: TypeEnv): TypeEnv => {
   const result: TypeEnv = new Map();
-  for (const [name, scheme] of env) {
-    result.set(name, applySubstScheme(subst, scheme));
+  for (const [name, s] of env) {
+    result.set(name, applySubstScheme(subst, s));
   }
   return result;
 };
 
+/**
+ * Apply a substitution to a type class constraint.
+ */
 const applySubstConstraint = (subst: Subst, c: Constraint): Constraint => ({
   class_: c.class_,
   type: applySubst(subst, c.type),
 });
 
+/**
+ * Apply a substitution to a list of constraints.
+ */
 const applySubstConstraints = (subst: Subst, cs: readonly Constraint[]): Constraint[] =>
   cs.map((c) => applySubstConstraint(subst, c));
 
+// =============================================================================
+// SUBSTITUTION COMPOSITION
+// =============================================================================
+
+/**
+ * Compose two substitutions: first apply s1, then apply s2.
+ *
+ * The composition s1 ∘ s2 means: when applying the result to a type,
+ * first apply s2, then apply s1 to that result.
+ *
+ * However, we also need s2's effect on s1's mappings: if s1 maps t0 to t1,
+ * and s2 maps t1 to number, then s1 ∘ s2 should map t0 to number.
+ *
+ * @param s1 First substitution (applied second to types)
+ * @param s2 Second substitution (applied first to types)
+ * @returns Combined substitution
+ */
 const composeSubst = (s1: Subst, s2: Subst): Subst => {
   const result: Subst = new Map();
 
+  // Apply s2 to all types in s1's mappings
   for (const [name, type] of s1) {
     result.set(name, applySubst(s2, type));
   }
 
+  // Add s2's mappings that aren't already in result
   for (const [name, type] of s2) {
     if (!result.has(name)) {
       result.set(name, type);
@@ -147,32 +478,74 @@ const composeSubst = (s1: Subst, s2: Subst): Subst => {
   return result;
 };
 
+// =============================================================================
+// UNIFICATION
+// =============================================================================
+
+/**
+ * Unify two types - find a substitution that makes them equal.
+ *
+ * Unification is the core constraint-solving mechanism in type inference.
+ * Given two types, we find the most general substitution that makes them identical.
+ *
+ * Examples:
+ * - unify(t0, number) → {t0 = number}
+ * - unify(t0 -> t1, number -> boolean) → {t0 = number, t1 = boolean}
+ * - unify(number, string) → ERROR (incompatible types)
+ *
+ * The algorithm:
+ * 1. If either type is a variable, bind it to the other type
+ * 2. If both are constructors, they must be the same name
+ * 3. If both are compound (functions, applications), recursively unify parts
+ * 4. Otherwise, fail
+ *
+ * @param t1 First type
+ * @param t2 Second type
+ * @returns Substitution that makes t1 and t2 equal
+ * @throws TypeError if types cannot be unified
+ */
 const unify = (t1: Type, t2: Type): Subst => {
+  // Same type variable - already equal, no substitution needed
   if (t1.kind === "TVar" && t2.kind === "TVar" && t1.name === t2.name) {
     return new Map();
   }
+
+  // t1 is a variable - bind it to t2
   if (t1.kind === "TVar") {
     return bindVar(t1.name, t2);
   }
+
+  // t2 is a variable - bind it to t1
   if (t2.kind === "TVar") {
     return bindVar(t2.name, t1);
   }
+
+  // Both are type constructors - must have the same name
   if (t1.kind === "TCon" && t2.kind === "TCon" && t1.name === t2.name) {
     return new Map();
   }
+
+  // Both are function types - unify parameter and return types
   if (t1.kind === "TFun" && t2.kind === "TFun") {
     const s1 = unify(t1.param, t2.param);
+    // Apply s1 before unifying return types (left-to-right dependency)
     const s2 = unify(applySubst(s1, t1.ret), applySubst(s1, t2.ret));
     return composeSubst(s1, s2);
   }
+
+  // Both are type applications - unify constructor and argument
   if (t1.kind === "TApp" && t2.kind === "TApp") {
     const s1 = unify(t1.con, t2.con);
     const s2 = unify(applySubst(s1, t1.arg), applySubst(s1, t2.arg));
     return composeSubst(s1, s2);
   }
+
+  // Both are record types - use specialized record unification
   if (t1.kind === "TRecord" && t2.kind === "TRecord") {
     return unifyRecords(t1, t2);
   }
+
+  // Both are tuple types - unify element-wise
   if (t1.kind === "TTuple" && t2.kind === "TTuple") {
     if (t1.elements.length !== t2.elements.length) {
       throw new TypeError(
@@ -188,37 +561,90 @@ const unify = (t1: Type, t2: Type): Subst => {
     }
     return currentSubst;
   }
+
+  // Types are incompatible
   throw new TypeError(`Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`);
 };
 
+/**
+ * Bind a type variable to a type.
+ *
+ * This creates a substitution {name = type}, but first checks for the
+ * "occurs check" to prevent infinite types.
+ *
+ * The occurs check prevents situations like: t0 = List t0
+ * This would create an infinitely nested type, which we reject.
+ *
+ * @param name The type variable name
+ * @param type The type to bind it to
+ * @returns Substitution mapping name to type
+ * @throws TypeError if binding would create an infinite type
+ */
 const bindVar = (name: string, type: Type): Subst => {
+  // Binding to itself is a no-op
   if (type.kind === "TVar" && type.name === name) {
     return new Map();
   }
+
+  // Occurs check: ensure the variable doesn't appear in the type
   if (freeTypeVars(type).has(name)) {
     throw new TypeError(`Infinite type: ${name} appears in ${typeToString(type)}`);
   }
+
   return new Map([[name, type]]);
 };
 
+// =============================================================================
+// FRESH TYPE VARIABLES
+// =============================================================================
+
+/**
+ * Counter for generating unique type variable names.
+ * Reset at the start of each inference to give consistent output.
+ */
 let typeVarCounter = 0;
 
+/**
+ * Generate a fresh type variable with a unique name.
+ *
+ * Fresh variables are used when we need to represent an unknown type:
+ * - Function parameter types (before we know how they're used)
+ * - Return types (before we analyze the function body)
+ * - Instantiating polymorphic types
+ */
 const freshTypeVar = (): Type => {
   return tvar(`t${typeVarCounter++}`);
 };
 
-type TRecord = Extract<Type, { kind: "TRecord" }>;
+// =============================================================================
+// RECORD UNIFICATION (Row Polymorphism)
+// =============================================================================
 
+/**
+ * Unify two record types with row polymorphism support.
+ *
+ * Row polymorphism allows records to have "extra" fields beyond what's specified.
+ * A record `{ x: number | ρ }` has an `x` field and potentially more fields in ρ.
+ *
+ * This enables functions like `fn r => r.x` to work on any record with an x field,
+ * regardless of what other fields it has.
+ *
+ * The algorithm handles several cases:
+ * 1. Same fields, both closed → just unify field types
+ * 2. Same fields, both open → unify field types and row variables
+ * 3. Different fields → one must be open to absorb the difference
+ * 4. Both have unique fields → both must be open, create fresh row for tail
+ */
 const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
   const fields1 = new Set(t1.fields.keys());
   const fields2 = new Set(t2.fields.keys());
 
-  // Find common fields and fields unique to each record
+  // Categorize fields
   const commonFields = fields1.intersection(fields2);
   const onlyIn1 = fields1.difference(fields2);
   const onlyIn2 = fields2.difference(fields1);
 
-  // Unify common fields
+  // First, unify the types of common fields
   let currentSubst: Subst = new Map();
   for (const fieldName of commonFields) {
     const fieldType1 = applySubst(currentSubst, t1.fields.get(fieldName)!);
@@ -227,11 +653,11 @@ const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
     currentSubst = composeSubst(currentSubst, s);
   }
 
-  // Handle row variables for extra fields
+  // Get row variables after applying current substitutions
   const row1 = t1.row ? applySubst(currentSubst, t1.row) : null;
   const row2 = t2.row ? applySubst(currentSubst, t2.row) : null;
 
-  // Build record types for the extra fields
+  // Prepare extra fields with substitutions applied
   const extraFields1: [string, Type][] = [...onlyIn1].map((f) => [
     f,
     applySubst(currentSubst, t1.fields.get(f)!),
@@ -241,53 +667,54 @@ const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
     applySubst(currentSubst, t2.fields.get(f)!),
   ]);
 
+  // Case 1: No extra fields on either side
   if (onlyIn1.size === 0 && onlyIn2.size === 0) {
-    // No extra fields, just unify row variables
     if (row1 && row2) {
+      // Both open - unify row variables
       const s = unify(row1, row2);
       return composeSubst(currentSubst, s);
     }
     if (row1 && !row2) {
-      // row1 must be empty record
+      // t1 open, t2 closed - t1's row must be empty
       const s = unify(row1, trecord([]));
       return composeSubst(currentSubst, s);
     }
     if (!row1 && row2) {
-      // row2 must be empty record
+      // t1 closed, t2 open - t2's row must be empty
       const s = unify(row2, trecord([]));
       return composeSubst(currentSubst, s);
     }
-    // Both closed, fields match
+    // Both closed with matching fields - already done
     return currentSubst;
   }
 
+  // Case 2: t1 has extra fields, t2 doesn't
   if (onlyIn1.size > 0 && onlyIn2.size === 0) {
-    // t1 has extra fields, t2 must absorb them via its row var
     if (!row2) {
       throw new TypeError(
         `Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`,
       );
     }
-    // row2 = { extraFields1 | row1 }
+    // t2's row must equal t1's extra fields (plus t1's row if any)
     const extraRecord = trecord(extraFields1, row1);
     const s = unify(row2, extraRecord);
     return composeSubst(currentSubst, s);
   }
 
+  // Case 3: t2 has extra fields, t1 doesn't
   if (onlyIn2.size > 0 && onlyIn1.size === 0) {
-    // t2 has extra fields, t1 must absorb them via its row var
     if (!row1) {
       throw new TypeError(
         `Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`,
       );
     }
-    // row1 = { extraFields2 | row2 }
+    // t1's row must equal t2's extra fields (plus t2's row if any)
     const extraRecord = trecord(extraFields2, row2);
     const s = unify(row1, extraRecord);
     return composeSubst(currentSubst, s);
   }
 
-  // Both have extra fields - both must be open
+  // Case 4: Both have unique extra fields - both must be open
   if (!row1) {
     throw new TypeError(`Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`);
   }
@@ -295,41 +722,93 @@ const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
     throw new TypeError(`Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`);
   }
 
-  // Create fresh row variable for combined tail
+  // Both records contribute unique fields - create a shared tail
   const freshRow = freshTypeVar();
-  // row1 = { extraFields2 | freshRow }
+  // row1 = { t2's extra fields | freshRow }
   const s1 = unify(row1, trecord(extraFields2, freshRow));
   currentSubst = composeSubst(currentSubst, s1);
-  // row2 = { extraFields1 | freshRow }
+  // row2 = { t1's extra fields | freshRow }
   const s2 = unify(applySubst(currentSubst, row2), trecord(extraFields1, freshRow));
   return composeSubst(currentSubst, s2);
 };
 
-const instantiate = (scheme: Scheme): Type => {
+// =============================================================================
+// INSTANTIATION AND GENERALIZATION
+// =============================================================================
+
+/**
+ * Instantiate a type scheme with fresh type variables.
+ *
+ * When we use a polymorphic value, we create a fresh copy of its type
+ * where all quantified variables are replaced with fresh type variables.
+ *
+ * Example: Using `id : ∀a. a -> a` creates a fresh instance like `t5 -> t5`.
+ * Each use of `id` gets its own fresh variables, allowing different types.
+ *
+ * @param s The scheme to instantiate
+ * @returns A fresh monomorphic type
+ */
+const instantiate = (s: Scheme): Type => {
+  // Create fresh variables for each quantified variable
   const freshVars = new Map<string, Type>();
-  for (const name of scheme.vars) {
+  for (const name of s.vars) {
     freshVars.set(name, freshTypeVar());
   }
-  return applySubst(freshVars, scheme.type);
+  // Apply the fresh variable substitution to the type
+  return applySubst(freshVars, s.type);
 };
 
+/**
+ * Generalize a type into a polymorphic scheme.
+ *
+ * Generalization quantifies over type variables that are:
+ * 1. Free in the type (appear in it)
+ * 2. NOT free in the environment (not constrained by context)
+ *
+ * This is what enables let-polymorphism: in `let id = fn x => x in ...`,
+ * after inferring `id : t0 -> t0`, we generalize to `∀t0. t0 -> t0`
+ * because t0 isn't constrained by anything in the environment.
+ *
+ * @param env The current type environment
+ * @param type The type to generalize
+ * @returns A polymorphic type scheme
+ */
 const generalize = (env: TypeEnv, type: Type): Scheme => {
   const typeVars = freeTypeVars(type);
   const envVars = freeEnvVars(env);
+  // Quantify over variables free in the type but not in the environment
   const vars = typeVars.difference(envVars);
   return scheme([...vars], type);
 };
 
+// =============================================================================
+// FREE TYPE VARIABLES
+// =============================================================================
+
+/**
+ * Find all free type variables in a type.
+ *
+ * A type variable is "free" if it's not bound by a surrounding quantifier.
+ * For our Type representation, all type variables are free (quantifiers
+ * only appear at the Scheme level).
+ *
+ * @param type The type to analyze
+ * @returns Set of free type variable names
+ */
 const freeTypeVars = (type: Type): Set<string> => {
   switch (type.kind) {
     case "TCon":
-      return new Set();
+      return new Set(); // Type constructors have no variables
+
     case "TVar":
-      return new Set([type.name]);
+      return new Set([type.name]); // The variable itself is free
+
     case "TFun":
       return freeTypeVars(type.param).union(freeTypeVars(type.ret));
+
     case "TApp":
       return freeTypeVars(type.con).union(freeTypeVars(type.arg));
+
     case "TRecord": {
       let result = new Set<string>();
       for (const fieldType of type.fields.values()) {
@@ -340,6 +819,7 @@ const freeTypeVars = (type: Type): Set<string> => {
       }
       return result;
     }
+
     case "TTuple": {
       let result = new Set<string>();
       for (const elem of type.elements) {
@@ -350,36 +830,68 @@ const freeTypeVars = (type: Type): Set<string> => {
   }
 };
 
-const freeSchemeVars = (scheme: Scheme): Set<string> => {
-  return freeTypeVars(scheme.type).difference(new Set(scheme.vars));
+/**
+ * Find free type variables in a scheme.
+ *
+ * The scheme's quantified variables are bound, so we exclude them.
+ * Only variables in the type that AREN'T quantified are free.
+ */
+const freeSchemeVars = (s: Scheme): Set<string> => {
+  return freeTypeVars(s.type).difference(new Set(s.vars));
 };
 
-const freeEnvVars = (type: TypeEnv): Set<string> => {
+/**
+ * Find all free type variables in an environment.
+ *
+ * A variable is free in the environment if it's free in any scheme.
+ * These represent type constraints from the surrounding context.
+ */
+const freeEnvVars = (env: TypeEnv): Set<string> => {
   let result = new Set<string>();
-  for (const scheme of type.values()) {
-    result = result.union(freeSchemeVars(scheme));
+  for (const s of env.values()) {
+    result = result.union(freeSchemeVars(s));
   }
   return result;
 };
 
+// =============================================================================
+// TYPE PRETTY-PRINTING
+// =============================================================================
+
+/**
+ * Convert a type to a human-readable string.
+ *
+ * This is used for error messages and debugging output.
+ * The format follows common conventions:
+ * - Function types: a -> b (right-associative)
+ * - Type application: List a (space-separated)
+ * - Tuples: (a, b, c)
+ * - Records: { x: a, y: b } or { x: a | ρ } for open records
+ */
 export const typeToString = (type: Type): string => {
   switch (type.kind) {
     case "TVar":
       return type.name;
+
     case "TCon":
       return type.name;
+
     case "TFun": {
+      // Parenthesize function parameters that are themselves functions
       const param =
         type.param.kind === "TFun" ? `(${typeToString(type.param)})` : typeToString(type.param);
       return `${param} -> ${typeToString(type.ret)}`;
     }
+
     case "TApp": {
+      // Parenthesize complex arguments
       const arg =
         type.arg.kind === "TApp" || type.arg.kind === "TFun"
           ? `(${typeToString(type.arg)})`
           : typeToString(type.arg);
       return `${typeToString(type.con)} ${arg}`;
     }
+
     case "TRecord": {
       const entries: string[] = [];
       for (const [name, fieldType] of type.fields) {
@@ -394,17 +906,35 @@ export const typeToString = (type: Type): string => {
       }
       return `{ ${entries.join(", ")} }`;
     }
+
     case "TTuple":
       return `(${type.elements.map(typeToString).join(", ")})`;
   }
 };
 
+// =============================================================================
+// TYPE CLASS CONSTRAINT SOLVING
+// =============================================================================
+
+/**
+ * Verify that all type class constraints are satisfied.
+ *
+ * After inference, we have constraints like "the operand of + must support Add".
+ * This function checks that the concrete types actually have the required instances.
+ *
+ * Constraints on type variables are deferred - they'll be checked when instantiated.
+ *
+ * @param constraints The constraints to check
+ * @throws TypeError if a constraint is violated
+ */
 const solveConstraints = (constraints: readonly Constraint[]): void => {
   for (const c of constraints) {
+    // Type variables - defer until instantiation
     if (c.type.kind === "TVar") {
       continue;
     }
 
+    // Concrete type - check it has the required instance
     if (c.type.kind === "TCon") {
       const classInstances = instances.get(c.class_);
       if (!classInstances?.has(c.type.name)) {
@@ -412,12 +942,36 @@ const solveConstraints = (constraints: readonly Constraint[]): void => {
       }
     }
 
+    // Function types never satisfy our type classes
     if (c.type.kind === "TFun") {
       throw new TypeError(`Function types does not satisfy ${c.class_}`);
     }
   }
 };
 
+// =============================================================================
+// MAIN INFERENCE ENTRY POINT
+// =============================================================================
+
+/**
+ * The result of type inference: substitution, type, and constraints.
+ */
+type InferResult = [Subst, Type, readonly Constraint[]];
+
+/**
+ * Infer the type of an expression.
+ *
+ * This is the main entry point for type inference. It:
+ * 1. Resets the type variable counter for consistent output
+ * 2. Runs the inference algorithm
+ * 3. Applies final substitutions to constraints
+ * 4. Verifies all type class constraints
+ *
+ * @param env The type environment (variables in scope)
+ * @param registry The constructor registry (for exhaustiveness checking)
+ * @param expr The expression to type-check
+ * @returns The inferred type information
+ */
 export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr): InferResult => {
   typeVarCounter = 0;
   const [subst, type, constraints] = inferExpr(env, registry, expr);
@@ -426,8 +980,24 @@ export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Exp
   return [subst, type, finalConstraints];
 };
 
-type InferResult = [Subst, Type, readonly Constraint[]];
+// =============================================================================
+// EXPRESSION INFERENCE
+// =============================================================================
 
+/**
+ * Infer the type of an expression (internal recursive function).
+ *
+ * This implements Algorithm W by case analysis on the expression kind.
+ * Each case returns:
+ * - A substitution (learned type information)
+ * - The inferred type
+ * - Any type class constraints generated
+ *
+ * @param env Current type environment
+ * @param registry Constructor registry for pattern matching
+ * @param expr The expression to infer
+ * @returns Inference result tuple
+ */
 const inferExpr = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr): InferResult => {
   switch (expr.kind) {
     case "Abs":
@@ -461,15 +1031,32 @@ const inferExpr = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr):
   }
 };
 
+// =============================================================================
+// RECORD AND FIELD ACCESS INFERENCE
+// =============================================================================
+
+/**
+ * Infer the type of a field access expression (record.field).
+ *
+ * This handles row polymorphism: if we don't know the record type yet,
+ * we constrain it to be an open record with the required field.
+ *
+ * Cases:
+ * 1. Record type is a variable → constrain it to { field: t | ρ }
+ * 2. Record type has the field → return the field's type
+ * 3. Record is open but field not present → constrain the row
+ * 4. Record is closed without field → error
+ */
 const inferFieldAccess = (
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.FieldAccess,
 ): InferResult => {
+  // Infer the record expression's type
   const [s1, recordType, constraints] = inferExpr(env, registry, expr.record);
   const resolvedType = applySubst(s1, recordType);
 
-  // If it's a type variable, constrain it to be an open record with the field
+  // Case 1: Type variable - constrain to open record with the field
   if (resolvedType.kind === "TVar") {
     const fieldType = freshTypeVar();
     const rowVar = freshTypeVar();
@@ -478,33 +1065,39 @@ const inferFieldAccess = (
     return [composeSubst(s1, s2), applySubst(s2, fieldType), constraints];
   }
 
+  // Must be a record type
   if (resolvedType.kind !== "TRecord") {
     throw new TypeError(
       `Cannot access field '${expr.field}' on non-record type: ${typeToString(resolvedType)}`,
     );
   }
 
-  // Check if field exists directly
+  // Case 2: Field exists in known fields
   const fieldType = resolvedType.fields.get(expr.field);
   if (fieldType) {
     return [s1, fieldType, constraints];
   }
 
-  // Field not in known fields - check if record is open
+  // Case 3: Field not in known fields but record is open - constrain the row
   if (resolvedType.row) {
-    // Constrain the row to contain this field
     const newFieldType = freshTypeVar();
     const newRowVar = freshTypeVar();
     const s2 = unify(resolvedType.row, trecord([[expr.field, newFieldType]], newRowVar));
     return [composeSubst(s1, s2), applySubst(s2, newFieldType), constraints];
   }
 
-  // Closed record without the field
+  // Case 4: Closed record without the field - error
   throw new TypeError(
     `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`,
   );
 };
 
+/**
+ * Infer the type of a record literal { field1: value1, field2: value2 }.
+ *
+ * We infer each field's value type and combine them into a closed record type.
+ * The record is closed (no row variable) because we know exactly what fields it has.
+ */
 const inferRecord = (
   env: TypeEnv,
   registry: ConstructorRegistry,
@@ -514,6 +1107,7 @@ const inferRecord = (
   let constraints: Constraint[] = [];
   const fieldTypes = new Map<string, Type>();
 
+  // Infer each field's type
   for (const field of expr.fields) {
     const [s, t, c] = inferExpr(applySubstEnv(subst, env), registry, field.value);
     subst = composeSubst(subst, s);
@@ -521,45 +1115,115 @@ const inferRecord = (
     fieldTypes.set(field.name, applySubst(subst, t));
   }
 
+  // Return a closed record type (no row variable)
   return [subst, trecord([...fieldTypes.entries()]), constraints];
 };
 
+// =============================================================================
+// FUNCTION INFERENCE
+// =============================================================================
+
+/**
+ * Infer the type of a lambda abstraction (fn param => body).
+ *
+ * Algorithm:
+ * 1. Create a fresh type variable for the parameter
+ * 2. Add parameter to environment with monomorphic type (no generalization!)
+ * 3. Infer the body's type in the extended environment
+ * 4. The function type is: (parameter type with substitutions) -> body type
+ *
+ * Note: Lambda parameters are monomorphic within their body. This differs from
+ * let-bound variables which are polymorphic. This is key to Algorithm W.
+ */
 const inferAbs = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Abs): InferResult => {
+  // Fresh type variable for the parameter (we don't know its type yet)
   const paramType = freshTypeVar();
+
+  // Add parameter to environment (monomorphic - empty quantifier list)
   const newEnv = new Map(env);
   newEnv.set(expr.param, scheme([], paramType));
+
+  // Infer body type with parameter in scope
   const [subst, bodyType, constraints] = inferExpr(newEnv, registry, expr.body);
+
+  // Function type: apply substitutions to parameter type
   return [subst, tfun(applySubst(subst, paramType), bodyType), constraints];
 };
 
+/**
+ * Infer the type of a function application (func arg).
+ *
+ * Algorithm:
+ * 1. Infer the function's type
+ * 2. Infer the argument's type
+ * 3. Create a fresh variable for the return type
+ * 4. Unify function type with (argType -> returnType)
+ * 5. Apply resulting substitution to return type
+ */
 const inferApp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.App): InferResult => {
+  // Infer function type
   const [s1, funcType, c1] = inferExpr(env, registry, expr.func);
+
+  // Infer argument type (with s1 applied to environment)
   const [s2, paramType, c2] = inferExpr(applySubstEnv(s1, env), registry, expr.param);
+
+  // Fresh variable for result
   const returnType = freshTypeVar();
+
+  // The function must have type: argType -> returnType
   const s3 = unify(applySubst(s2, funcType), tfun(paramType, returnType));
+
   const subst = composeSubst(composeSubst(s1, s2), s3);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
+
   return [subst, applySubst(s3, returnType), constraints];
 };
 
+// =============================================================================
+// OPERATOR INFERENCE
+// =============================================================================
+
+/**
+ * Infer the type of a binary operator expression.
+ *
+ * Operators are polymorphic but constrained by type classes:
+ * - Arithmetic (+): Add constraint (works on number and string)
+ * - Arithmetic (-, *, /): Must be number
+ * - Comparison (<, >, <=, >=): Ord constraint
+ * - Equality (==, !=): Eq constraint
+ *
+ * Both operands must have the same type (unified first).
+ */
 const inferBinOp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.BinOp): InferResult => {
+  // Infer left operand
   const [s1, leftType, c1] = inferExpr(env, registry, expr.left);
+
+  // Infer right operand
   const [s2, rightType, c2] = inferExpr(applySubstEnv(s1, env), registry, expr.right);
+
+  // Operands must have the same type
   const s3 = unify(applySubst(s2, leftType), rightType);
   const operandType = applySubst(s3, rightType);
+
   const subst = composeSubst(composeSubst(s1, s2), s3);
   const constraints = [...applySubstConstraints(subst, c1), ...applySubstConstraints(subst, c2)];
+
   switch (expr.op) {
+    // Addition: polymorphic (Add class), returns operand type
     case "+": {
       constraints.push({ class_: "Add", type: operandType });
       return [subst, operandType, constraints];
     }
+
+    // Other arithmetic: must be number, returns number
     case "-":
     case "/":
     case "*": {
       const s4 = unify(operandType, tNum);
       return [composeSubst(subst, s4), tNum, constraints];
     }
+
+    // Comparison: Ord constraint, returns boolean
     case "<":
     case ">":
     case "<=":
@@ -567,6 +1231,8 @@ const inferBinOp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.BinOp
       constraints.push({ class_: "Ord", type: operandType });
       return [subst, tBool, constraints];
     }
+
+    // Equality: Eq constraint, returns boolean
     case "==":
     case "!=": {
       constraints.push({ class_: "Eq", type: operandType });
@@ -575,56 +1241,140 @@ const inferBinOp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.BinOp
   }
 };
 
+// =============================================================================
+// CONDITIONAL INFERENCE
+// =============================================================================
+
+/**
+ * Infer the type of an if-then-else expression.
+ *
+ * Rules:
+ * - Condition must be boolean
+ * - Both branches must have the same type (the result type)
+ */
 const inferIf = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.If): InferResult => {
+  // Infer condition type
   const [s1, condType, c1] = inferExpr(env, registry, expr.cond);
+
+  // Condition must be boolean
   const s2 = unify(condType, tBool);
   let subst = composeSubst(s1, s2);
+
+  // Infer then branch
   const [s3, thenType, c2] = inferExpr(applySubstEnv(subst, env), registry, expr.then);
   subst = composeSubst(subst, s3);
+
+  // Infer else branch
   const [s4, elseType, c3] = inferExpr(applySubstEnv(subst, env), registry, expr.else);
   subst = composeSubst(subst, s4);
+
+  // Both branches must have the same type
   const s5 = unify(applySubst(s4, thenType), elseType);
   const finalSubst = composeSubst(subst, s5);
+
   const constraints = applySubstConstraints(finalSubst, [...c1, ...c2, ...c3]);
   return [finalSubst, applySubst(s5, elseType), constraints];
 };
 
+// =============================================================================
+// LET BINDING INFERENCE
+// =============================================================================
+
+/**
+ * Infer the type of a let binding (let name = value in body).
+ *
+ * This is where let-polymorphism happens:
+ * 1. Infer the value's type
+ * 2. GENERALIZE the type (quantify free variables not in environment)
+ * 3. Add the generalized scheme to the environment
+ * 4. Infer the body's type with the new binding
+ *
+ * The generalization step is what makes `let id = fn x => x in (id 1, id "hi")`
+ * work - `id` gets type `∀a. a -> a` and each use instantiates it fresh.
+ */
 const inferLet = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Let): InferResult => {
+  // Infer the value's type
   const [s1, valueType, c1] = inferExpr(env, registry, expr.value);
+
+  // Apply substitution to environment before generalizing
   const env1 = applySubstEnv(s1, env);
-  const scheme = generalize(env1, applySubst(s1, valueType));
+
+  // Generalize: quantify over variables not free in the environment
+  const generalizedScheme = generalize(env1, applySubst(s1, valueType));
+
+  // Add binding to environment
   const env2 = new Map(env1);
-  env2.set(expr.name, scheme);
+  env2.set(expr.name, generalizedScheme);
+
+  // Infer body with new binding
   const [s2, bodyType, c2] = inferExpr(env2, registry, expr.body);
+
   const subst = composeSubst(s1, s2);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
+
   return [subst, bodyType, constraints];
 };
 
+/**
+ * Infer the type of a recursive let binding (letrec name = value in body).
+ *
+ * For recursion, the bound name must be in scope while inferring the value.
+ * We do this by:
+ * 1. Add a fresh type variable for the binding
+ * 2. Infer as a regular let (which will unify the variable with the actual type)
+ *
+ * This is a simplified approach. A more sophisticated implementation would
+ * handle mutual recursion and better polymorphism.
+ */
 const inferLetRec = (
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.LetRec,
 ): InferResult => {
+  // Add a placeholder type for the recursive binding
   const newEnv = new Map(env);
   newEnv.set(expr.name, scheme([], freshTypeVar()));
+
+  // Now infer as a regular let
   const newExpr = ast.let_(expr.name, expr.value, expr.body);
   return inferLet(newEnv, registry, newExpr);
 };
 
+// =============================================================================
+// VARIABLE INFERENCE
+// =============================================================================
+
+/**
+ * Infer the type of a variable reference.
+ *
+ * Look up the variable in the environment and instantiate its scheme.
+ * Each use of a polymorphic variable gets fresh type variables.
+ */
 const inferVar = (env: TypeEnv, expr: ast.Var): InferResult => {
-  const scheme = env.get(expr.name);
-  if (!scheme) {
+  const s = env.get(expr.name);
+  if (!s) {
     throw new TypeError(`Unknown variable: ${expr.name}`);
   }
-  return [new Map(), instantiate(scheme), []];
+  // Instantiate with fresh variables
+  return [new Map(), instantiate(s), []];
 };
 
+// =============================================================================
+// TUPLE INFERENCE
+// =============================================================================
+
+/**
+ * Infer the type of a tuple expression (a, b, c).
+ *
+ * We infer each element's type and combine into a tuple type.
+ * Single-element "tuples" are unwrapped to just their element type.
+ */
 const inferTuple = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Tuple): InferResult => {
   if (expr.elements.length === 0) {
     throw new Error("Tuples cannot be empty");
   }
 
+  // Single element - not really a tuple
   if (expr.elements.length === 1) {
     return inferExpr(env, registry, expr.elements[0]!);
   }
@@ -633,6 +1383,7 @@ const inferTuple = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Tuple
   let constraints: Constraint[] = [];
   const types: Type[] = [];
 
+  // Infer each element's type
   for (const elem of expr.elements) {
     const [s, t, c] = inferExpr(applySubstEnv(subst, env), registry, elem);
     subst = composeSubst(subst, s);
@@ -643,6 +1394,25 @@ const inferTuple = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Tuple
   return [subst, ttuple(types), constraints];
 };
 
+// =============================================================================
+// PATTERN MATCHING INFERENCE
+// =============================================================================
+
+/**
+ * Infer types and bindings from a pattern.
+ *
+ * Pattern inference:
+ * 1. Takes an expected type (the scrutinee's type)
+ * 2. Returns updated substitution and variable bindings
+ *
+ * Each pattern kind has its own inference logic:
+ * - PVar: binds the variable to the expected type
+ * - PWildcard: matches anything, binds nothing
+ * - PLit: unifies expected type with literal's type
+ * - PCon: looks up constructor, unifies, and recurses into arguments
+ * - PRecord: builds/matches record type with fields
+ * - PTuple: builds/matches tuple type with elements
+ */
 const inferPattern = (
   env: TypeEnv,
   pattern: ast.Pattern,
@@ -651,23 +1421,35 @@ const inferPattern = (
 ): [Subst, PatternBindings] => {
   switch (pattern.kind) {
     case "PVar": {
+      // Variable pattern: bind the name to the expected type
       return [subst, new Map([[pattern.name, applySubst(subst, expectedType)]])];
     }
+
     case "PWildcard": {
+      // Wildcard: matches anything, no bindings
       return [subst, new Map()];
     }
+
     case "PLit": {
+      // Literal: expected type must match the literal's type
       const litType =
         typeof pattern.value === "number" ? tNum : typeof pattern.value === "string" ? tStr : tBool;
       const s = unify(applySubst(subst, expectedType), litType);
       return [composeSubst(subst, s), new Map()];
     }
+
     case "PCon": {
+      // Constructor pattern: look up constructor type and match
       const conScheme = env.get(pattern.name);
       if (!conScheme) {
         throw new TypeError(`Unknown constructor: ${pattern.name}`);
       }
+
+      // Instantiate constructor type
       const conType = instantiate(conScheme);
+
+      // Extract argument types from the constructor's function type
+      // Con a (Con b c) has type: a -> b -> c -> Result
       const argTypes: Type[] = [];
       let resultType = conType;
       while (resultType.kind === "TFun") {
@@ -675,16 +1457,19 @@ const inferPattern = (
         resultType = resultType.ret;
       }
 
+      // Verify arity
       if (argTypes.length !== pattern.args.length) {
         throw new TypeError(
           `Constructor ${pattern.name} expects ${argTypes.length} args, got ${pattern.args.length}`,
         );
       }
 
+      // Unify constructor's result type with expected type
       const s1 = unify(applySubst(subst, resultType), applySubst(subst, expectedType));
       let currentSubst = composeSubst(subst, s1);
-      const allBindings: PatternBindings = new Map();
 
+      // Recursively infer patterns for constructor arguments
+      const allBindings: PatternBindings = new Map();
       for (let i = 0; i < pattern.args.length; i++) {
         const argType = applySubst(currentSubst, argTypes[i]!);
         const [s, bindings] = inferPattern(env, pattern.args[i]!, argType, currentSubst);
@@ -693,13 +1478,15 @@ const inferPattern = (
           allBindings.set(name, type);
         }
       }
+
       return [currentSubst, allBindings];
     }
+
     case "PRecord": {
       const expectedResolved = applySubst(subst, expectedType);
 
+      // If expected type is a variable, build an open record type
       if (expectedResolved.kind === "TVar") {
-        // Build open record type from pattern fields
         const fieldTypes = new Map<string, Type>();
         let currentSubst = subst;
         const allBindings: PatternBindings = new Map();
@@ -714,7 +1501,7 @@ const inferPattern = (
           }
         }
 
-        // Create open record with row variable for additional fields
+        // Create open record (may have more fields)
         const rowVar = freshTypeVar();
         const recordType = trecord([...fieldTypes.entries()], rowVar);
         const s = unify(applySubst(currentSubst, expectedType), recordType);
@@ -727,14 +1514,15 @@ const inferPattern = (
         );
       }
 
+      // Match against known record type
       let currentSubst = subst;
       const allBindings: PatternBindings = new Map();
 
       for (const field of pattern.fields) {
         let fieldType = expectedResolved.fields.get(field.name);
 
+        // Field not in known fields but record is open
         if (!fieldType && expectedResolved.row) {
-          // Field not in known fields but record is open - constrain row
           const newFieldType = freshTypeVar();
           const newRowVar = freshTypeVar();
           const s = unify(
@@ -760,11 +1548,12 @@ const inferPattern = (
 
       return [currentSubst, allBindings];
     }
+
     case "PTuple": {
       const expectedResolved = applySubst(subst, expectedType);
 
+      // If expected type is a variable, build a tuple type
       if (expectedResolved.kind === "TVar") {
-        // Build tuple type from pattern elements
         const elemTypes: Type[] = [];
         let currentSubst = subst;
         const allBindings: PatternBindings = new Map();
@@ -788,12 +1577,14 @@ const inferPattern = (
         throw new TypeError(`Cannot match tuple pattern against ${typeToString(expectedResolved)}`);
       }
 
+      // Verify arity matches
       if (pattern.elements.length !== expectedResolved.elements.length) {
         throw new TypeError(
           `Tuple pattern has ${pattern.elements.length} elements, but expected ${expectedResolved.elements.length}`,
         );
       }
 
+      // Match element by element
       let currentSubst = subst;
       const allBindings: PatternBindings = new Map();
 
@@ -811,17 +1602,31 @@ const inferPattern = (
   }
 };
 
+/**
+ * Infer the type of a match expression.
+ *
+ * Algorithm:
+ * 1. Infer the scrutinee's type
+ * 2. For each case:
+ *    a. Infer pattern bindings against scrutinee type
+ *    b. Infer body with bindings in scope
+ *    c. Unify all body types
+ * 3. Check exhaustiveness
+ */
 const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match): InferResult => {
   if (expr.cases.length === 0) {
     throw new TypeError("Match expression must have at least one case");
   }
 
+  // Infer scrutinee type
   const [s1, scrutineeType, c1] = inferExpr(env, registry, expr.expr);
   let subst = s1;
   let constraints: Constraint[] = [...c1];
   let resultType: Type | null = null;
 
+  // Process each case
   for (const case_ of expr.cases) {
+    // Infer pattern bindings
     const [s2, bindings] = inferPattern(
       applySubstEnv(subst, env),
       case_.pattern,
@@ -830,15 +1635,18 @@ const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match
     );
     subst = s2;
 
+    // Create environment with pattern bindings
     const caseEnv = new Map(applySubstEnv(subst, env));
     for (const [name, type] of bindings) {
       caseEnv.set(name, scheme([], applySubst(subst, type)));
     }
 
+    // Infer body type
     const [s3, bodyType, c2] = inferExpr(caseEnv, registry, case_.body);
     subst = composeSubst(subst, s3);
     constraints = [...applySubstConstraints(subst, constraints), ...c2];
 
+    // Unify with previous case types
     if (resultType === null) {
       resultType = bodyType;
     } else {
@@ -848,6 +1656,7 @@ const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match
     }
   }
 
+  // Check exhaustiveness
   const patterns = expr.cases.map((c) => c.pattern);
   const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
 
@@ -858,41 +1667,58 @@ const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match
   return [subst, applySubst(subst, resultType!), constraints];
 };
 
+// =============================================================================
+// DATA DECLARATION PROCESSING
+// =============================================================================
+
+/**
+ * Convert a type expression (from AST) to internal Type representation.
+ */
 const typeExprToType = (texpr: ast.TypeExpr): Type => {
   switch (texpr.kind) {
-    case "TyApp": {
+    case "TyApp":
       return tapp(typeExprToType(texpr.con), typeExprToType(texpr.arg));
-    }
-    case "TyCon": {
+    case "TyCon":
       return tcon(texpr.name);
-    }
-    case "TyFun": {
+    case "TyFun":
       return tfun(typeExprToType(texpr.param), typeExprToType(texpr.ret));
-    }
     case "TyVar":
       return tvar(texpr.name);
   }
 };
 
+/**
+ * Process a data declaration to produce:
+ * 1. Type environment entries for constructors
+ * 2. Registry entries for exhaustiveness checking
+ *
+ * Example: `data Maybe a = Nothing | Just a` produces:
+ * - Environment: Nothing : ∀a. Maybe a, Just : ∀a. a -> Maybe a
+ * - Registry: Maybe -> [Nothing, Just]
+ */
 export const processDataDecl = (decl: ast.DataDecl): [TypeEnv, ConstructorRegistry] => {
   const env: TypeEnv = new Map();
   const registry: ConstructorRegistry = new Map();
 
-  let resultType = tcon(decl.name);
-
+  // Build the result type: TypeName typeParam1 typeParam2 ...
+  let resultType: Type = tcon(decl.name);
   for (const param of decl.typeParams) {
     resultType = tapp(resultType, tvar(param));
   }
 
   const constructorNames: string[] = [];
 
+  // Process each constructor
   for (const con of decl.constructors) {
     constructorNames.push(con.name);
 
+    // Build constructor type: field1 -> field2 -> ... -> ResultType
     let conType = resultType;
     for (let i = con.fields.length - 1; i >= 0; i--) {
       conType = tfun(typeExprToType(con.fields[i]!), conType);
     }
+
+    // Quantify over all type parameters
     env.set(con.name, scheme([...decl.typeParams], conType));
   }
 
@@ -901,6 +1727,14 @@ export const processDataDecl = (decl: ast.DataDecl): [TypeEnv, ConstructorRegist
   return [env, registry];
 };
 
+// =============================================================================
+// EXHAUSTIVENESS CHECKING
+// =============================================================================
+
+/**
+ * Extract the type constructor name from a type.
+ * Used to look up constructors for exhaustiveness checking.
+ */
 const getTypeConName = (type: Type): string | null => {
   switch (type.kind) {
     case "TApp":
@@ -912,26 +1746,40 @@ const getTypeConName = (type: Type): string | null => {
   }
 };
 
+/**
+ * Collect constructor names matched by a set of patterns.
+ * Wildcards and variable patterns match everything (represented as "*").
+ */
 const getPatternConstructors = (patterns: readonly ast.Pattern[]): Set<string> => {
   const constructors = new Set<string>();
   for (const pattern of patterns) {
     switch (pattern.kind) {
-      case "PCon": {
+      case "PCon":
         constructors.add(pattern.name);
         break;
-      }
       case "PWildcard":
-      case "PVar": {
+      case "PVar":
+        // Catches everything
         return new Set(["*"]);
-      }
-      case "PLit": {
+      case "PLit":
+        // Literals don't cover all constructors
         break;
-      }
     }
   }
   return constructors;
 };
 
+/**
+ * Check if a set of patterns exhaustively covers all constructors of a type.
+ *
+ * Returns the list of missing constructors (empty if exhaustive).
+ *
+ * This is a simplified exhaustiveness check that only handles:
+ * - Flat constructor patterns
+ * - Wildcard/variable patterns as catch-alls
+ *
+ * A full implementation would handle nested patterns and guards.
+ */
 const checkExhaustiveness = (
   registry: ConstructorRegistry,
   scrutineeType: Type,
@@ -942,14 +1790,17 @@ const checkExhaustiveness = (
 
   const allConstructors = registry.get(typeName);
   if (!allConstructors) {
-    return [];
+    return []; // Unknown type, skip check
   }
 
   const matchedConstructors = getPatternConstructors(patterns);
+
+  // Wildcard catches everything
   if (matchedConstructors.has("*")) {
     return [];
   }
 
+  // Find unmatched constructors
   const missing: string[] = [];
   for (const con of allConstructors) {
     if (!matchedConstructors.has(con)) {
@@ -960,6 +1811,14 @@ const checkExhaustiveness = (
   return missing;
 };
 
+// =============================================================================
+// ENVIRONMENT AND REGISTRY UTILITIES
+// =============================================================================
+
+/**
+ * Merge multiple type environments into one.
+ * Later environments override earlier ones for duplicate names.
+ */
 export const mergeEnvs = (...envs: readonly TypeEnv[]): TypeEnv => {
   const result: TypeEnv = new Map();
   for (const env of envs) {
@@ -970,6 +1829,9 @@ export const mergeEnvs = (...envs: readonly TypeEnv[]): TypeEnv => {
   return result;
 };
 
+/**
+ * Merge multiple constructor registries into one.
+ */
 export const mergeRegistries = (
   ...registries: readonly ConstructorRegistry[]
 ): ConstructorRegistry => {
@@ -982,8 +1844,19 @@ export const mergeRegistries = (
   return result;
 };
 
+// =============================================================================
+// BASE ENVIRONMENT (Built-in functions)
+// =============================================================================
+
+/**
+ * Built-in functions available in all programs.
+ *
+ * These provide common list operations with their polymorphic types.
+ * In a real language, these would be implemented in the standard library.
+ */
 export const baseEnv: TypeEnv = new Map([
   // map : ∀a b. (a -> b) -> List a -> List b
+  // Transforms each element of a list
   [
     "map",
     scheme(
@@ -991,24 +1864,40 @@ export const baseEnv: TypeEnv = new Map([
       tfun(tfun(tvar("a"), tvar("b")), tfun(tListOf(tvar("a")), tListOf(tvar("b")))),
     ),
   ],
+
   // head : ∀a. List a -> Maybe a
+  // Returns the first element, if any
   ["head", scheme(["a"], tfun(tListOf(tvar("a")), tMaybeOf(tvar("a"))))],
+
   // tail : ∀a. List a -> Maybe (List a)
+  // Returns everything except the first element
   ["tail", scheme(["a"], tfun(tListOf(tvar("a")), tMaybeOf(tListOf(tvar("a")))))],
+
   // isEmpty : ∀a. List a -> boolean
+  // Tests if a list has no elements
   ["isEmpty", scheme(["a"], tfun(tListOf(tvar("a")), tBool))],
+
   // length : ∀a. List a -> number
+  // Returns the number of elements
   ["length", scheme(["a"], tfun(tListOf(tvar("a")), tNum))],
+
   // concat : ∀a. List a -> List a -> List a
+  // Concatenates two lists
   ["concat", scheme(["a"], tfun(tListOf(tvar("a")), tfun(tListOf(tvar("a")), tListOf(tvar("a")))))],
+
   // reverse : ∀a. List a -> List a
+  // Reverses a list
   ["reverse", scheme(["a"], tfun(tListOf(tvar("a")), tListOf(tvar("a"))))],
+
   // filter : ∀a. (a -> boolean) -> List a -> List a
+  // Keeps elements satisfying a predicate
   [
     "filter",
     scheme(["a"], tfun(tfun(tvar("a"), tBool), tfun(tListOf(tvar("a")), tListOf(tvar("a"))))),
   ],
+
   // foldr : ∀a b. (a -> b -> b) -> b -> List a -> b
+  // Right fold over a list
   [
     "foldr",
     scheme(
