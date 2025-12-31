@@ -14,13 +14,15 @@ A small, experimental type checker written in TypeScript. This is a learning pro
 - Algebraic data types (ADTs) with `dataDecl`
 - Pattern matching with `match` expressions
 - Exhaustiveness checking for pattern matches
-- Tuple syntax
+- Tuples with proper arity: `(number, string, boolean)`
+- Record types with field access: `{ x: number, y: string }`
+- Row polymorphism: `fn r => r.x` types as `{ x: t | ρ } -> t`
+- Pattern matching on records and tuples
 
 ## What's next
 
 - Lexer and parser
 - Runtime/interpreter for code execution
-- Record types
 
 ## Running
 

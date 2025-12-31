@@ -289,14 +289,10 @@ const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
 
   // Both have extra fields - both must be open
   if (!row1) {
-    throw new TypeError(
-      `Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`,
-    );
+    throw new TypeError(`Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`);
   }
   if (!row2) {
-    throw new TypeError(
-      `Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`,
-    );
+    throw new TypeError(`Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`);
   }
 
   // Create fresh row variable for combined tail

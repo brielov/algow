@@ -134,10 +134,20 @@ printType(
 printType(ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")));
 
 // Test: row polymorphism - applying field accessor to a record
-printType(ast.app(ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")), ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("hello"))])));
+printType(
+  ast.app(
+    ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
+    ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("hello"))]),
+  ),
+);
 
 // Test: row polymorphism - fn r => r.x + r.y (multiple field access)
-printType(ast.abs("r", ast.binOp("+", ast.fieldAccess(ast.var_("r"), "x"), ast.fieldAccess(ast.var_("r"), "y"))));
+printType(
+  ast.abs(
+    "r",
+    ast.binOp("+", ast.fieldAccess(ast.var_("r"), "x"), ast.fieldAccess(ast.var_("r"), "y")),
+  ),
+);
 
 printType(
   ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
