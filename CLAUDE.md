@@ -1,106 +1,46 @@
+# CLAUDE.md
 
-Default to using Bun instead of Node.js.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+## Project Overview
 
-## APIs
+Algow is an experimental Hindley-Milner type inference implementation (Algorithm W) in TypeScript. This is a learning project exploring how compilers and type systems work.
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+## Commands
 
-## Testing
-
-Use `bun test` to run tests.
-
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+```bash
+bun install          # Install dependencies
+bun run src/index.ts # Run the type checker
+bun test             # Run tests (uses bun:test)
+bunx oxlint          # Run linter
 ```
 
-## Frontend
+## Architecture
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+The type checker has three main components:
 
-Server:
+### `src/ast.ts` - Abstract Syntax Tree
 
-```ts#index.ts
-import index from "./index.html"
+Defines expression types and smart constructors:
 
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
+- **Literals**: `Num`, `Bool`, `Str`
+- **Bindings**: `Let` (polymorphic), `LetRec` (recursive)
+- **Functions**: `Abs` (lambda), `App` (application)
+- **Control**: `If`, `BinOp`
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+### `src/infer.ts` - Type Inference Engine
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
+Implements Algorithm W with:
 
-With the following `frontend.tsx`:
+- **Types**: `TVar` (type variable), `TCon` (type constant), `TFun` (function type)
+- **Schemes**: Polymorphic types with quantified variables and constraints
+- **Type classes**: `Eq`, `Ord`, `Add` for operator overloading
+- **Core functions**: `infer()` is the entry point; internally uses `unify()`, `generalize()`, `instantiate()`
 
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
+### `src/index.ts` - Entry Point
 
-// import .css files directly and it works
-import './index.css';
+Simple test harness for building and testing expressions.
 
-const root = createRoot(document.body);
+## Runtime
 
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+Use Bun, not Node.js. Bun auto-loads `.env` files. See `node_modules/bun-types/docs/**.mdx` for Bun API documentation.

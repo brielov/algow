@@ -16,6 +16,12 @@ experimental = true
 name = "typescript"
 auto-format = true
 language-servers = [
-  { name = "tsgo", except-features = ["format"] },
-  { name = "oxc", only-features = ["diagnostics", "code-action", "format"] },
+  { name = "tsgo", except-features = [
+    "format",
+  ] },
+  { name = "oxc", only-features = [
+    "diagnostics",
+    "code-action",
+    "format",
+  ] },
 ]
