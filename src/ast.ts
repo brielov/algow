@@ -34,18 +34,18 @@
  * a "tagged union" or "discriminated union".
  */
 export type Expr =
-	| Con // Constants (literals)
-	| Let // Let bindings (with polymorphism)
-	| LetRec // Recursive let bindings
-	| Var // Variable references
-	| Abs // Lambda abstractions (anonymous functions)
-	| App // Function application
-	| Tuple // Tuples: (a, b, c)
-	| Record // Records: { x: 1, y: "hello" }
-	| FieldAccess // Field access: record.field
-	| If // Conditional expressions
-	| BinOp // Binary operators: +, -, ==, <, etc.
-	| Match; // Pattern matching expressions
+  | Con // Constants (literals)
+  | Let // Let bindings (with polymorphism)
+  | LetRec // Recursive let bindings
+  | Var // Variable references
+  | Abs // Lambda abstractions (anonymous functions)
+  | App // Function application
+  | Tuple // Tuples: (a, b, c)
+  | Record // Records: { x: 1, y: "hello" }
+  | FieldAccess // Field access: record.field
+  | If // Conditional expressions
+  | BinOp // Binary operators: +, -, ==, <, etc.
+  | Match; // Pattern matching expressions
 
 // -----------------------------------------------------------------------------
 // Constants (Literals)
@@ -62,8 +62,8 @@ export type Con = Num | Bool | Str;
  * Example: 42, 3.14
  */
 export type Num = {
-	readonly kind: "Num";
-	readonly value: number;
+  readonly kind: "Num";
+  readonly value: number;
 };
 
 /**
@@ -71,8 +71,8 @@ export type Num = {
  * Example: true, false
  */
 export type Bool = {
-	readonly kind: "Bool";
-	readonly value: boolean;
+  readonly kind: "Bool";
+  readonly value: boolean;
 };
 
 /**
@@ -80,8 +80,8 @@ export type Bool = {
  * Example: "hello world"
  */
 export type Str = {
-	readonly kind: "Str";
-	readonly value: string;
+  readonly kind: "Str";
+  readonly value: string;
 };
 
 // -----------------------------------------------------------------------------
@@ -101,10 +101,10 @@ export type Str = {
  * at different types in the body.
  */
 export type Let = {
-	readonly kind: "Let";
-	readonly name: string;
-	readonly value: Expr;
-	readonly body: Expr;
+  readonly kind: "Let";
+  readonly name: string;
+  readonly value: Expr;
+  readonly body: Expr;
 };
 
 /**
@@ -118,10 +118,10 @@ export type Let = {
  * placeholder type variable for the binding before inferring the value.
  */
 export type LetRec = {
-	readonly kind: "LetRec";
-	readonly name: string;
-	readonly value: Expr;
-	readonly body: Expr;
+  readonly kind: "LetRec";
+  readonly name: string;
+  readonly value: Expr;
+  readonly body: Expr;
 };
 
 // -----------------------------------------------------------------------------
@@ -140,8 +140,8 @@ export type LetRec = {
  * - Built-in functions (like map, filter)
  */
 export type Var = {
-	readonly kind: "Var";
-	readonly name: string;
+  readonly kind: "Var";
+  readonly name: string;
 };
 
 /**
@@ -157,9 +157,9 @@ export type Var = {
  * Example of currying: fn x => fn y => x + y
  */
 export type Abs = {
-	readonly kind: "Abs";
-	readonly param: string;
-	readonly body: Expr;
+  readonly kind: "Abs";
+  readonly param: string;
+  readonly body: Expr;
 };
 
 /**
@@ -175,9 +175,9 @@ export type Abs = {
  * then `add 1` has type `number -> number`.
  */
 export type App = {
-	readonly kind: "App";
-	readonly func: Expr;
-	readonly param: Expr;
+  readonly kind: "App";
+  readonly func: Expr;
+  readonly param: Expr;
 };
 
 // -----------------------------------------------------------------------------
@@ -196,8 +196,8 @@ export type App = {
  * - Have positional access rather than head/tail
  */
 export type Tuple = {
-	readonly kind: "Tuple";
-	readonly elements: readonly Expr[];
+  readonly kind: "Tuple";
+  readonly elements: readonly Expr[];
 };
 
 /**
@@ -210,16 +210,16 @@ export type Tuple = {
  * and types are considered compatible, regardless of field order.
  */
 export type Record = {
-	readonly kind: "Record";
-	readonly fields: readonly RecordField[];
+  readonly kind: "Record";
+  readonly fields: readonly RecordField[];
 };
 
 /**
  * A single field in a record expression.
  */
 export type RecordField = {
-	readonly name: string;
-	readonly value: Expr;
+  readonly name: string;
+  readonly value: Expr;
 };
 
 /**
@@ -233,9 +233,9 @@ export type RecordField = {
  * the type `{ x: t | ρ } -> t` where ρ represents the unknown remaining fields.
  */
 export type FieldAccess = {
-	readonly kind: "FieldAccess";
-	readonly record: Expr;
-	readonly field: string;
+  readonly kind: "FieldAccess";
+  readonly record: Expr;
+  readonly field: string;
 };
 
 // -----------------------------------------------------------------------------
@@ -252,10 +252,10 @@ export type FieldAccess = {
  * This is an expression (returns a value), not a statement.
  */
 export type If = {
-	readonly kind: "If";
-	readonly cond: Expr;
-	readonly then: Expr;
-	readonly else: Expr;
+  readonly kind: "If";
+  readonly cond: Expr;
+  readonly then: Expr;
+  readonly else: Expr;
 };
 
 /**
@@ -271,10 +271,10 @@ export type If = {
  * - Equality (==, !=): requires Eq class
  */
 export type BinOp = {
-	readonly kind: "BinOp";
-	readonly op: Op;
-	readonly left: Expr;
-	readonly right: Expr;
+  readonly kind: "BinOp";
+  readonly op: Op;
+  readonly left: Expr;
+  readonly right: Expr;
 };
 
 /**
@@ -308,8 +308,8 @@ export type Pattern = PVar | PWildcard | PCon | PLit | PRecord | PTuple;
  * when used as the only or last pattern.
  */
 export type PVar = {
-	readonly kind: "PVar";
-	readonly name: string;
+  readonly kind: "PVar";
+  readonly name: string;
 };
 
 /**
@@ -322,7 +322,7 @@ export type PVar = {
  * Like variable patterns, wildcards always match.
  */
 export type PWildcard = {
-	readonly kind: "PWildcard";
+  readonly kind: "PWildcard";
 };
 
 /**
@@ -338,9 +338,9 @@ export type PWildcard = {
  * a list with exactly two elements.
  */
 export type PCon = {
-	readonly kind: "PCon";
-	readonly name: string;
-	readonly args: readonly Pattern[];
+  readonly kind: "PCon";
+  readonly name: string;
+  readonly args: readonly Pattern[];
 };
 
 /**
@@ -352,16 +352,16 @@ export type PCon = {
  * by themselves (there are always other values of the same type).
  */
 export type PLit = {
-	readonly kind: "PLit";
-	readonly value: number | string | boolean;
+  readonly kind: "PLit";
+  readonly value: number | string | boolean;
 };
 
 /**
  * A single field in a record pattern.
  */
 export type PRecordField = {
-	readonly name: string;
-	readonly pattern: Pattern;
+  readonly name: string;
+  readonly pattern: Pattern;
 };
 
 /**
@@ -374,8 +374,8 @@ export type PRecordField = {
  * and support row polymorphism (the record can have additional fields).
  */
 export type PRecord = {
-	readonly kind: "PRecord";
-	readonly fields: readonly PRecordField[];
+  readonly kind: "PRecord";
+  readonly fields: readonly PRecordField[];
 };
 
 /**
@@ -387,16 +387,16 @@ export type PRecord = {
  * The pattern must have the same arity as the tuple being matched.
  */
 export type PTuple = {
-	readonly kind: "PTuple";
-	readonly elements: readonly Pattern[];
+  readonly kind: "PTuple";
+  readonly elements: readonly Pattern[];
 };
 
 /**
  * A single case in a match expression - pairs a pattern with an expression.
  */
 export type Case = {
-	readonly pattern: Pattern;
-	readonly body: Expr;
+  readonly pattern: Pattern;
+  readonly body: Expr;
 };
 
 /**
@@ -416,9 +416,9 @@ export type Case = {
  * 5. Verifies exhaustiveness for algebraic data types
  */
 export type Match = {
-	readonly kind: "Match";
-	readonly expr: Expr;
-	readonly cases: readonly Case[];
+  readonly kind: "Match";
+  readonly expr: Expr;
+  readonly cases: readonly Case[];
 };
 
 // =============================================================================
@@ -443,8 +443,8 @@ export type TypeExpr = TyVar | TyCon | TyApp | TyFun;
  * can work with any type.
  */
 export type TyVar = {
-	readonly kind: "TyVar";
-	readonly name: string;
+  readonly kind: "TyVar";
+  readonly name: string;
 };
 
 /**
@@ -457,8 +457,8 @@ export type TyVar = {
  * - User-defined types (List, Maybe, Either)
  */
 export type TyCon = {
-	readonly kind: "TyCon";
-	readonly name: string;
+  readonly kind: "TyCon";
+  readonly name: string;
 };
 
 /**
@@ -471,9 +471,9 @@ export type TyCon = {
  * TyApp(TyApp(TyCon("Either"), TyVar("a")), TyVar("b")).
  */
 export type TyApp = {
-	readonly kind: "TyApp";
-	readonly con: TypeExpr;
-	readonly arg: TypeExpr;
+  readonly kind: "TyApp";
+  readonly con: TypeExpr;
+  readonly arg: TypeExpr;
 };
 
 /**
@@ -485,9 +485,9 @@ export type TyApp = {
  * which represents a curried function taking a, then b, returning c.
  */
 export type TyFun = {
-	readonly kind: "TyFun";
-	readonly param: TypeExpr;
-	readonly ret: TypeExpr;
+  readonly kind: "TyFun";
+  readonly param: TypeExpr;
+  readonly ret: TypeExpr;
 };
 
 // =============================================================================
@@ -502,8 +502,8 @@ export type TyFun = {
  * - `Just` is ConDecl("Just", [TyVar("a")])
  */
 export type ConDecl = {
-	readonly name: string;
-	readonly fields: readonly TypeExpr[];
+  readonly name: string;
+  readonly fields: readonly TypeExpr[];
 };
 
 /**
@@ -526,10 +526,10 @@ export type ConDecl = {
  * - Register constructors for exhaustiveness checking
  */
 export type DataDecl = {
-	readonly kind: "DataDecl";
-	readonly name: string;
-	readonly typeParams: readonly string[];
-	readonly constructors: readonly ConDecl[];
+  readonly kind: "DataDecl";
+  readonly name: string;
+  readonly typeParams: readonly string[];
+  readonly constructors: readonly ConDecl[];
 };
 
 // =============================================================================
@@ -554,26 +554,26 @@ export const str = (value: string): Str => ({ kind: "Str", value });
 // --- Control Flow ---
 
 export const if_ = (cond: Expr, then: Expr, else_: Expr): If => ({
-	kind: "If",
-	cond,
-	then,
-	else: else_,
+  kind: "If",
+  cond,
+  then,
+  else: else_,
 });
 
 // --- Bindings ---
 
 export const let_ = (name: string, value: Expr, body: Expr): Let => ({
-	kind: "Let",
-	name,
-	value,
-	body,
+  kind: "Let",
+  name,
+  value,
+  body,
 });
 
 export const letRec = (name: string, value: Expr, body: Expr): LetRec => ({
-	kind: "LetRec",
-	name,
-	value,
-	body,
+  kind: "LetRec",
+  name,
+  value,
+  body,
 });
 
 // --- Variables and Functions ---
@@ -581,47 +581,47 @@ export const letRec = (name: string, value: Expr, body: Expr): LetRec => ({
 export const var_ = (name: string): Var => ({ kind: "Var", name });
 
 export const abs = (param: string, body: Expr): Abs => ({
-	kind: "Abs",
-	param,
-	body,
+  kind: "Abs",
+  param,
+  body,
 });
 
 export const app = (func: Expr, param: Expr): App => ({
-	kind: "App",
-	func,
-	param,
+  kind: "App",
+  func,
+  param,
 });
 
 // --- Compound Data ---
 
 export const tuple = (...elements: readonly Expr[]): Tuple => ({
-	kind: "Tuple",
-	elements,
+  kind: "Tuple",
+  elements,
 });
 
 export const record = (fields: readonly RecordField[]): Record => ({
-	kind: "Record",
-	fields,
+  kind: "Record",
+  fields,
 });
 
 export const field = (name: string, value: Expr): RecordField => ({
-	name,
-	value,
+  name,
+  value,
 });
 
 export const fieldAccess = (record: Expr, field: string): FieldAccess => ({
-	kind: "FieldAccess",
-	record,
-	field,
+  kind: "FieldAccess",
+  record,
+  field,
 });
 
 // --- Operators ---
 
 export const binOp = (op: Op, left: Expr, right: Expr): BinOp => ({
-	kind: "BinOp",
-	op,
-	left,
-	right,
+  kind: "BinOp",
+  op,
+  left,
+  right,
 });
 
 // --- Patterns ---
@@ -631,40 +631,40 @@ export const pwildcard: PWildcard = { kind: "PWildcard" };
 export const pvar = (name: string): PVar => ({ kind: "PVar", name });
 
 export const pcon = (name: string, ...args: readonly Pattern[]): PCon => ({
-	kind: "PCon",
-	name,
-	args,
+  kind: "PCon",
+  name,
+  args,
 });
 
 export const plit = (value: string | number | boolean): PLit => ({
-	kind: "PLit",
-	value,
+  kind: "PLit",
+  value,
 });
 
 export const precord = (fields: readonly PRecordField[]): PRecord => ({
-	kind: "PRecord",
-	fields,
+  kind: "PRecord",
+  fields,
 });
 
 export const pfield = (name: string, pattern: Pattern): PRecordField => ({
-	name,
-	pattern,
+  name,
+  pattern,
 });
 
 export const ptuple = (elements: readonly Pattern[]): PTuple => ({
-	kind: "PTuple",
-	elements,
+  kind: "PTuple",
+  elements,
 });
 
 export const case_ = (pattern: Pattern, body: Expr): Case => ({
-	pattern,
-	body,
+  pattern,
+  body,
 });
 
 export const match = (expr: Expr, cases: readonly Case[]): Match => ({
-	kind: "Match",
-	expr,
-	cases,
+  kind: "Match",
+  expr,
+  cases,
 });
 
 // --- Type Expressions ---
@@ -674,29 +674,26 @@ export const tyvar = (name: string): TyVar => ({ kind: "TyVar", name });
 export const tycon = (name: string): TyCon => ({ kind: "TyCon", name });
 
 export const tyapp = (con: TypeExpr, arg: TypeExpr): TyApp => ({
-	kind: "TyApp",
-	con,
-	arg,
+  kind: "TyApp",
+  con,
+  arg,
 });
 
 export const tyfun = (param: TypeExpr, ret: TypeExpr): TyFun => ({
-	kind: "TyFun",
-	param,
-	ret,
+  kind: "TyFun",
+  param,
+  ret,
 });
 
 // --- Data Declarations ---
 
-export const conDecl = (
-	name: string,
-	fields: readonly TypeExpr[],
-): ConDecl => ({
-	name,
-	fields,
+export const conDecl = (name: string, fields: readonly TypeExpr[]): ConDecl => ({
+  name,
+  fields,
 });
 
 export const dataDecl = (
-	name: string,
-	typeParams: string[],
-	constructors: ConDecl[],
+  name: string,
+  typeParams: string[],
+  constructors: ConDecl[],
 ): DataDecl => ({ kind: "DataDecl", name, typeParams, constructors });

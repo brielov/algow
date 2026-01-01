@@ -47,6 +47,34 @@
  */
 
 import * as ast from "./ast";
+import { type Diagnostic, error as diagError } from "./diagnostics";
+
+// =============================================================================
+// INFERENCE CONTEXT
+// =============================================================================
+
+/**
+ * Mutable context for type inference.
+ * Collects diagnostics instead of throwing errors.
+ */
+type InferContext = {
+  readonly diagnostics: Diagnostic[];
+};
+
+/**
+ * Create a fresh inference context.
+ */
+const createContext = (): InferContext => ({
+  diagnostics: [],
+});
+
+/**
+ * Add an error diagnostic to the context.
+ * Uses 0,0 positions since AST nodes don't have source positions yet.
+ */
+const addError = (ctx: InferContext, message: string): void => {
+  ctx.diagnostics.push(diagError(0, 0, message));
+};
 
 // =============================================================================
 // INTERNAL TYPE REPRESENTATION
@@ -497,14 +525,14 @@ const composeSubst = (s1: Subst, s2: Subst): Subst => {
  * 1. If either type is a variable, bind it to the other type
  * 2. If both are constructors, they must be the same name
  * 3. If both are compound (functions, applications), recursively unify parts
- * 4. Otherwise, fail
+ * 4. Otherwise, fail (record diagnostic and return empty substitution)
  *
+ * @param ctx Inference context for collecting diagnostics
  * @param t1 First type
  * @param t2 Second type
- * @returns Substitution that makes t1 and t2 equal
- * @throws TypeError if types cannot be unified
+ * @returns Substitution that makes t1 and t2 equal (empty on error)
  */
-const unify = (t1: Type, t2: Type): Subst => {
+const unify = (ctx: InferContext, t1: Type, t2: Type): Subst => {
   // Same type variable - already equal, no substitution needed
   if (t1.kind === "TVar" && t2.kind === "TVar" && t1.name === t2.name) {
     return new Map();
@@ -512,12 +540,12 @@ const unify = (t1: Type, t2: Type): Subst => {
 
   // t1 is a variable - bind it to t2
   if (t1.kind === "TVar") {
-    return bindVar(t1.name, t2);
+    return bindVar(ctx, t1.name, t2);
   }
 
   // t2 is a variable - bind it to t1
   if (t2.kind === "TVar") {
-    return bindVar(t2.name, t1);
+    return bindVar(ctx, t2.name, t1);
   }
 
   // Both are type constructors - must have the same name
@@ -527,43 +555,46 @@ const unify = (t1: Type, t2: Type): Subst => {
 
   // Both are function types - unify parameter and return types
   if (t1.kind === "TFun" && t2.kind === "TFun") {
-    const s1 = unify(t1.param, t2.param);
+    const s1 = unify(ctx, t1.param, t2.param);
     // Apply s1 before unifying return types (left-to-right dependency)
-    const s2 = unify(applySubst(s1, t1.ret), applySubst(s1, t2.ret));
+    const s2 = unify(ctx, applySubst(s1, t1.ret), applySubst(s1, t2.ret));
     return composeSubst(s1, s2);
   }
 
   // Both are type applications - unify constructor and argument
   if (t1.kind === "TApp" && t2.kind === "TApp") {
-    const s1 = unify(t1.con, t2.con);
-    const s2 = unify(applySubst(s1, t1.arg), applySubst(s1, t2.arg));
+    const s1 = unify(ctx, t1.con, t2.con);
+    const s2 = unify(ctx, applySubst(s1, t1.arg), applySubst(s1, t2.arg));
     return composeSubst(s1, s2);
   }
 
   // Both are record types - use specialized record unification
   if (t1.kind === "TRecord" && t2.kind === "TRecord") {
-    return unifyRecords(t1, t2);
+    return unifyRecords(ctx, t1, t2);
   }
 
   // Both are tuple types - unify element-wise
   if (t1.kind === "TTuple" && t2.kind === "TTuple") {
     if (t1.elements.length !== t2.elements.length) {
-      throw new TypeError(
+      addError(
+        ctx,
         `Tuple arity mismatch: (${t1.elements.length} elements) vs (${t2.elements.length} elements)`,
       );
+      return new Map();
     }
     let currentSubst: Subst = new Map();
     for (let i = 0; i < t1.elements.length; i++) {
       const elem1 = applySubst(currentSubst, t1.elements[i]!);
       const elem2 = applySubst(currentSubst, t2.elements[i]!);
-      const s = unify(elem1, elem2);
+      const s = unify(ctx, elem1, elem2);
       currentSubst = composeSubst(currentSubst, s);
     }
     return currentSubst;
   }
 
   // Types are incompatible
-  throw new TypeError(`Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`);
+  addError(ctx, `Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`);
+  return new Map();
 };
 
 /**
@@ -575,12 +606,12 @@ const unify = (t1: Type, t2: Type): Subst => {
  * The occurs check prevents situations like: t0 = List t0
  * This would create an infinitely nested type, which we reject.
  *
+ * @param ctx Inference context for collecting diagnostics
  * @param name The type variable name
  * @param type The type to bind it to
- * @returns Substitution mapping name to type
- * @throws TypeError if binding would create an infinite type
+ * @returns Substitution mapping name to type (empty on error)
  */
-const bindVar = (name: string, type: Type): Subst => {
+const bindVar = (ctx: InferContext, name: string, type: Type): Subst => {
   // Binding to itself is a no-op
   if (type.kind === "TVar" && type.name === name) {
     return new Map();
@@ -588,7 +619,8 @@ const bindVar = (name: string, type: Type): Subst => {
 
   // Occurs check: ensure the variable doesn't appear in the type
   if (freeTypeVars(type).has(name)) {
-    throw new TypeError(`Infinite type: ${name} appears in ${typeToString(type)}`);
+    addError(ctx, `Infinite type: ${name} appears in ${typeToString(type)}`);
+    return new Map();
   }
 
   return new Map([[name, type]]);
@@ -635,7 +667,7 @@ const freshTypeVar = (): Type => {
  * 3. Different fields → one must be open to absorb the difference
  * 4. Both have unique fields → both must be open, create fresh row for tail
  */
-const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
+const unifyRecords = (ctx: InferContext, t1: TRecord, t2: TRecord): Subst => {
   const fields1 = new Set(t1.fields.keys());
   const fields2 = new Set(t2.fields.keys());
 
@@ -649,7 +681,7 @@ const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
   for (const fieldName of commonFields) {
     const fieldType1 = applySubst(currentSubst, t1.fields.get(fieldName)!);
     const fieldType2 = applySubst(currentSubst, t2.fields.get(fieldName)!);
-    const s = unify(fieldType1, fieldType2);
+    const s = unify(ctx, fieldType1, fieldType2);
     currentSubst = composeSubst(currentSubst, s);
   }
 
@@ -671,17 +703,17 @@ const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
   if (onlyIn1.size === 0 && onlyIn2.size === 0) {
     if (row1 && row2) {
       // Both open - unify row variables
-      const s = unify(row1, row2);
+      const s = unify(ctx, row1, row2);
       return composeSubst(currentSubst, s);
     }
     if (row1 && !row2) {
       // t1 open, t2 closed - t1's row must be empty
-      const s = unify(row1, trecord([]));
+      const s = unify(ctx, row1, trecord([]));
       return composeSubst(currentSubst, s);
     }
     if (!row1 && row2) {
       // t1 closed, t2 open - t2's row must be empty
-      const s = unify(row2, trecord([]));
+      const s = unify(ctx, row2, trecord([]));
       return composeSubst(currentSubst, s);
     }
     // Both closed with matching fields - already done
@@ -691,44 +723,44 @@ const unifyRecords = (t1: TRecord, t2: TRecord): Subst => {
   // Case 2: t1 has extra fields, t2 doesn't
   if (onlyIn1.size > 0 && onlyIn2.size === 0) {
     if (!row2) {
-      throw new TypeError(
-        `Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`,
-      );
+      addError(ctx, `Record field mismatch: missing fields { ${[...onlyIn1].join(", ")} }`);
+      return currentSubst;
     }
     // t2's row must equal t1's extra fields (plus t1's row if any)
     const extraRecord = trecord(extraFields1, row1);
-    const s = unify(row2, extraRecord);
+    const s = unify(ctx, row2, extraRecord);
     return composeSubst(currentSubst, s);
   }
 
   // Case 3: t2 has extra fields, t1 doesn't
   if (onlyIn2.size > 0 && onlyIn1.size === 0) {
     if (!row1) {
-      throw new TypeError(
-        `Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`,
-      );
+      addError(ctx, `Record field mismatch: missing fields { ${[...onlyIn2].join(", ")} }`);
+      return currentSubst;
     }
     // t1's row must equal t2's extra fields (plus t2's row if any)
     const extraRecord = trecord(extraFields2, row2);
-    const s = unify(row1, extraRecord);
+    const s = unify(ctx, row1, extraRecord);
     return composeSubst(currentSubst, s);
   }
 
   // Case 4: Both have unique extra fields - both must be open
   if (!row1) {
-    throw new TypeError(`Record field mismatch: t1 missing fields { ${[...onlyIn2].join(", ")} }`);
+    addError(ctx, `Record field mismatch: missing fields { ${[...onlyIn2].join(", ")} }`);
+    return currentSubst;
   }
   if (!row2) {
-    throw new TypeError(`Record field mismatch: t2 missing fields { ${[...onlyIn1].join(", ")} }`);
+    addError(ctx, `Record field mismatch: missing fields { ${[...onlyIn1].join(", ")} }`);
+    return currentSubst;
   }
 
   // Both records contribute unique fields - create a shared tail
   const freshRow = freshTypeVar();
   // row1 = { t2's extra fields | freshRow }
-  const s1 = unify(row1, trecord(extraFields2, freshRow));
+  const s1 = unify(ctx, row1, trecord(extraFields2, freshRow));
   currentSubst = composeSubst(currentSubst, s1);
   // row2 = { t1's extra fields | freshRow }
-  const s2 = unify(applySubst(currentSubst, row2), trecord(extraFields1, freshRow));
+  const s2 = unify(ctx, applySubst(currentSubst, row2), trecord(extraFields1, freshRow));
   return composeSubst(currentSubst, s2);
 };
 
@@ -924,10 +956,10 @@ export const typeToString = (type: Type): string => {
  *
  * Constraints on type variables are deferred - they'll be checked when instantiated.
  *
+ * @param ctx Inference context for collecting diagnostics
  * @param constraints The constraints to check
- * @throws TypeError if a constraint is violated
  */
-const solveConstraints = (constraints: readonly Constraint[]): void => {
+const solveConstraints = (ctx: InferContext, constraints: readonly Constraint[]): void => {
   for (const c of constraints) {
     // Type variables - defer until instantiation
     if (c.type.kind === "TVar") {
@@ -938,13 +970,13 @@ const solveConstraints = (constraints: readonly Constraint[]): void => {
     if (c.type.kind === "TCon") {
       const classInstances = instances.get(c.class_);
       if (!classInstances?.has(c.type.name)) {
-        throw new TypeError(`Type '${c.type.name}' does not satisfy ${c.class_}`);
+        addError(ctx, `Type '${c.type.name}' does not satisfy ${c.class_}`);
       }
     }
 
     // Function types never satisfy our type classes
     if (c.type.kind === "TFun") {
-      throw new TypeError(`Function types does not satisfy ${c.class_}`);
+      addError(ctx, `Function types do not satisfy ${c.class_}`);
     }
   }
 };
@@ -954,9 +986,19 @@ const solveConstraints = (constraints: readonly Constraint[]): void => {
 // =============================================================================
 
 /**
- * The result of type inference: substitution, type, and constraints.
+ * The result of type inference: substitution, type, constraints, and diagnostics.
  */
 type InferResult = [Subst, Type, readonly Constraint[]];
+
+/**
+ * The full result of type inference including diagnostics.
+ */
+export type InferOutput = {
+  readonly subst: Subst;
+  readonly type: Type;
+  readonly constraints: readonly Constraint[];
+  readonly diagnostics: readonly Diagnostic[];
+};
 
 /**
  * Infer the type of an expression.
@@ -966,18 +1008,29 @@ type InferResult = [Subst, Type, readonly Constraint[]];
  * 2. Runs the inference algorithm
  * 3. Applies final substitutions to constraints
  * 4. Verifies all type class constraints
+ * 5. Returns diagnostics instead of throwing errors
  *
  * @param env The type environment (variables in scope)
  * @param registry The constructor registry (for exhaustiveness checking)
  * @param expr The expression to type-check
- * @returns The inferred type information
+ * @returns The inferred type information with diagnostics
  */
-export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr): InferResult => {
+export const infer = (
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Expr,
+): InferOutput => {
   typeVarCounter = 0;
-  const [subst, type, constraints] = inferExpr(env, registry, expr);
+  const ctx = createContext();
+  const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
-  solveConstraints(finalConstraints);
-  return [subst, type, finalConstraints];
+  solveConstraints(ctx, finalConstraints);
+  return {
+    subst,
+    type,
+    constraints: finalConstraints,
+    diagnostics: ctx.diagnostics,
+  };
 };
 
 // =============================================================================
@@ -993,41 +1046,47 @@ export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Exp
  * - The inferred type
  * - Any type class constraints generated
  *
+ * @param ctx Inference context for collecting diagnostics
  * @param env Current type environment
  * @param registry Constructor registry for pattern matching
  * @param expr The expression to infer
  * @returns Inference result tuple
  */
-const inferExpr = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr): InferResult => {
+const inferExpr = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Expr,
+): InferResult => {
   switch (expr.kind) {
     case "Abs":
-      return inferAbs(env, registry, expr);
+      return inferAbs(ctx, env, registry, expr);
     case "App":
-      return inferApp(env, registry, expr);
+      return inferApp(ctx, env, registry, expr);
     case "BinOp":
-      return inferBinOp(env, registry, expr);
+      return inferBinOp(ctx, env, registry, expr);
     case "Bool":
       return [new Map(), tBool, []];
     case "If":
-      return inferIf(env, registry, expr);
+      return inferIf(ctx, env, registry, expr);
     case "Let":
-      return inferLet(env, registry, expr);
+      return inferLet(ctx, env, registry, expr);
     case "LetRec":
-      return inferLetRec(env, registry, expr);
+      return inferLetRec(ctx, env, registry, expr);
     case "Num":
       return [new Map(), tNum, []];
     case "Str":
       return [new Map(), tStr, []];
     case "Tuple":
-      return inferTuple(env, registry, expr);
+      return inferTuple(ctx, env, registry, expr);
     case "Var":
-      return inferVar(env, expr);
+      return inferVar(ctx, env, expr);
     case "Match":
-      return inferMatch(env, registry, expr);
+      return inferMatch(ctx, env, registry, expr);
     case "FieldAccess":
-      return inferFieldAccess(env, registry, expr);
+      return inferFieldAccess(ctx, env, registry, expr);
     case "Record":
-      return inferRecord(env, registry, expr);
+      return inferRecord(ctx, env, registry, expr);
   }
 };
 
@@ -1048,12 +1107,13 @@ const inferExpr = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr):
  * 4. Record is closed without field → error
  */
 const inferFieldAccess = (
+  ctx: InferContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.FieldAccess,
 ): InferResult => {
   // Infer the record expression's type
-  const [s1, recordType, constraints] = inferExpr(env, registry, expr.record);
+  const [s1, recordType, constraints] = inferExpr(ctx, env, registry, expr.record);
   const resolvedType = applySubst(s1, recordType);
 
   // Case 1: Type variable - constrain to open record with the field
@@ -1061,15 +1121,17 @@ const inferFieldAccess = (
     const fieldType = freshTypeVar();
     const rowVar = freshTypeVar();
     const openRecord = trecord([[expr.field, fieldType]], rowVar);
-    const s2 = unify(resolvedType, openRecord);
+    const s2 = unify(ctx, resolvedType, openRecord);
     return [composeSubst(s1, s2), applySubst(s2, fieldType), constraints];
   }
 
   // Must be a record type
   if (resolvedType.kind !== "TRecord") {
-    throw new TypeError(
+    addError(
+      ctx,
       `Cannot access field '${expr.field}' on non-record type: ${typeToString(resolvedType)}`,
     );
+    return [s1, freshTypeVar(), constraints];
   }
 
   // Case 2: Field exists in known fields
@@ -1082,14 +1144,16 @@ const inferFieldAccess = (
   if (resolvedType.row) {
     const newFieldType = freshTypeVar();
     const newRowVar = freshTypeVar();
-    const s2 = unify(resolvedType.row, trecord([[expr.field, newFieldType]], newRowVar));
+    const s2 = unify(ctx, resolvedType.row, trecord([[expr.field, newFieldType]], newRowVar));
     return [composeSubst(s1, s2), applySubst(s2, newFieldType), constraints];
   }
 
   // Case 4: Closed record without the field - error
-  throw new TypeError(
+  addError(
+    ctx,
     `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`,
   );
+  return [s1, freshTypeVar(), constraints];
 };
 
 /**
@@ -1099,6 +1163,7 @@ const inferFieldAccess = (
  * The record is closed (no row variable) because we know exactly what fields it has.
  */
 const inferRecord = (
+  ctx: InferContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.Record,
@@ -1109,7 +1174,7 @@ const inferRecord = (
 
   // Infer each field's type
   for (const field of expr.fields) {
-    const [s, t, c] = inferExpr(applySubstEnv(subst, env), registry, field.value);
+    const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), registry, field.value);
     subst = composeSubst(subst, s);
     constraints = [...applySubstConstraints(subst, constraints), ...c];
     fieldTypes.set(field.name, applySubst(subst, t));
@@ -1135,7 +1200,12 @@ const inferRecord = (
  * Note: Lambda parameters are monomorphic within their body. This differs from
  * let-bound variables which are polymorphic. This is key to Algorithm W.
  */
-const inferAbs = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Abs): InferResult => {
+const inferAbs = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Abs,
+): InferResult => {
   // Fresh type variable for the parameter (we don't know its type yet)
   const paramType = freshTypeVar();
 
@@ -1144,7 +1214,7 @@ const inferAbs = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Abs): I
   newEnv.set(expr.param, scheme([], paramType));
 
   // Infer body type with parameter in scope
-  const [subst, bodyType, constraints] = inferExpr(newEnv, registry, expr.body);
+  const [subst, bodyType, constraints] = inferExpr(ctx, newEnv, registry, expr.body);
 
   // Function type: apply substitutions to parameter type
   return [subst, tfun(applySubst(subst, paramType), bodyType), constraints];
@@ -1160,18 +1230,23 @@ const inferAbs = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Abs): I
  * 4. Unify function type with (argType -> returnType)
  * 5. Apply resulting substitution to return type
  */
-const inferApp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.App): InferResult => {
+const inferApp = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.App,
+): InferResult => {
   // Infer function type
-  const [s1, funcType, c1] = inferExpr(env, registry, expr.func);
+  const [s1, funcType, c1] = inferExpr(ctx, env, registry, expr.func);
 
   // Infer argument type (with s1 applied to environment)
-  const [s2, paramType, c2] = inferExpr(applySubstEnv(s1, env), registry, expr.param);
+  const [s2, paramType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.param);
 
   // Fresh variable for result
   const returnType = freshTypeVar();
 
   // The function must have type: argType -> returnType
-  const s3 = unify(applySubst(s2, funcType), tfun(paramType, returnType));
+  const s3 = unify(ctx, applySubst(s2, funcType), tfun(paramType, returnType));
 
   const subst = composeSubst(composeSubst(s1, s2), s3);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
@@ -1194,15 +1269,20 @@ const inferApp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.App): I
  *
  * Both operands must have the same type (unified first).
  */
-const inferBinOp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.BinOp): InferResult => {
+const inferBinOp = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.BinOp,
+): InferResult => {
   // Infer left operand
-  const [s1, leftType, c1] = inferExpr(env, registry, expr.left);
+  const [s1, leftType, c1] = inferExpr(ctx, env, registry, expr.left);
 
   // Infer right operand
-  const [s2, rightType, c2] = inferExpr(applySubstEnv(s1, env), registry, expr.right);
+  const [s2, rightType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.right);
 
   // Operands must have the same type
-  const s3 = unify(applySubst(s2, leftType), rightType);
+  const s3 = unify(ctx, applySubst(s2, leftType), rightType);
   const operandType = applySubst(s3, rightType);
 
   const subst = composeSubst(composeSubst(s1, s2), s3);
@@ -1219,7 +1299,7 @@ const inferBinOp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.BinOp
     case "-":
     case "/":
     case "*": {
-      const s4 = unify(operandType, tNum);
+      const s4 = unify(ctx, operandType, tNum);
       return [composeSubst(subst, s4), tNum, constraints];
     }
 
@@ -1252,24 +1332,29 @@ const inferBinOp = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.BinOp
  * - Condition must be boolean
  * - Both branches must have the same type (the result type)
  */
-const inferIf = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.If): InferResult => {
+const inferIf = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.If,
+): InferResult => {
   // Infer condition type
-  const [s1, condType, c1] = inferExpr(env, registry, expr.cond);
+  const [s1, condType, c1] = inferExpr(ctx, env, registry, expr.cond);
 
   // Condition must be boolean
-  const s2 = unify(condType, tBool);
+  const s2 = unify(ctx, condType, tBool);
   let subst = composeSubst(s1, s2);
 
   // Infer then branch
-  const [s3, thenType, c2] = inferExpr(applySubstEnv(subst, env), registry, expr.then);
+  const [s3, thenType, c2] = inferExpr(ctx, applySubstEnv(subst, env), registry, expr.then);
   subst = composeSubst(subst, s3);
 
   // Infer else branch
-  const [s4, elseType, c3] = inferExpr(applySubstEnv(subst, env), registry, expr.else);
+  const [s4, elseType, c3] = inferExpr(ctx, applySubstEnv(subst, env), registry, expr.else);
   subst = composeSubst(subst, s4);
 
   // Both branches must have the same type
-  const s5 = unify(applySubst(s4, thenType), elseType);
+  const s5 = unify(ctx, applySubst(s4, thenType), elseType);
   const finalSubst = composeSubst(subst, s5);
 
   const constraints = applySubstConstraints(finalSubst, [...c1, ...c2, ...c3]);
@@ -1292,9 +1377,14 @@ const inferIf = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.If): Inf
  * The generalization step is what makes `let id = fn x => x in (id 1, id "hi")`
  * work - `id` gets type `∀a. a -> a` and each use instantiates it fresh.
  */
-const inferLet = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Let): InferResult => {
+const inferLet = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Let,
+): InferResult => {
   // Infer the value's type
-  const [s1, valueType, c1] = inferExpr(env, registry, expr.value);
+  const [s1, valueType, c1] = inferExpr(ctx, env, registry, expr.value);
 
   // Apply substitution to environment before generalizing
   const env1 = applySubstEnv(s1, env);
@@ -1307,7 +1397,7 @@ const inferLet = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Let): I
   env2.set(expr.name, generalizedScheme);
 
   // Infer body with new binding
-  const [s2, bodyType, c2] = inferExpr(env2, registry, expr.body);
+  const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
 
   const subst = composeSubst(s1, s2);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
@@ -1327,6 +1417,7 @@ const inferLet = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Let): I
  * handle mutual recursion and better polymorphism.
  */
 const inferLetRec = (
+  ctx: InferContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.LetRec,
@@ -1337,7 +1428,7 @@ const inferLetRec = (
 
   // Now infer as a regular let
   const newExpr = ast.let_(expr.name, expr.value, expr.body);
-  return inferLet(newEnv, registry, newExpr);
+  return inferLet(ctx, newEnv, registry, newExpr);
 };
 
 // =============================================================================
@@ -1350,10 +1441,11 @@ const inferLetRec = (
  * Look up the variable in the environment and instantiate its scheme.
  * Each use of a polymorphic variable gets fresh type variables.
  */
-const inferVar = (env: TypeEnv, expr: ast.Var): InferResult => {
+const inferVar = (ctx: InferContext, env: TypeEnv, expr: ast.Var): InferResult => {
   const s = env.get(expr.name);
   if (!s) {
-    throw new TypeError(`Unknown variable: ${expr.name}`);
+    addError(ctx, `Unknown variable: ${expr.name}`);
+    return [new Map(), freshTypeVar(), []];
   }
   // Instantiate with fresh variables
   return [new Map(), instantiate(s), []];
@@ -1369,14 +1461,20 @@ const inferVar = (env: TypeEnv, expr: ast.Var): InferResult => {
  * We infer each element's type and combine into a tuple type.
  * Single-element "tuples" are unwrapped to just their element type.
  */
-const inferTuple = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Tuple): InferResult => {
+const inferTuple = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Tuple,
+): InferResult => {
   if (expr.elements.length === 0) {
-    throw new Error("Tuples cannot be empty");
+    addError(ctx, "Tuples cannot be empty");
+    return [new Map(), ttuple([]), []];
   }
 
   // Single element - not really a tuple
   if (expr.elements.length === 1) {
-    return inferExpr(env, registry, expr.elements[0]!);
+    return inferExpr(ctx, env, registry, expr.elements[0]!);
   }
 
   let subst: Subst = new Map();
@@ -1385,7 +1483,7 @@ const inferTuple = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Tuple
 
   // Infer each element's type
   for (const elem of expr.elements) {
-    const [s, t, c] = inferExpr(applySubstEnv(subst, env), registry, elem);
+    const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), registry, elem);
     subst = composeSubst(subst, s);
     constraints = [...applySubstConstraints(subst, constraints), ...c];
     types.push(applySubst(subst, t));
@@ -1414,6 +1512,7 @@ const inferTuple = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Tuple
  * - PTuple: builds/matches tuple type with elements
  */
 const inferPattern = (
+  ctx: InferContext,
   env: TypeEnv,
   pattern: ast.Pattern,
   expectedType: Type,
@@ -1434,7 +1533,7 @@ const inferPattern = (
       // Literal: expected type must match the literal's type
       const litType =
         typeof pattern.value === "number" ? tNum : typeof pattern.value === "string" ? tStr : tBool;
-      const s = unify(applySubst(subst, expectedType), litType);
+      const s = unify(ctx, applySubst(subst, expectedType), litType);
       return [composeSubst(subst, s), new Map()];
     }
 
@@ -1442,7 +1541,8 @@ const inferPattern = (
       // Constructor pattern: look up constructor type and match
       const conScheme = env.get(pattern.name);
       if (!conScheme) {
-        throw new TypeError(`Unknown constructor: ${pattern.name}`);
+        addError(ctx, `Unknown constructor: ${pattern.name}`);
+        return [subst, new Map()];
       }
 
       // Instantiate constructor type
@@ -1459,20 +1559,22 @@ const inferPattern = (
 
       // Verify arity
       if (argTypes.length !== pattern.args.length) {
-        throw new TypeError(
+        addError(
+          ctx,
           `Constructor ${pattern.name} expects ${argTypes.length} args, got ${pattern.args.length}`,
         );
+        return [subst, new Map()];
       }
 
       // Unify constructor's result type with expected type
-      const s1 = unify(applySubst(subst, resultType), applySubst(subst, expectedType));
+      const s1 = unify(ctx, applySubst(subst, resultType), applySubst(subst, expectedType));
       let currentSubst = composeSubst(subst, s1);
 
       // Recursively infer patterns for constructor arguments
       const allBindings: PatternBindings = new Map();
       for (let i = 0; i < pattern.args.length; i++) {
         const argType = applySubst(currentSubst, argTypes[i]!);
-        const [s, bindings] = inferPattern(env, pattern.args[i]!, argType, currentSubst);
+        const [s, bindings] = inferPattern(ctx, env, pattern.args[i]!, argType, currentSubst);
         currentSubst = s;
         for (const [name, type] of bindings) {
           allBindings.set(name, type);
@@ -1494,7 +1596,7 @@ const inferPattern = (
         for (const field of pattern.fields) {
           const fieldType = freshTypeVar();
           fieldTypes.set(field.name, fieldType);
-          const [s, bindings] = inferPattern(env, field.pattern, fieldType, currentSubst);
+          const [s, bindings] = inferPattern(ctx, env, field.pattern, fieldType, currentSubst);
           currentSubst = s;
           for (const [name, type] of bindings) {
             allBindings.set(name, type);
@@ -1504,14 +1606,13 @@ const inferPattern = (
         // Create open record (may have more fields)
         const rowVar = freshTypeVar();
         const recordType = trecord([...fieldTypes.entries()], rowVar);
-        const s = unify(applySubst(currentSubst, expectedType), recordType);
+        const s = unify(ctx, applySubst(currentSubst, expectedType), recordType);
         return [composeSubst(currentSubst, s), allBindings];
       }
 
       if (expectedResolved.kind !== "TRecord") {
-        throw new TypeError(
-          `Cannot match record pattern against ${typeToString(expectedResolved)}`,
-        );
+        addError(ctx, `Cannot match record pattern against ${typeToString(expectedResolved)}`);
+        return [subst, new Map()];
       }
 
       // Match against known record type
@@ -1526,6 +1627,7 @@ const inferPattern = (
           const newFieldType = freshTypeVar();
           const newRowVar = freshTypeVar();
           const s = unify(
+            ctx,
             applySubst(currentSubst, expectedResolved.row),
             trecord([[field.name, newFieldType]], newRowVar),
           );
@@ -1534,12 +1636,14 @@ const inferPattern = (
         }
 
         if (!fieldType) {
-          throw new TypeError(
+          addError(
+            ctx,
             `Record has no field '${field.name}'. Available: ${[...expectedResolved.fields.keys()].join(", ")}`,
           );
+          continue;
         }
 
-        const [s, bindings] = inferPattern(env, field.pattern, fieldType, currentSubst);
+        const [s, bindings] = inferPattern(ctx, env, field.pattern, fieldType, currentSubst);
         currentSubst = s;
         for (const [name, type] of bindings) {
           allBindings.set(name, type);
@@ -1561,7 +1665,7 @@ const inferPattern = (
         for (const elem of pattern.elements) {
           const elemType = freshTypeVar();
           elemTypes.push(elemType);
-          const [s, bindings] = inferPattern(env, elem, elemType, currentSubst);
+          const [s, bindings] = inferPattern(ctx, env, elem, elemType, currentSubst);
           currentSubst = s;
           for (const [name, type] of bindings) {
             allBindings.set(name, type);
@@ -1569,19 +1673,22 @@ const inferPattern = (
         }
 
         const tupleType = ttuple(elemTypes);
-        const s = unify(applySubst(currentSubst, expectedType), tupleType);
+        const s = unify(ctx, applySubst(currentSubst, expectedType), tupleType);
         return [composeSubst(currentSubst, s), allBindings];
       }
 
       if (expectedResolved.kind !== "TTuple") {
-        throw new TypeError(`Cannot match tuple pattern against ${typeToString(expectedResolved)}`);
+        addError(ctx, `Cannot match tuple pattern against ${typeToString(expectedResolved)}`);
+        return [subst, new Map()];
       }
 
       // Verify arity matches
       if (pattern.elements.length !== expectedResolved.elements.length) {
-        throw new TypeError(
+        addError(
+          ctx,
           `Tuple pattern has ${pattern.elements.length} elements, but expected ${expectedResolved.elements.length}`,
         );
+        return [subst, new Map()];
       }
 
       // Match element by element
@@ -1590,7 +1697,7 @@ const inferPattern = (
 
       for (let i = 0; i < pattern.elements.length; i++) {
         const elemType = expectedResolved.elements[i]!;
-        const [s, bindings] = inferPattern(env, pattern.elements[i]!, elemType, currentSubst);
+        const [s, bindings] = inferPattern(ctx, env, pattern.elements[i]!, elemType, currentSubst);
         currentSubst = s;
         for (const [name, type] of bindings) {
           allBindings.set(name, type);
@@ -1613,13 +1720,19 @@ const inferPattern = (
  *    c. Unify all body types
  * 3. Check exhaustiveness
  */
-const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match): InferResult => {
+const inferMatch = (
+  ctx: InferContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Match,
+): InferResult => {
   if (expr.cases.length === 0) {
-    throw new TypeError("Match expression must have at least one case");
+    addError(ctx, "Match expression must have at least one case");
+    return [new Map(), freshTypeVar(), []];
   }
 
   // Infer scrutinee type
-  const [s1, scrutineeType, c1] = inferExpr(env, registry, expr.expr);
+  const [s1, scrutineeType, c1] = inferExpr(ctx, env, registry, expr.expr);
   let subst = s1;
   let constraints: Constraint[] = [...c1];
   let resultType: Type | null = null;
@@ -1628,6 +1741,7 @@ const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match
   for (const case_ of expr.cases) {
     // Infer pattern bindings
     const [s2, bindings] = inferPattern(
+      ctx,
       applySubstEnv(subst, env),
       case_.pattern,
       applySubst(subst, scrutineeType),
@@ -1642,7 +1756,7 @@ const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match
     }
 
     // Infer body type
-    const [s3, bodyType, c2] = inferExpr(caseEnv, registry, case_.body);
+    const [s3, bodyType, c2] = inferExpr(ctx, caseEnv, registry, case_.body);
     subst = composeSubst(subst, s3);
     constraints = [...applySubstConstraints(subst, constraints), ...c2];
 
@@ -1650,7 +1764,7 @@ const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match
     if (resultType === null) {
       resultType = bodyType;
     } else {
-      const s4 = unify(applySubst(subst, resultType), applySubst(subst, bodyType));
+      const s4 = unify(ctx, applySubst(subst, resultType), applySubst(subst, bodyType));
       subst = composeSubst(subst, s4);
       resultType = applySubst(s4, bodyType);
     }
@@ -1661,7 +1775,7 @@ const inferMatch = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Match
   const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
 
   if (missing.length > 0) {
-    throw new TypeError(`Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+    addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
   }
 
   return [subst, applySubst(subst, resultType!), constraints];

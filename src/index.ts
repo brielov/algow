@@ -33,7 +33,10 @@ const env = mergeEnvs(baseEnv, listEnv, maybeEnv, eitherEnv);
 const registry = mergeRegistries(listReg, maybeReg, eitherReg);
 
 function printType(expr: ast.Expr): void {
-  const [, type] = infer(env, registry, expr);
+  const { type, diagnostics } = infer(env, registry, expr);
+  if (diagnostics.length > 0) {
+    console.log("Errors:", diagnostics.map((d) => d.message).join(", "));
+  }
   console.log(typeToString(type));
 }
 
