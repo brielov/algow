@@ -13,14 +13,7 @@
 
 import * as ast from "./ast";
 import type { Diagnostic } from "./diagnostics";
-import {
-  createLexer,
-  type LexerState,
-  nextToken,
-  slice,
-  type Token,
-  TokenKind,
-} from "./lexer";
+import { createLexer, type LexerState, nextToken, slice, type Token, TokenKind } from "./lexer";
 
 export type { Diagnostic, DiagnosticSeverity } from "./diagnostics";
 
@@ -168,9 +161,7 @@ export const parse = (source: string): ParseResult => {
 // LET BINDING OR EXPRESSION
 // =============================================================================
 
-type LetResult =
-  | { kind: "binding"; binding: TopLevelBinding }
-  | { kind: "expr"; expr: ast.Expr };
+type LetResult = { kind: "binding"; binding: TopLevelBinding } | { kind: "expr"; expr: ast.Expr };
 
 const parseLetBindingOrExpr = (state: ParserState): LetResult => {
   advance(state); // 'let'

@@ -1015,11 +1015,7 @@ export type InferOutput = {
  * @param expr The expression to type-check
  * @returns The inferred type information with diagnostics
  */
-export const infer = (
-  env: TypeEnv,
-  registry: ConstructorRegistry,
-  expr: ast.Expr,
-): InferOutput => {
+export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr): InferOutput => {
   typeVarCounter = 0;
   const ctx = createContext();
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);

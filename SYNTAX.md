@@ -83,6 +83,7 @@ type_var     = LOWER
 ```
 
 Examples:
+
 ```
 data Bool = True | False
 data Maybe a = Nothing | Just a
@@ -106,6 +107,7 @@ field_pat    = LOWER "=" pattern
 ```
 
 Examples:
+
 ```
 let x = 42
 let add x y = x + y
@@ -187,15 +189,15 @@ All expression types are inferred by Algorithm W.
 
 ## Operator Precedence (low to high)
 
-| Precedence | Operators          | Associativity |
-|------------|-------------------|---------------|
-| 1          | `|>` (pipe)       | left          |
-| 2          | `==` `!=`         | left          |
-| 3          | `<` `<=` `>` `>=` | left          |
-| 4          | `+` `-`           | left          |
-| 5          | `*` `/`           | left          |
-| 6          | function application | left       |
-| 7          | `.` (field access) | left         |
+| Precedence | Operators            | Associativity |
+| ---------- | -------------------- | ------------- | ---- |
+| 1          | `                    | >` (pipe)     | left |
+| 2          | `==` `!=`            | left          |
+| 3          | `<` `<=` `>` `>=`    | left          |
+| 4          | `+` `-`              | left          |
+| 5          | `*` `/`              | left          |
+| 6          | function application | left          |
+| 7          | `.` (field access)   | left          |
 
 ---
 
