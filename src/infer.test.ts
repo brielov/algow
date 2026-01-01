@@ -1088,7 +1088,6 @@ describe("Type Inference", () => {
     });
   });
 
-
   describe("environment utilities", () => {
     it("merges multiple environments", () => {
       const [maybeEnv] = createMaybeEnv();

@@ -37,7 +37,10 @@ printType(
 );
 
 // Test records
-printType("{ x: 1, y: 'hello' }", ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.str("hello"))]));
+printType(
+  "{ x: 1, y: 'hello' }",
+  ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.str("hello"))]),
+);
 printType("record.x", ast.fieldAccess(ast.record([ast.field("x", ast.num(42))]), "x"));
 
 // Test row polymorphism
