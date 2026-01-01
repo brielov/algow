@@ -82,8 +82,10 @@ describe("Type Inference", () => {
     });
 
     it("instantiates polymorphic types with fresh variables", () => {
-      const { type: type1 } = infer(baseEnv, new Map(), ast.var_("map"));
-      const { type: type2 } = infer(baseEnv, new Map(), ast.var_("map"));
+      const [maybeEnv] = createMaybeEnv();
+      // Just : a -> Maybe a is polymorphic
+      const { type: type1 } = infer(maybeEnv, new Map(), ast.var_("Just"));
+      const { type: type2 } = infer(maybeEnv, new Map(), ast.var_("Just"));
       // Both should have function types, but potentially different variable names
       expect(typeToString(type1)).toContain("->");
       expect(typeToString(type2)).toContain("->");
@@ -1086,45 +1088,17 @@ describe("Type Inference", () => {
     });
   });
 
-  describe("built-in functions", () => {
-    it("infers map type", () => {
-      const { type, diagnostics } = infer(baseEnv, new Map(), ast.var_("map"));
-      expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toContain("->");
-      expect(typeToString(type)).toContain("List");
-    });
-
-    it("infers filter type", () => {
-      const { type, diagnostics } = infer(baseEnv, new Map(), ast.var_("filter"));
-      expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toContain("->");
-      expect(typeToString(type)).toContain("List");
-    });
-
-    it("infers head type", () => {
-      const { type, diagnostics } = infer(baseEnv, new Map(), ast.var_("head"));
-      expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toContain("List");
-      expect(typeToString(type)).toContain("Maybe");
-    });
-
-    it("infers length type", () => {
-      const { type, diagnostics } = infer(baseEnv, new Map(), ast.var_("length"));
-      expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toContain("List");
-      expect(typeToString(type)).toContain("number");
-    });
-  });
 
   describe("environment utilities", () => {
     it("merges multiple environments", () => {
       const [maybeEnv] = createMaybeEnv();
       const [listEnv] = createListEnv();
-      const merged = mergeEnvs(baseEnv, maybeEnv, listEnv);
+      const merged = mergeEnvs(maybeEnv, listEnv);
 
-      expect(merged.has("map")).toBe(true);
       expect(merged.has("Just")).toBe(true);
+      expect(merged.has("Nothing")).toBe(true);
       expect(merged.has("Cons")).toBe(true);
+      expect(merged.has("Nil")).toBe(true);
     });
 
     it("merges multiple registries", () => {

@@ -89,7 +89,7 @@ const addError = (ctx: InferContext, message: string): void => {
  *
  * Types form a tree structure that we manipulate during inference.
  */
-type Type =
+export type Type =
   | TVar // Type variable: an unknown type to be determined
   | TCon // Type constructor: a concrete type like `number` or `List`
   | TFun // Function type: param -> return
@@ -106,7 +106,7 @@ type Type =
  *
  * Type variables are named `t0`, `t1`, etc. for readability in output.
  */
-type TVar = {
+export type TVar = {
   readonly kind: "TVar";
   readonly name: string;
 };
@@ -120,7 +120,7 @@ type TVar = {
  * - Base types (number, string, boolean) - used directly
  * - Parameterized types (List, Maybe) - need type application
  */
-type TCon = {
+export type TCon = {
   readonly kind: "TCon";
   readonly name: string;
 };
@@ -133,7 +133,7 @@ type TCon = {
  *
  * Function types are right-associative: `a -> b -> c` means `a -> (b -> c)`.
  */
-type TFun = {
+export type TFun = {
   readonly kind: "TFun";
   readonly param: Type;
   readonly ret: Type;
@@ -147,7 +147,7 @@ type TFun = {
  * For multiple parameters, we use nested application (left-associative):
  * `Either string number` is `TApp(TApp(TCon("Either"), TCon("string")), TCon("number"))`
  */
-type TApp = {
+export type TApp = {
   readonly kind: "TApp";
   readonly con: Type;
   readonly arg: Type;
@@ -168,7 +168,7 @@ type TApp = {
  * - TVar: open record, may have additional unknown fields
  * - TRecord: extended record (after unification)
  */
-type TRecord = {
+export type TRecord = {
   readonly kind: "TRecord";
   readonly fields: ReadonlyMap<string, Type>;
   readonly row: Type | null;
@@ -183,7 +183,7 @@ type TRecord = {
  * - Fixed arity (length) known at compile time
  * - Potentially different types for each position
  */
-type TTuple = {
+export type TTuple = {
   readonly kind: "TTuple";
   readonly elements: readonly Type[];
 };
@@ -230,18 +230,6 @@ const tStr = tcon("string");
 
 /** The boolean type */
 const tBool = tcon("boolean");
-
-/** The List type constructor (needs type argument) */
-const tList = tcon("List");
-
-/** The Maybe type constructor (needs type argument) */
-const tMaybe = tcon("Maybe");
-
-/** Create a List type with element type */
-const tListOf = (elem: Type): Type => tapp(tList, elem);
-
-/** Create a Maybe type with element type */
-const tMaybeOf = (elem: Type): Type => tapp(tMaybe, elem);
 
 // =============================================================================
 // TYPE CLASSES (for operator overloading)
@@ -300,7 +288,7 @@ const instances: Map<string, Set<string>> = new Map([
  * The vars list tells us which variables in `type` are universally quantified
  * (and should get fresh names on instantiation) vs free (referring to outer scope).
  */
-type Scheme = {
+export type Scheme = {
   readonly vars: readonly string[]; // Universally quantified variables
   readonly constraints: readonly Constraint[]; // Type class constraints
   readonly type: Type; // The type (may contain the quantified vars)
@@ -312,7 +300,7 @@ type Scheme = {
  * @param type The type
  * @param constraints Optional type class constraints
  */
-const scheme = (
+export const scheme = (
   vars: readonly string[],
   type: Type,
   constraints: readonly Constraint[] = [],
@@ -338,7 +326,7 @@ const scheme = (
  * Values bound by `let` get polymorphic schemes (can be used at multiple types).
  * Function parameters get monomorphic schemes (single type within the function).
  */
-type TypeEnv = Map<string, Scheme>;
+export type TypeEnv = Map<string, Scheme>;
 
 /**
  * Substitution - maps type variable names to their resolved types.
@@ -805,7 +793,7 @@ const instantiate = (s: Scheme): Type => {
  * @param type The type to generalize
  * @returns A polymorphic type scheme
  */
-const generalize = (env: TypeEnv, type: Type): Scheme => {
+export const generalize = (env: TypeEnv, type: Type): Scheme => {
   const typeVars = freeTypeVars(type);
   const envVars = freeEnvVars(env);
   // Quantify over variables free in the type but not in the environment
@@ -1955,67 +1943,11 @@ export const mergeRegistries = (
 };
 
 // =============================================================================
-// BASE ENVIRONMENT (Built-in functions)
+// BASE ENVIRONMENT
 // =============================================================================
 
 /**
- * Built-in functions available in all programs.
- *
- * These provide common list operations with their polymorphic types.
- * In a real language, these would be implemented in the standard library.
+ * Empty base environment.
+ * Use the prelude for standard library functions.
  */
-export const baseEnv: TypeEnv = new Map([
-  // map : ∀a b. (a -> b) -> List a -> List b
-  // Transforms each element of a list
-  [
-    "map",
-    scheme(
-      ["a", "b"],
-      tfun(tfun(tvar("a"), tvar("b")), tfun(tListOf(tvar("a")), tListOf(tvar("b")))),
-    ),
-  ],
-
-  // head : ∀a. List a -> Maybe a
-  // Returns the first element, if any
-  ["head", scheme(["a"], tfun(tListOf(tvar("a")), tMaybeOf(tvar("a"))))],
-
-  // tail : ∀a. List a -> Maybe (List a)
-  // Returns everything except the first element
-  ["tail", scheme(["a"], tfun(tListOf(tvar("a")), tMaybeOf(tListOf(tvar("a")))))],
-
-  // isEmpty : ∀a. List a -> boolean
-  // Tests if a list has no elements
-  ["isEmpty", scheme(["a"], tfun(tListOf(tvar("a")), tBool))],
-
-  // length : ∀a. List a -> number
-  // Returns the number of elements
-  ["length", scheme(["a"], tfun(tListOf(tvar("a")), tNum))],
-
-  // concat : ∀a. List a -> List a -> List a
-  // Concatenates two lists
-  ["concat", scheme(["a"], tfun(tListOf(tvar("a")), tfun(tListOf(tvar("a")), tListOf(tvar("a")))))],
-
-  // reverse : ∀a. List a -> List a
-  // Reverses a list
-  ["reverse", scheme(["a"], tfun(tListOf(tvar("a")), tListOf(tvar("a"))))],
-
-  // filter : ∀a. (a -> boolean) -> List a -> List a
-  // Keeps elements satisfying a predicate
-  [
-    "filter",
-    scheme(["a"], tfun(tfun(tvar("a"), tBool), tfun(tListOf(tvar("a")), tListOf(tvar("a"))))),
-  ],
-
-  // foldr : ∀a b. (a -> b -> b) -> b -> List a -> b
-  // Right fold over a list
-  [
-    "foldr",
-    scheme(
-      ["a", "b"],
-      tfun(
-        tfun(tvar("a"), tfun(tvar("b"), tvar("b"))),
-        tfun(tvar("b"), tfun(tListOf(tvar("a")), tvar("b"))),
-      ),
-    ),
-  ],
-]);
+export const baseEnv: TypeEnv = new Map();
