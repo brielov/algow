@@ -81,7 +81,9 @@ describe("Interpreter", () => {
     });
 
     it("throws on division by zero", () => {
-      expect(() => evaluate(emptyEnv, ast.binOp("/", ast.num(1), ast.num(0)))).toThrow(RuntimeError);
+      expect(() => evaluate(emptyEnv, ast.binOp("/", ast.num(1), ast.num(0)))).toThrow(
+        RuntimeError,
+      );
     });
 
     it("concatenates strings with +", () => {
@@ -146,7 +148,11 @@ describe("Interpreter", () => {
     });
 
     it("captures environment in closures", () => {
-      const expr = ast.let_("x", ast.num(10), ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y"))));
+      const expr = ast.let_(
+        "x",
+        ast.num(10),
+        ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y"))),
+      );
       const result = evaluate(emptyEnv, ast.app(expr, ast.num(5)));
       expect(result).toEqual(vnum(15));
     });
@@ -207,14 +213,14 @@ describe("Interpreter", () => {
 
   describe("tuples", () => {
     it("evaluates tuple elements", () => {
-      const expr = ast.tuple(ast.num(1), ast.str("hello"), ast.bool(true));
+      const expr = ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]);
       const result = evaluate(emptyEnv, expr);
       expect(result.kind).toBe("VTuple");
-      expect(valueToString(result)).toBe("(1, \"hello\", true)");
+      expect(valueToString(result)).toBe('(1, "hello", true)');
     });
 
     it("unwraps single-element tuples", () => {
-      const result = evaluate(emptyEnv, ast.tuple(ast.num(42)));
+      const result = evaluate(emptyEnv, ast.tuple([ast.num(42)]));
       expect(result).toEqual(vnum(42));
     });
   });
@@ -255,7 +261,7 @@ describe("Interpreter", () => {
 
   describe("pattern matching", () => {
     it("matches wildcard", () => {
-      const expr = ast.match(ast.num(42), [ast.case_(ast.pwildcard, ast.str("matched"))]);
+      const expr = ast.match(ast.num(42), [ast.case_(ast.pwildcard(), ast.str("matched"))]);
       expect(evaluate(emptyEnv, expr)).toEqual(vstr("matched"));
     });
 
@@ -268,7 +274,7 @@ describe("Interpreter", () => {
       const expr = ast.match(ast.num(1), [
         ast.case_(ast.plit(1), ast.str("one")),
         ast.case_(ast.plit(2), ast.str("two")),
-        ast.case_(ast.pwildcard, ast.str("other")),
+        ast.case_(ast.pwildcard(), ast.str("other")),
       ]);
       expect(evaluate(emptyEnv, expr)).toEqual(vstr("one"));
     });
@@ -276,22 +282,22 @@ describe("Interpreter", () => {
     it("matches constructor", () => {
       const just42 = ast.app(ast.var_("Just"), ast.num(42));
       const expr = ast.match(just42, [
-        ast.case_(ast.pcon("Just", ast.pvar("x")), ast.binOp("*", ast.var_("x"), ast.num(2))),
-        ast.case_(ast.pcon("Nothing"), ast.num(0)),
+        ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.binOp("*", ast.var_("x"), ast.num(2))),
+        ast.case_(ast.pcon("Nothing", []), ast.num(0)),
       ]);
       expect(evaluate(baseEnv, expr)).toEqual(vnum(84));
     });
 
     it("matches Nothing", () => {
       const expr = ast.match(ast.var_("Nothing"), [
-        ast.case_(ast.pcon("Just", ast.pvar("x")), ast.var_("x")),
-        ast.case_(ast.pcon("Nothing"), ast.num(0)),
+        ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
+        ast.case_(ast.pcon("Nothing", []), ast.num(0)),
       ]);
       expect(evaluate(baseEnv, expr)).toEqual(vnum(0));
     });
 
     it("matches tuple pattern", () => {
-      const tuple = ast.tuple(ast.num(1), ast.str("hello"));
+      const tuple = ast.tuple([ast.num(1), ast.str("hello")]);
       const expr = ast.match(tuple, [
         ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), ast.var_("a")),
       ]);
@@ -305,7 +311,6 @@ describe("Interpreter", () => {
       ]);
       expect(evaluate(emptyEnv, expr)).toEqual(vnum(10));
     });
-
   });
 
   describe("prelude functions", () => {
@@ -364,7 +369,9 @@ describe("Interpreter", () => {
     it("map transforms elements", () => {
       const double = ast.abs("x", ast.binOp("*", ast.var_("x"), ast.num(2)));
       const result = evaluate(env, ast.app(ast.app(ast.var_("map"), double), myList));
-      expect(result).toEqual(vcon("Cons", [vnum(2), vcon("Cons", [vnum(4), vcon("Cons", [vnum(6), vcon("Nil")])])]));
+      expect(result).toEqual(
+        vcon("Cons", [vnum(2), vcon("Cons", [vnum(4), vcon("Cons", [vnum(6), vcon("Nil")])])]),
+      );
     });
 
     it("filter keeps matching elements", () => {
@@ -375,13 +382,18 @@ describe("Interpreter", () => {
 
     it("foldr accumulates from right", () => {
       const add = ast.abs("a", ast.abs("b", ast.binOp("+", ast.var_("a"), ast.var_("b"))));
-      const result = evaluate(env, ast.app(ast.app(ast.app(ast.var_("foldr"), add), ast.num(0)), myList));
+      const result = evaluate(
+        env,
+        ast.app(ast.app(ast.app(ast.var_("foldr"), add), ast.num(0)), myList),
+      );
       expect(result).toEqual(vnum(6));
     });
 
     it("reverse reverses the list", () => {
       const result = evaluate(env, ast.app(ast.var_("reverse"), myList));
-      expect(result).toEqual(vcon("Cons", [vnum(3), vcon("Cons", [vnum(2), vcon("Cons", [vnum(1), vcon("Nil")])])]));
+      expect(result).toEqual(
+        vcon("Cons", [vnum(3), vcon("Cons", [vnum(2), vcon("Cons", [vnum(1), vcon("Nil")])])]),
+      );
     });
   });
 
@@ -391,7 +403,7 @@ describe("Interpreter", () => {
     });
 
     it("formats strings with quotes", () => {
-      expect(valueToString(vstr("hello"))).toBe("\"hello\"");
+      expect(valueToString(vstr("hello"))).toBe('"hello"');
     });
 
     it("formats booleans", () => {

@@ -20,7 +20,29 @@
  * - All types use a discriminated union pattern with a `kind` field for type-safe matching
  * - All fields are readonly to enforce immutability
  * - Helper functions are provided to construct AST nodes concisely
+ * - Spans are optional to support programmatic AST construction (e.g., prelude)
  */
+
+// =============================================================================
+// SOURCE LOCATIONS
+// =============================================================================
+
+/**
+ * A span represents a range in the source code.
+ * Uses byte offsets for efficient lookup.
+ */
+export interface Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Base interface for all AST nodes.
+ * Span is optional to support programmatic AST construction (e.g., prelude).
+ */
+export interface Node {
+  readonly span?: Span;
+}
 
 // =============================================================================
 // EXPRESSIONS
@@ -61,28 +83,28 @@ export type Con = Num | Bool | Str;
  * Numeric literal.
  * Example: 42, 3.14
  */
-export type Num = {
+export interface Num extends Node {
   readonly kind: "Num";
   readonly value: number;
-};
+}
 
 /**
  * Boolean literal.
  * Example: true, false
  */
-export type Bool = {
+export interface Bool extends Node {
   readonly kind: "Bool";
   readonly value: boolean;
-};
+}
 
 /**
  * String literal.
  * Example: "hello world"
  */
-export type Str = {
+export interface Str extends Node {
   readonly kind: "Str";
   readonly value: string;
-};
+}
 
 // -----------------------------------------------------------------------------
 // Bindings
@@ -100,12 +122,12 @@ export type Str = {
  * is valid because `id` has type `∀a. a -> a` and can be instantiated
  * at different types in the body.
  */
-export type Let = {
+export interface Let extends Node {
   readonly kind: "Let";
   readonly name: string;
   readonly value: Expr;
   readonly body: Expr;
-};
+}
 
 /**
  * Recursive let binding - allows the bound value to reference itself.
@@ -117,12 +139,12 @@ export type Let = {
  * enabling recursive function definitions. The implementation adds a
  * placeholder type variable for the binding before inferring the value.
  */
-export type LetRec = {
+export interface LetRec extends Node {
   readonly kind: "LetRec";
   readonly name: string;
   readonly value: Expr;
   readonly body: Expr;
-};
+}
 
 // -----------------------------------------------------------------------------
 // Variables and Functions
@@ -139,10 +161,10 @@ export type LetRec = {
  * - Constructor names (like Cons, Just, Nothing)
  * - Built-in functions (like map, filter)
  */
-export type Var = {
+export interface Var extends Node {
   readonly kind: "Var";
   readonly name: string;
-};
+}
 
 /**
  * Lambda abstraction - an anonymous function.
@@ -156,11 +178,11 @@ export type Var = {
  *
  * Example of currying: fn x => fn y => x + y
  */
-export type Abs = {
+export interface Abs extends Node {
   readonly kind: "Abs";
   readonly param: string;
   readonly body: Expr;
-};
+}
 
 /**
  * Function application - applies a function to an argument.
@@ -174,11 +196,11 @@ export type Abs = {
  * This works with curried functions: if `add : number -> number -> number`,
  * then `add 1` has type `number -> number`.
  */
-export type App = {
+export interface App extends Node {
   readonly kind: "App";
   readonly func: Expr;
   readonly param: Expr;
-};
+}
 
 // -----------------------------------------------------------------------------
 // Compound Data Types
@@ -195,10 +217,10 @@ export type App = {
  * - Can contain elements of different types
  * - Have positional access rather than head/tail
  */
-export type Tuple = {
+export interface Tuple extends Node {
   readonly kind: "Tuple";
   readonly elements: readonly Expr[];
-};
+}
 
 /**
  * Record expression - a collection of named fields.
@@ -209,18 +231,18 @@ export type Tuple = {
  * Records provide structural typing: two records with the same field names
  * and types are considered compatible, regardless of field order.
  */
-export type Record = {
+export interface Record extends Node {
   readonly kind: "Record";
   readonly fields: readonly RecordField[];
-};
+}
 
 /**
  * A single field in a record expression.
  */
-export type RecordField = {
+export interface RecordField extends Node {
   readonly name: string;
   readonly value: Expr;
-};
+}
 
 /**
  * Field access expression - extracts a field from a record.
@@ -232,11 +254,11 @@ export type RecordField = {
  * record that has an `x` field, regardless of other fields. This gives
  * the type `{ x: t | ρ } -> t` where ρ represents the unknown remaining fields.
  */
-export type FieldAccess = {
+export interface FieldAccess extends Node {
   readonly kind: "FieldAccess";
   readonly record: Expr;
   readonly field: string;
-};
+}
 
 // -----------------------------------------------------------------------------
 // Control Flow
@@ -251,12 +273,12 @@ export type FieldAccess = {
  * Both branches must have the same type, and the condition must be boolean.
  * This is an expression (returns a value), not a statement.
  */
-export type If = {
+export interface If extends Node {
   readonly kind: "If";
   readonly cond: Expr;
   readonly then: Expr;
   readonly else: Expr;
-};
+}
 
 /**
  * Binary operator expression.
@@ -270,12 +292,12 @@ export type If = {
  * - Comparison (<, >, <=, >=): requires Ord class
  * - Equality (==, !=): requires Eq class
  */
-export type BinOp = {
+export interface BinOp extends Node {
   readonly kind: "BinOp";
   readonly op: Op;
   readonly left: Expr;
   readonly right: Expr;
-};
+}
 
 /**
  * Supported binary operators.
@@ -307,10 +329,10 @@ export type Pattern = PVar | PWildcard | PCon | PLit | PRecord | PTuple;
  * Variable patterns always match and make the whole match exhaustive
  * when used as the only or last pattern.
  */
-export type PVar = {
+export interface PVar extends Node {
   readonly kind: "PVar";
   readonly name: string;
-};
+}
 
 /**
  * Wildcard pattern - matches anything but doesn't bind a name.
@@ -321,9 +343,9 @@ export type PVar = {
  * Use wildcards when you need to match a position but don't care about the value.
  * Like variable patterns, wildcards always match.
  */
-export type PWildcard = {
+export interface PWildcard extends Node {
   readonly kind: "PWildcard";
-};
+}
 
 /**
  * Constructor pattern - matches and destructures algebraic data types.
@@ -337,11 +359,11 @@ export type PWildcard = {
  * Constructor patterns can be nested: `Cons x (Cons y Nil)` matches
  * a list with exactly two elements.
  */
-export type PCon = {
+export interface PCon extends Node {
   readonly kind: "PCon";
   readonly name: string;
   readonly args: readonly Pattern[];
-};
+}
 
 /**
  * Literal pattern - matches a specific constant value.
@@ -351,18 +373,18 @@ export type PCon = {
  * Literal patterns match by equality. They don't make a match exhaustive
  * by themselves (there are always other values of the same type).
  */
-export type PLit = {
+export interface PLit extends Node {
   readonly kind: "PLit";
   readonly value: number | string | boolean;
-};
+}
 
 /**
  * A single field in a record pattern.
  */
-export type PRecordField = {
+export interface PRecordField extends Node {
   readonly name: string;
   readonly pattern: Pattern;
-};
+}
 
 /**
  * Record pattern - destructures a record by matching specific fields.
@@ -373,10 +395,10 @@ export type PRecordField = {
  * Record patterns are non-exhaustive (they only match specific fields)
  * and support row polymorphism (the record can have additional fields).
  */
-export type PRecord = {
+export interface PRecord extends Node {
   readonly kind: "PRecord";
   readonly fields: readonly PRecordField[];
-};
+}
 
 /**
  * Tuple pattern - destructures a tuple by position.
@@ -386,18 +408,18 @@ export type PRecord = {
  *
  * The pattern must have the same arity as the tuple being matched.
  */
-export type PTuple = {
+export interface PTuple extends Node {
   readonly kind: "PTuple";
   readonly elements: readonly Pattern[];
-};
+}
 
 /**
  * A single case in a match expression - pairs a pattern with an expression.
  */
-export type Case = {
+export interface Case extends Node {
   readonly pattern: Pattern;
   readonly body: Expr;
-};
+}
 
 /**
  * Match expression - pattern matching on a value.
@@ -415,11 +437,11 @@ export type Case = {
  * 4. Unifies all body types to determine the result type
  * 5. Verifies exhaustiveness for algebraic data types
  */
-export type Match = {
+export interface Match extends Node {
   readonly kind: "Match";
   readonly expr: Expr;
   readonly cases: readonly Case[];
-};
+}
 
 // =============================================================================
 // TYPE EXPRESSIONS (for data declarations)
@@ -442,10 +464,10 @@ export type TypeExpr = TyVar | TyCon | TyApp | TyFun;
  * Type variables enable parametric polymorphism: the same data structure
  * can work with any type.
  */
-export type TyVar = {
+export interface TyVar extends Node {
   readonly kind: "TyVar";
   readonly name: string;
-};
+}
 
 /**
  * Type constructor - a named type.
@@ -456,10 +478,10 @@ export type TyVar = {
  * - Primitive types (number, string, boolean)
  * - User-defined types (List, Maybe, Either)
  */
-export type TyCon = {
+export interface TyCon extends Node {
   readonly kind: "TyCon";
   readonly name: string;
-};
+}
 
 /**
  * Type application - applying a parameterized type to an argument.
@@ -470,11 +492,11 @@ export type TyCon = {
  * Multiple parameters use nested application: `Either a b` is
  * TyApp(TyApp(TyCon("Either"), TyVar("a")), TyVar("b")).
  */
-export type TyApp = {
+export interface TyApp extends Node {
   readonly kind: "TyApp";
   readonly con: TypeExpr;
   readonly arg: TypeExpr;
-};
+}
 
 /**
  * Function type - the type of functions.
@@ -484,11 +506,11 @@ export type TyApp = {
  * Function types are right-associative: `a -> b -> c` means `a -> (b -> c)`,
  * which represents a curried function taking a, then b, returning c.
  */
-export type TyFun = {
+export interface TyFun extends Node {
   readonly kind: "TyFun";
   readonly param: TypeExpr;
   readonly ret: TypeExpr;
-};
+}
 
 // =============================================================================
 // DATA DECLARATIONS (Algebraic Data Types)
@@ -501,10 +523,10 @@ export type TyFun = {
  * - `Nothing` is ConDecl("Nothing", [])
  * - `Just` is ConDecl("Just", [TyVar("a")])
  */
-export type ConDecl = {
+export interface ConDecl extends Node {
   readonly name: string;
   readonly fields: readonly TypeExpr[];
-};
+}
 
 /**
  * Data declaration - defines an algebraic data type (ADT).
@@ -525,12 +547,12 @@ export type ConDecl = {
  * - Add constructor functions to the type environment
  * - Register constructors for exhaustiveness checking
  */
-export type DataDecl = {
+export interface DataDecl extends Node {
   readonly kind: "DataDecl";
   readonly name: string;
   readonly typeParams: readonly string[];
   readonly constructors: readonly ConDecl[];
-};
+}
 
 // =============================================================================
 // HELPER FUNCTIONS (Smart Constructors)
@@ -547,153 +569,174 @@ export type DataDecl = {
 
 // --- Constants ---
 
-export const num = (value: number): Num => ({ kind: "Num", value });
-export const bool = (value: boolean): Bool => ({ kind: "Bool", value });
-export const str = (value: string): Str => ({ kind: "Str", value });
+export const num = (value: number, span?: Span): Num => ({ kind: "Num", value, span });
+export const bool = (value: boolean, span?: Span): Bool => ({ kind: "Bool", value, span });
+export const str = (value: string, span?: Span): Str => ({ kind: "Str", value, span });
 
 // --- Control Flow ---
 
-export const if_ = (cond: Expr, then: Expr, else_: Expr): If => ({
+export const if_ = (cond: Expr, then: Expr, else_: Expr, span?: Span): If => ({
   kind: "If",
   cond,
   then,
   else: else_,
+  span,
 });
 
 // --- Bindings ---
 
-export const let_ = (name: string, value: Expr, body: Expr): Let => ({
+export const let_ = (name: string, value: Expr, body: Expr, span?: Span): Let => ({
   kind: "Let",
   name,
   value,
   body,
+  span,
 });
 
-export const letRec = (name: string, value: Expr, body: Expr): LetRec => ({
+export const letRec = (name: string, value: Expr, body: Expr, span?: Span): LetRec => ({
   kind: "LetRec",
   name,
   value,
   body,
+  span,
 });
 
 // --- Variables and Functions ---
 
-export const var_ = (name: string): Var => ({ kind: "Var", name });
+export const var_ = (name: string, span?: Span): Var => ({ kind: "Var", name, span });
 
-export const abs = (param: string, body: Expr): Abs => ({
+export const abs = (param: string, body: Expr, span?: Span): Abs => ({
   kind: "Abs",
   param,
   body,
+  span,
 });
 
-export const app = (func: Expr, param: Expr): App => ({
+export const app = (func: Expr, param: Expr, span?: Span): App => ({
   kind: "App",
   func,
   param,
+  span,
 });
 
 // --- Compound Data ---
 
-export const tuple = (...elements: readonly Expr[]): Tuple => ({
+export const tuple = (elements: readonly Expr[], span?: Span): Tuple => ({
   kind: "Tuple",
   elements,
+  span,
 });
 
-export const record = (fields: readonly RecordField[]): Record => ({
+export const record = (fields: readonly RecordField[], span?: Span): Record => ({
   kind: "Record",
   fields,
+  span,
 });
 
-export const field = (name: string, value: Expr): RecordField => ({
+export const field = (name: string, value: Expr, span?: Span): RecordField => ({
   name,
   value,
+  span,
 });
 
-export const fieldAccess = (record: Expr, field: string): FieldAccess => ({
+export const fieldAccess = (record: Expr, field: string, span?: Span): FieldAccess => ({
   kind: "FieldAccess",
   record,
   field,
+  span,
 });
 
 // --- Operators ---
 
-export const binOp = (op: Op, left: Expr, right: Expr): BinOp => ({
+export const binOp = (op: Op, left: Expr, right: Expr, span?: Span): BinOp => ({
   kind: "BinOp",
   op,
   left,
   right,
+  span,
 });
 
 // --- Patterns ---
 
-export const pwildcard: PWildcard = { kind: "PWildcard" };
+export const pwildcard = (span?: Span): PWildcard => ({ kind: "PWildcard", span });
 
-export const pvar = (name: string): PVar => ({ kind: "PVar", name });
+export const pvar = (name: string, span?: Span): PVar => ({ kind: "PVar", name, span });
 
-export const pcon = (name: string, ...args: readonly Pattern[]): PCon => ({
+export const pcon = (name: string, args: readonly Pattern[], span?: Span): PCon => ({
   kind: "PCon",
   name,
   args,
+  span,
 });
 
-export const plit = (value: string | number | boolean): PLit => ({
+export const plit = (value: string | number | boolean, span?: Span): PLit => ({
   kind: "PLit",
   value,
+  span,
 });
 
-export const precord = (fields: readonly PRecordField[]): PRecord => ({
+export const precord = (fields: readonly PRecordField[], span?: Span): PRecord => ({
   kind: "PRecord",
   fields,
+  span,
 });
 
-export const pfield = (name: string, pattern: Pattern): PRecordField => ({
+export const pfield = (name: string, pattern: Pattern, span?: Span): PRecordField => ({
   name,
   pattern,
+  span,
 });
 
-export const ptuple = (elements: readonly Pattern[]): PTuple => ({
+export const ptuple = (elements: readonly Pattern[], span?: Span): PTuple => ({
   kind: "PTuple",
   elements,
+  span,
 });
 
-export const case_ = (pattern: Pattern, body: Expr): Case => ({
+export const case_ = (pattern: Pattern, body: Expr, span?: Span): Case => ({
   pattern,
   body,
+  span,
 });
 
-export const match = (expr: Expr, cases: readonly Case[]): Match => ({
+export const match = (expr: Expr, cases: readonly Case[], span?: Span): Match => ({
   kind: "Match",
   expr,
   cases,
+  span,
 });
 
 // --- Type Expressions ---
 
-export const tyvar = (name: string): TyVar => ({ kind: "TyVar", name });
+export const tyvar = (name: string, span?: Span): TyVar => ({ kind: "TyVar", name, span });
 
-export const tycon = (name: string): TyCon => ({ kind: "TyCon", name });
+export const tycon = (name: string, span?: Span): TyCon => ({ kind: "TyCon", name, span });
 
-export const tyapp = (con: TypeExpr, arg: TypeExpr): TyApp => ({
+export const tyapp = (con: TypeExpr, arg: TypeExpr, span?: Span): TyApp => ({
   kind: "TyApp",
   con,
   arg,
+  span,
 });
 
-export const tyfun = (param: TypeExpr, ret: TypeExpr): TyFun => ({
+export const tyfun = (param: TypeExpr, ret: TypeExpr, span?: Span): TyFun => ({
   kind: "TyFun",
   param,
   ret,
+  span,
 });
 
 // --- Data Declarations ---
 
-export const conDecl = (name: string, fields: readonly TypeExpr[]): ConDecl => ({
+export const conDecl = (name: string, fields: readonly TypeExpr[], span?: Span): ConDecl => ({
   name,
   fields,
+  span,
 });
 
 export const dataDecl = (
   name: string,
   typeParams: string[],
   constructors: ConDecl[],
-): DataDecl => ({ kind: "DataDecl", name, typeParams, constructors });
+  span?: Span,
+): DataDecl => ({ kind: "DataDecl", name, typeParams, constructors, span });

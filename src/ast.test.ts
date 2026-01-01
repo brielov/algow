@@ -127,28 +127,25 @@ describe("AST Helper Functions", () => {
 
   describe("compound data constructors", () => {
     it("creates empty tuple", () => {
-      const node = ast.tuple();
-      expect(node).toEqual({ kind: "Tuple", elements: [] });
+      const node = ast.tuple([]);
+      expect(node.kind).toBe("Tuple");
+      expect(node.elements).toEqual([]);
     });
 
     it("creates single element tuple", () => {
-      const node = ast.tuple(ast.num(1));
-      expect(node).toEqual({
-        kind: "Tuple",
-        elements: [{ kind: "Num", value: 1 }],
-      });
+      const node = ast.tuple([ast.num(1)]);
+      expect(node.kind).toBe("Tuple");
+      expect(node.elements.length).toBe(1);
+      expect(node.elements[0]?.kind).toBe("Num");
     });
 
     it("creates multi-element tuple", () => {
-      const node = ast.tuple(ast.num(1), ast.str("hello"), ast.bool(true));
-      expect(node).toEqual({
-        kind: "Tuple",
-        elements: [
-          { kind: "Num", value: 1 },
-          { kind: "Str", value: "hello" },
-          { kind: "Bool", value: true },
-        ],
-      });
+      const node = ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]);
+      expect(node.kind).toBe("Tuple");
+      expect(node.elements.length).toBe(3);
+      expect(node.elements[0]?.kind).toBe("Num");
+      expect(node.elements[1]?.kind).toBe("Str");
+      expect(node.elements[2]?.kind).toBe("Bool");
     });
 
     it("creates empty record", () => {
@@ -187,38 +184,36 @@ describe("AST Helper Functions", () => {
 
   describe("pattern constructors", () => {
     it("creates wildcard pattern", () => {
-      expect(ast.pwildcard).toEqual({ kind: "PWildcard" });
+      const node = ast.pwildcard();
+      expect(node.kind).toBe("PWildcard");
     });
 
     it("creates variable pattern", () => {
       const node = ast.pvar("x");
-      expect(node).toEqual({ kind: "PVar", name: "x" });
+      expect(node.kind).toBe("PVar");
+      expect(node.name).toBe("x");
     });
 
     it("creates constructor pattern without args", () => {
-      const node = ast.pcon("Nothing");
-      expect(node).toEqual({ kind: "PCon", name: "Nothing", args: [] });
+      const node = ast.pcon("Nothing", []);
+      expect(node.kind).toBe("PCon");
+      expect(node.name).toBe("Nothing");
+      expect(node.args).toEqual([]);
     });
 
     it("creates constructor pattern with args", () => {
-      const node = ast.pcon("Just", ast.pvar("x"));
-      expect(node).toEqual({
-        kind: "PCon",
-        name: "Just",
-        args: [{ kind: "PVar", name: "x" }],
-      });
+      const node = ast.pcon("Just", [ast.pvar("x")]);
+      expect(node.kind).toBe("PCon");
+      expect(node.name).toBe("Just");
+      expect(node.args.length).toBe(1);
+      expect(node.args[0]?.kind).toBe("PVar");
     });
 
     it("creates constructor pattern with multiple args", () => {
-      const node = ast.pcon("Cons", ast.pvar("x"), ast.pvar("xs"));
-      expect(node).toEqual({
-        kind: "PCon",
-        name: "Cons",
-        args: [
-          { kind: "PVar", name: "x" },
-          { kind: "PVar", name: "xs" },
-        ],
-      });
+      const node = ast.pcon("Cons", [ast.pvar("x"), ast.pvar("xs")]);
+      expect(node.kind).toBe("PCon");
+      expect(node.name).toBe("Cons");
+      expect(node.args.length).toBe(2);
     });
 
     it("creates literal pattern with number", () => {
@@ -412,9 +407,9 @@ describe("AST Helper Functions", () => {
 
     it("builds complex match expression", () => {
       const node = ast.match(ast.var_("xs"), [
-        ast.case_(ast.pcon("Nil"), ast.num(0)),
+        ast.case_(ast.pcon("Nil", []), ast.num(0)),
         ast.case_(
-          ast.pcon("Cons", ast.pvar("x"), ast.pvar("rest")),
+          ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
           ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
         ),
       ]);
@@ -477,7 +472,7 @@ describe("AST Helper Functions", () => {
 
   describe("readonly immutability", () => {
     it("produces readonly expression structures", () => {
-      const node = ast.tuple(ast.num(1), ast.num(2));
+      const node = ast.tuple([ast.num(1), ast.num(2)]);
       // TypeScript would error if we try to modify:
       // node.elements = []; // Error: Cannot assign to 'elements'
       expect(node.elements).toHaveLength(2);

@@ -46,9 +46,9 @@ export const map = ast.letRec(
     ast.abs(
       "xs",
       ast.match(ast.var_("xs"), [
-        ast.case_(ast.pcon("Nil"), ast.var_("Nil")),
+        ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
         ast.case_(
-          ast.pcon("Cons", ast.pvar("x"), ast.pvar("rest")),
+          ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
           ast.app(
             ast.app(ast.var_("Cons"), ast.app(ast.var_("f"), ast.var_("x"))),
             ast.app(ast.app(ast.var_("map"), ast.var_("f")), ast.var_("rest")),
@@ -68,9 +68,9 @@ export const filter = ast.letRec(
     ast.abs(
       "xs",
       ast.match(ast.var_("xs"), [
-        ast.case_(ast.pcon("Nil"), ast.var_("Nil")),
+        ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
         ast.case_(
-          ast.pcon("Cons", ast.pvar("x"), ast.pvar("rest")),
+          ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
           ast.if_(
             ast.app(ast.var_("p"), ast.var_("x")),
             ast.app(
@@ -90,9 +90,9 @@ export const filter = ast.letRec(
 export const head = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
-    ast.case_(ast.pcon("Nil"), ast.var_("Nothing")),
+    ast.case_(ast.pcon("Nil", []), ast.var_("Nothing")),
     ast.case_(
-      ast.pcon("Cons", ast.pvar("x"), ast.pwildcard),
+      ast.pcon("Cons", [ast.pvar("x"), ast.pwildcard()]),
       ast.app(ast.var_("Just"), ast.var_("x")),
     ),
   ]),
@@ -102,9 +102,9 @@ export const head = ast.abs(
 export const tail = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
-    ast.case_(ast.pcon("Nil"), ast.var_("Nothing")),
+    ast.case_(ast.pcon("Nil", []), ast.var_("Nothing")),
     ast.case_(
-      ast.pcon("Cons", ast.pwildcard, ast.pvar("rest")),
+      ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
       ast.app(ast.var_("Just"), ast.var_("rest")),
     ),
   ]),
@@ -114,8 +114,8 @@ export const tail = ast.abs(
 export const isEmpty = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
-    ast.case_(ast.pcon("Nil"), ast.bool(true)),
-    ast.case_(ast.pcon("Cons", ast.pwildcard, ast.pwildcard), ast.bool(false)),
+    ast.case_(ast.pcon("Nil", []), ast.bool(true)),
+    ast.case_(ast.pcon("Cons", [ast.pwildcard(), ast.pwildcard()]), ast.bool(false)),
   ]),
 );
 
@@ -125,9 +125,9 @@ export const length = ast.letRec(
   ast.abs(
     "xs",
     ast.match(ast.var_("xs"), [
-      ast.case_(ast.pcon("Nil"), ast.num(0)),
+      ast.case_(ast.pcon("Nil", []), ast.num(0)),
       ast.case_(
-        ast.pcon("Cons", ast.pwildcard, ast.pvar("rest")),
+        ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
         ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
       ),
     ]),
@@ -145,9 +145,9 @@ export const foldr = ast.letRec(
       ast.abs(
         "xs",
         ast.match(ast.var_("xs"), [
-          ast.case_(ast.pcon("Nil"), ast.var_("z")),
+          ast.case_(ast.pcon("Nil", []), ast.var_("z")),
           ast.case_(
-            ast.pcon("Cons", ast.pvar("x"), ast.pvar("rest")),
+            ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
             ast.app(
               ast.app(ast.var_("f"), ast.var_("x")),
               ast.app(
@@ -173,9 +173,9 @@ export const foldl = ast.letRec(
       ast.abs(
         "xs",
         ast.match(ast.var_("xs"), [
-          ast.case_(ast.pcon("Nil"), ast.var_("z")),
+          ast.case_(ast.pcon("Nil", []), ast.var_("z")),
           ast.case_(
-            ast.pcon("Cons", ast.pvar("x"), ast.pvar("rest")),
+            ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
             ast.app(
               ast.app(
                 ast.app(ast.var_("foldl"), ast.var_("f")),

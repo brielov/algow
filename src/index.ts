@@ -31,8 +31,8 @@ printType("Right 'hello'", ast.app(ast.var_("Right"), ast.str("hello")));
 printType(
   "match Just 42",
   ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
-    ast.case_(ast.pcon("Just", ast.pvar("x")), ast.var_("x")),
-    ast.case_(ast.pcon("Nothing"), ast.num(0)),
+    ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
+    ast.case_(ast.pcon("Nothing", []), ast.num(0)),
   ]),
 );
 
@@ -47,4 +47,4 @@ printType("record.x", ast.fieldAccess(ast.record([ast.field("x", ast.num(42))]),
 printType("fn r => r.x", ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")));
 
 // Test tuples
-printType("(1, 'hello', true)", ast.tuple(ast.num(1), ast.str("hello"), ast.bool(true)));
+printType("(1, 'hello', true)", ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]));

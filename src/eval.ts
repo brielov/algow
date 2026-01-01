@@ -10,14 +10,7 @@ import type * as ast from "./ast";
 // Runtime Values
 // =============================================================================
 
-export type Value =
-  | VNum
-  | VStr
-  | VBool
-  | VClosure
-  | VCon
-  | VTuple
-  | VRecord;
+export type Value = VNum | VStr | VBool | VClosure | VCon | VTuple | VRecord;
 
 /** Number value */
 export type VNum = {

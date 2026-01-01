@@ -107,6 +107,12 @@ const error = (state: ParserState, message: string): void => {
   });
 };
 
+/** Create a span from token positions */
+const span = (start: number, end: number): ast.Span => ({ start, end });
+
+/** Create a span from a token */
+const tokenSpan = (token: Token): ast.Span => span(token[1], token[2]);
+
 const atNewStatement = (state: ParserState): boolean =>
   state.lexer.atLineStart && !at(state, TokenKind.Bar);
 
@@ -335,25 +341,26 @@ const parsePrecedence = (state: ParserState, minBp: number): ast.Expr => {
 const parsePrefix = (state: ParserState): ast.Expr => {
   const token = state.current;
   const kind = token[0];
+  const start = token[1];
 
   switch (kind) {
     case TokenKind.Number: {
       advance(state);
-      return ast.num(parseFloat(text(state, token)));
+      return ast.num(parseFloat(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.String: {
       advance(state);
-      return ast.str(parseStringContent(text(state, token)));
+      return ast.str(parseStringContent(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.True:
       advance(state);
-      return ast.bool(true);
+      return ast.bool(true, tokenSpan(token));
 
     case TokenKind.False:
       advance(state);
-      return ast.bool(false);
+      return ast.bool(false, tokenSpan(token));
 
     case TokenKind.Lower: {
       advance(state);
@@ -362,15 +369,16 @@ const parsePrefix = (state: ParserState): ast.Expr => {
       if (at(state, TokenKind.Arrow)) {
         advance(state);
         const body = parseExpr(state);
-        return ast.abs(name, body);
+        const end = body.span?.end ?? state.current[1];
+        return ast.abs(name, body, span(start, end));
       }
 
-      return ast.var_(name);
+      return ast.var_(name, tokenSpan(token));
     }
 
     case TokenKind.Upper: {
       advance(state);
-      return ast.var_(text(state, token));
+      return ast.var_(text(state, token), tokenSpan(token));
     }
 
     case TokenKind.LParen:
@@ -398,63 +406,57 @@ const parsePrefix = (state: ParserState): ast.Expr => {
 
 const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr => {
   const kind = state.current[0];
+  const start = left.span?.start ?? 0;
+
+  const binOp = (op: ast.Op): ast.Expr => {
+    advance(state);
+    const right = parsePrecedence(state, bp);
+    const end = right.span?.end ?? state.current[1];
+    return ast.binOp(op, left, right, span(start, end));
+  };
 
   switch (kind) {
     case TokenKind.Plus:
-      advance(state);
-      return ast.binOp("+", left, parsePrecedence(state, bp));
-
+      return binOp("+");
     case TokenKind.Minus:
-      advance(state);
-      return ast.binOp("-", left, parsePrecedence(state, bp));
-
+      return binOp("-");
     case TokenKind.Star:
-      advance(state);
-      return ast.binOp("*", left, parsePrecedence(state, bp));
-
+      return binOp("*");
     case TokenKind.Slash:
-      advance(state);
-      return ast.binOp("/", left, parsePrecedence(state, bp));
-
+      return binOp("/");
     case TokenKind.Lt:
-      advance(state);
-      return ast.binOp("<", left, parsePrecedence(state, bp));
-
+      return binOp("<");
     case TokenKind.Le:
-      advance(state);
-      return ast.binOp("<=", left, parsePrecedence(state, bp));
-
+      return binOp("<=");
     case TokenKind.Gt:
-      advance(state);
-      return ast.binOp(">", left, parsePrecedence(state, bp));
-
+      return binOp(">");
     case TokenKind.Ge:
-      advance(state);
-      return ast.binOp(">=", left, parsePrecedence(state, bp));
-
+      return binOp(">=");
     case TokenKind.EqEq:
-      advance(state);
-      return ast.binOp("==", left, parsePrecedence(state, bp));
-
+      return binOp("==");
     case TokenKind.Ne:
-      advance(state);
-      return ast.binOp("!=", left, parsePrecedence(state, bp));
+      return binOp("!=");
 
     case TokenKind.Pipe: {
       advance(state);
       const right = parsePrecedence(state, bp);
-      return ast.app(right, left);
+      const end = right.span?.end ?? state.current[1];
+      return ast.app(right, left, span(start, end));
     }
 
     case TokenKind.Dot: {
       advance(state);
       const fieldToken = expect(state, TokenKind.Lower, "expected field name after '.'");
       const field = fieldToken ? text(state, fieldToken) : "?";
-      return ast.fieldAccess(left, field);
+      const end = fieldToken ? fieldToken[2] : state.current[1];
+      return ast.fieldAccess(left, field, span(start, end));
     }
 
-    default:
-      return ast.app(left, parsePrefix(state));
+    default: {
+      const right = parsePrefix(state);
+      const end = right.span?.end ?? state.current[1];
+      return ast.app(left, right, span(start, end));
+    }
   }
 };
 
@@ -509,6 +511,7 @@ const infixBindingPower = (state: ParserState): number => {
 // =============================================================================
 
 const parseParenOrTuple = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
   advance(state); // (
 
   if (at(state, TokenKind.RParen)) {
@@ -525,8 +528,9 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
       advance(state);
       elements.push(parseExpr(state));
     }
-    expect(state, TokenKind.RParen, "expected ')' after tuple");
-    return ast.tuple(...elements);
+    const endToken = expect(state, TokenKind.RParen, "expected ')' after tuple");
+    const end = endToken ? endToken[2] : state.current[1];
+    return ast.tuple(elements, span(start, end));
   }
 
   expect(state, TokenKind.RParen, "expected ')' after expression");
@@ -534,6 +538,7 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
 };
 
 const parseRecord = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
   advance(state); // {
 
   const fields: ast.RecordField[] = [];
@@ -545,19 +550,23 @@ const parseRecord = (state: ParserState): ast.Expr => {
       const nameToken = expect(state, TokenKind.Lower, "expected field name");
       if (!nameToken) break;
       const name = text(state, nameToken);
+      const fieldStart = nameToken[1];
 
       expect(state, TokenKind.Eq, "expected '=' after field name");
       const value = parseExpr(state);
+      const fieldEnd = value.span?.end ?? state.current[1];
 
-      fields.push(ast.field(name, value));
+      fields.push(ast.field(name, value, span(fieldStart, fieldEnd)));
     } while (at(state, TokenKind.Comma));
   }
 
-  expect(state, TokenKind.RBrace, "expected '}' after record");
-  return ast.record(fields);
+  const endToken = expect(state, TokenKind.RBrace, "expected '}' after record");
+  const end = endToken ? endToken[2] : state.current[1];
+  return ast.record(fields, span(start, end));
 };
 
 const parseIf = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
   advance(state); // if
 
   const cond = parseExpr(state);
@@ -565,11 +574,13 @@ const parseIf = (state: ParserState): ast.Expr => {
   const thenBranch = parseExpr(state);
   expect(state, TokenKind.Else, "expected 'else' after 'then' branch");
   const elseBranch = parseExpr(state);
+  const end = elseBranch.span?.end ?? state.current[1];
 
-  return ast.if_(cond, thenBranch, elseBranch);
+  return ast.if_(cond, thenBranch, elseBranch, span(start, end));
 };
 
 const parseMatch = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
   advance(state); // match
 
   const scrutinee = parseExpr(state);
@@ -577,19 +588,23 @@ const parseMatch = (state: ParserState): ast.Expr => {
 
   const cases: ast.Case[] = [];
   while (at(state, TokenKind.Bar)) {
+    const caseStart = state.current[1];
     advance(state);
     const pattern = parsePattern(state);
     expect(state, TokenKind.Arrow, "expected '=>' after pattern");
     const body = parseExpr(state);
-    cases.push(ast.case_(pattern, body));
+    const caseEnd = body.span?.end ?? state.current[1];
+    cases.push(ast.case_(pattern, body, span(caseStart, caseEnd)));
   }
 
-  expect(state, TokenKind.End, "expected 'end' after match cases");
+  const endToken = expect(state, TokenKind.End, "expected 'end' after match cases");
+  const end = endToken ? endToken[2] : state.current[1];
 
-  return ast.match(scrutinee, cases);
+  return ast.match(scrutinee, cases, span(start, end));
 };
 
 const parseLetExpr = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
   advance(state); // let
 
   const recursive = at(state, TokenKind.Rec);
@@ -617,8 +632,11 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   expect(state, TokenKind.In, "expected 'in' after let value");
 
   const body = parseExpr(state);
+  const end = body.span?.end ?? state.current[1];
 
-  return recursive ? ast.letRec(name, value, body) : ast.let_(name, value, body);
+  return recursive
+    ? ast.letRec(name, value, body, span(start, end))
+    : ast.let_(name, value, body, span(start, end));
 };
 
 // =============================================================================
@@ -628,15 +646,16 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
 const parsePattern = (state: ParserState): ast.Pattern => {
   const token = state.current;
   const kind = token[0];
+  const start = token[1];
 
   switch (kind) {
     case TokenKind.Underscore:
       advance(state);
-      return ast.pwildcard;
+      return ast.pwildcard(tokenSpan(token));
 
     case TokenKind.Lower:
       advance(state);
-      return ast.pvar(text(state, token));
+      return ast.pvar(text(state, token), tokenSpan(token));
 
     case TokenKind.Upper: {
       advance(state);
@@ -647,26 +666,28 @@ const parsePattern = (state: ParserState): ast.Pattern => {
         args.push(parsePatternAtom(state));
       }
 
-      return ast.pcon(name, ...args);
+      const end =
+        args.length > 0 ? (args[args.length - 1]!.span?.end ?? state.current[1]) : token[2];
+      return ast.pcon(name, args, span(start, end));
     }
 
     case TokenKind.Number: {
       advance(state);
-      return ast.plit(parseFloat(text(state, token)));
+      return ast.plit(parseFloat(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.String: {
       advance(state);
-      return ast.plit(parseStringContent(text(state, token)));
+      return ast.plit(parseStringContent(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.True:
       advance(state);
-      return ast.plit(true);
+      return ast.plit(true, tokenSpan(token));
 
     case TokenKind.False:
       advance(state);
-      return ast.plit(false);
+      return ast.plit(false, tokenSpan(token));
 
     case TokenKind.LParen:
       return parseTuplePattern(state);
@@ -677,7 +698,7 @@ const parsePattern = (state: ParserState): ast.Pattern => {
     default:
       error(state, `unexpected token in pattern: ${TokenKind[kind]}`);
       advance(state);
-      return ast.pwildcard;
+      return ast.pwildcard();
   }
 };
 
@@ -688,33 +709,33 @@ const parsePatternAtom = (state: ParserState): ast.Pattern => {
   switch (kind) {
     case TokenKind.Underscore:
       advance(state);
-      return ast.pwildcard;
+      return ast.pwildcard(tokenSpan(token));
 
     case TokenKind.Lower:
       advance(state);
-      return ast.pvar(text(state, token));
+      return ast.pvar(text(state, token), tokenSpan(token));
 
     case TokenKind.Upper:
       advance(state);
-      return ast.pcon(text(state, token));
+      return ast.pcon(text(state, token), [], tokenSpan(token));
 
     case TokenKind.Number: {
       advance(state);
-      return ast.plit(parseFloat(text(state, token)));
+      return ast.plit(parseFloat(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.String: {
       advance(state);
-      return ast.plit(parseStringContent(text(state, token)));
+      return ast.plit(parseStringContent(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.True:
       advance(state);
-      return ast.plit(true);
+      return ast.plit(true, tokenSpan(token));
 
     case TokenKind.False:
       advance(state);
-      return ast.plit(false);
+      return ast.plit(false, tokenSpan(token));
 
     case TokenKind.LParen:
       return parseTuplePattern(state);
@@ -724,7 +745,7 @@ const parsePatternAtom = (state: ParserState): ast.Pattern => {
 
     default:
       error(state, `unexpected token in pattern: ${TokenKind[kind]}`);
-      return ast.pwildcard;
+      return ast.pwildcard();
   }
 };
 
@@ -743,12 +764,13 @@ const isPatternStart = (state: ParserState): boolean =>
   );
 
 const parseTuplePattern = (state: ParserState): ast.Pattern => {
+  const start = state.current[1];
   advance(state); // (
 
   if (at(state, TokenKind.RParen)) {
     advance(state);
     error(state, "empty pattern");
-    return ast.pwildcard;
+    return ast.pwildcard();
   }
 
   const first = parsePattern(state);
@@ -759,8 +781,9 @@ const parseTuplePattern = (state: ParserState): ast.Pattern => {
       advance(state);
       elements.push(parsePattern(state));
     }
-    expect(state, TokenKind.RParen, "expected ')' after tuple pattern");
-    return ast.ptuple(elements);
+    const endToken = expect(state, TokenKind.RParen, "expected ')' after tuple pattern");
+    const end = endToken ? endToken[2] : state.current[1];
+    return ast.ptuple(elements, span(start, end));
   }
 
   expect(state, TokenKind.RParen, "expected ')' after pattern");
@@ -768,6 +791,7 @@ const parseTuplePattern = (state: ParserState): ast.Pattern => {
 };
 
 const parseRecordPattern = (state: ParserState): ast.Pattern => {
+  const start = state.current[1];
   advance(state); // {
 
   const fields: ast.PRecordField[] = [];
@@ -779,16 +803,19 @@ const parseRecordPattern = (state: ParserState): ast.Pattern => {
       const nameToken = expect(state, TokenKind.Lower, "expected field name");
       if (!nameToken) break;
       const name = text(state, nameToken);
+      const fieldStart = nameToken[1];
 
       expect(state, TokenKind.Eq, "expected '=' after field name");
       const pattern = parsePattern(state);
+      const fieldEnd = pattern.span?.end ?? state.current[1];
 
-      fields.push(ast.pfield(name, pattern));
+      fields.push(ast.pfield(name, pattern, span(fieldStart, fieldEnd)));
     } while (at(state, TokenKind.Comma));
   }
 
-  expect(state, TokenKind.RBrace, "expected '}' after record pattern");
-  return ast.precord(fields);
+  const endToken = expect(state, TokenKind.RBrace, "expected '}' after record pattern");
+  const end = endToken ? endToken[2] : state.current[1];
+  return ast.precord(fields, span(start, end));
 };
 
 // =============================================================================

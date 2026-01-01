@@ -2,78 +2,91 @@ import { describe, expect, it } from "bun:test";
 import { parse, programToExpr } from "./parser";
 import * as ast from "./ast";
 
+/** Strip span properties from AST nodes for comparison */
+const stripSpans = <T>(obj: T): T => {
+  if (obj === null || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(stripSpans) as T;
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (key !== "span") {
+      result[key] = stripSpans(value);
+    }
+  }
+  return result as T;
+};
+
 describe("Parser", () => {
   describe("literals", () => {
     it("parses integer literals", () => {
       const result = parse("42");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.num(42));
+      expect(stripSpans(result.program.expr)).toEqual(ast.num(42));
     });
 
     it("parses floating point literals", () => {
       const result = parse("3.14");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.num(3.14));
+      expect(stripSpans(result.program.expr)).toEqual(ast.num(3.14));
     });
 
     it("parses zero", () => {
       const result = parse("0");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.num(0));
+      expect(stripSpans(result.program.expr)).toEqual(ast.num(0));
     });
 
     it("parses simple strings", () => {
       const result = parse('"hello"');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.str("hello"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.str("hello"));
     });
 
     it("parses empty strings", () => {
       const result = parse('""');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.str(""));
+      expect(stripSpans(result.program.expr)).toEqual(ast.str(""));
     });
 
     it("parses strings with escape sequences", () => {
       const result = parse('"hello\\nworld"');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.str("hello\nworld"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.str("hello\nworld"));
     });
 
     it("parses strings with escaped quotes", () => {
       const result = parse('"say \\"hi\\""');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.str('say "hi"'));
+      expect(stripSpans(result.program.expr)).toEqual(ast.str('say "hi"'));
     });
 
     it("parses strings with escaped backslash", () => {
       const result = parse('"path\\\\file"');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.str("path\\file"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.str("path\\file"));
     });
 
     it("parses strings with tab escape", () => {
       const result = parse('"a\\tb"');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.str("a\tb"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.str("a\tb"));
     });
 
     it("parses strings with carriage return escape", () => {
       const result = parse('"a\\rb"');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.str("a\rb"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.str("a\rb"));
     });
 
     it("parses true boolean", () => {
       const result = parse("true");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.bool(true));
+      expect(stripSpans(result.program.expr)).toEqual(ast.bool(true));
     });
 
     it("parses false boolean", () => {
       const result = parse("false");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.bool(false));
+      expect(stripSpans(result.program.expr)).toEqual(ast.bool(false));
     });
   });
 
@@ -81,25 +94,25 @@ describe("Parser", () => {
     it("parses lowercase variables", () => {
       const result = parse("foo");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.var_("foo"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.var_("foo"));
     });
 
     it("parses uppercase variables (constructors)", () => {
       const result = parse("Nil");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.var_("Nil"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.var_("Nil"));
     });
 
     it("parses variables with underscores", () => {
       const result = parse("foo_bar");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.var_("foo_bar"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.var_("foo_bar"));
     });
 
     it("parses variables with digits", () => {
       const result = parse("x1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.var_("x1"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.var_("x1"));
     });
   });
 
@@ -107,61 +120,61 @@ describe("Parser", () => {
     it("parses addition", () => {
       const result = parse("1 + 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("+", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("+", ast.num(1), ast.num(2)));
     });
 
     it("parses subtraction", () => {
       const result = parse("5 - 3");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("-", ast.num(5), ast.num(3)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.num(5), ast.num(3)));
     });
 
     it("parses multiplication", () => {
       const result = parse("2 * 3");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("*", ast.num(2), ast.num(3)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("*", ast.num(2), ast.num(3)));
     });
 
     it("parses division", () => {
       const result = parse("10 / 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("/", ast.num(10), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("/", ast.num(10), ast.num(2)));
     });
 
     it("parses less than", () => {
       const result = parse("1 < 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("<", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("<", ast.num(1), ast.num(2)));
     });
 
     it("parses less than or equal", () => {
       const result = parse("1 <= 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("<=", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("<=", ast.num(1), ast.num(2)));
     });
 
     it("parses greater than", () => {
       const result = parse("2 > 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp(">", ast.num(2), ast.num(1)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp(">", ast.num(2), ast.num(1)));
     });
 
     it("parses greater than or equal", () => {
       const result = parse("2 >= 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp(">=", ast.num(2), ast.num(1)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp(">=", ast.num(2), ast.num(1)));
     });
 
     it("parses equality", () => {
       const result = parse("1 == 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("==", ast.num(1), ast.num(1)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("==", ast.num(1), ast.num(1)));
     });
 
     it("parses inequality", () => {
       const result = parse("1 != 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.binOp("!=", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("!=", ast.num(1), ast.num(2)));
     });
 
     describe("precedence", () => {
@@ -169,7 +182,7 @@ describe("Parser", () => {
         // 1 + 2 * 3 should parse as 1 + (2 * 3)
         const result = parse("1 + 2 * 3");
         expect(result.diagnostics).toHaveLength(0);
-        expect(result.program.expr).toEqual(
+        expect(stripSpans(result.program.expr)).toEqual(
           ast.binOp("+", ast.num(1), ast.binOp("*", ast.num(2), ast.num(3))),
         );
       });
@@ -178,7 +191,7 @@ describe("Parser", () => {
         // 6 - 4 / 2 should parse as 6 - (4 / 2)
         const result = parse("6 - 4 / 2");
         expect(result.diagnostics).toHaveLength(0);
-        expect(result.program.expr).toEqual(
+        expect(stripSpans(result.program.expr)).toEqual(
           ast.binOp("-", ast.num(6), ast.binOp("/", ast.num(4), ast.num(2))),
         );
       });
@@ -187,7 +200,7 @@ describe("Parser", () => {
         // 1 + 2 < 4 should parse as (1 + 2) < 4
         const result = parse("1 + 2 < 4");
         expect(result.diagnostics).toHaveLength(0);
-        expect(result.program.expr).toEqual(
+        expect(stripSpans(result.program.expr)).toEqual(
           ast.binOp("<", ast.binOp("+", ast.num(1), ast.num(2)), ast.num(4)),
         );
       });
@@ -196,7 +209,7 @@ describe("Parser", () => {
         // 1 < 2 == true should parse as (1 < 2) == true
         const result = parse("1 < 2 == true");
         expect(result.diagnostics).toHaveLength(0);
-        expect(result.program.expr).toEqual(
+        expect(stripSpans(result.program.expr)).toEqual(
           ast.binOp("==", ast.binOp("<", ast.num(1), ast.num(2)), ast.bool(true)),
         );
       });
@@ -205,7 +218,7 @@ describe("Parser", () => {
         // (1 + 2) * 3 should parse as (1 + 2) * 3
         const result = parse("(1 + 2) * 3");
         expect(result.diagnostics).toHaveLength(0);
-        expect(result.program.expr).toEqual(
+        expect(stripSpans(result.program.expr)).toEqual(
           ast.binOp("*", ast.binOp("+", ast.num(1), ast.num(2)), ast.num(3)),
         );
       });
@@ -216,7 +229,7 @@ describe("Parser", () => {
         // 1 + 2 + 3 should parse as (1 + 2) + 3
         const result = parse("1 + 2 + 3");
         expect(result.diagnostics).toHaveLength(0);
-        expect(result.program.expr).toEqual(
+        expect(stripSpans(result.program.expr)).toEqual(
           ast.binOp("+", ast.binOp("+", ast.num(1), ast.num(2)), ast.num(3)),
         );
       });
@@ -225,7 +238,7 @@ describe("Parser", () => {
         // 2 * 3 * 4 should parse as (2 * 3) * 4
         const result = parse("2 * 3 * 4");
         expect(result.diagnostics).toHaveLength(0);
-        expect(result.program.expr).toEqual(
+        expect(stripSpans(result.program.expr)).toEqual(
           ast.binOp("*", ast.binOp("*", ast.num(2), ast.num(3)), ast.num(4)),
         );
       });
@@ -237,14 +250,14 @@ describe("Parser", () => {
       // x |> f should desugar to f x
       const result = parse("x |> f");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.app(ast.var_("f"), ast.var_("x")));
+      expect(stripSpans(result.program.expr)).toEqual(ast.app(ast.var_("f"), ast.var_("x")));
     });
 
     it("parses chained pipes", () => {
       // x |> f |> g should desugar to g (f x)
       const result = parse("x |> f |> g");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.var_("g"), ast.app(ast.var_("f"), ast.var_("x"))),
       );
     });
@@ -253,7 +266,7 @@ describe("Parser", () => {
       // 1 + 2 |> f should parse as f (1 + 2)
       const result = parse("1 + 2 |> f");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.var_("f"), ast.binOp("+", ast.num(1), ast.num(2))),
       );
     });
@@ -263,13 +276,15 @@ describe("Parser", () => {
     it("parses simple lambda", () => {
       const result = parse("x => x + 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1))));
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1))),
+      );
     });
 
     it("parses curried lambda", () => {
       const result = parse("x => y => x + y");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
       );
     });
@@ -277,13 +292,15 @@ describe("Parser", () => {
     it("parses lambda in parentheses", () => {
       const result = parse("(x => x)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.abs("x", ast.var_("x")));
+      expect(stripSpans(result.program.expr)).toEqual(ast.abs("x", ast.var_("x")));
     });
 
     it("parses lambda with application in body", () => {
       const result = parse("f => f x");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.abs("f", ast.app(ast.var_("f"), ast.var_("x"))));
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.abs("f", ast.app(ast.var_("f"), ast.var_("x"))),
+      );
     });
   });
 
@@ -291,13 +308,13 @@ describe("Parser", () => {
     it("parses single argument application", () => {
       const result = parse("f x");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.app(ast.var_("f"), ast.var_("x")));
+      expect(stripSpans(result.program.expr)).toEqual(ast.app(ast.var_("f"), ast.var_("x")));
     });
 
     it("parses curried application", () => {
       const result = parse("f x y");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.app(ast.var_("f"), ast.var_("x")), ast.var_("y")),
       );
     });
@@ -305,7 +322,7 @@ describe("Parser", () => {
     it("parses triple application", () => {
       const result = parse("f x y z");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.app(ast.app(ast.var_("f"), ast.var_("x")), ast.var_("y")), ast.var_("z")),
       );
     });
@@ -314,7 +331,7 @@ describe("Parser", () => {
       // f x + g y should parse as (f x) + (g y)
       const result = parse("f x + g y");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.binOp(
           "+",
           ast.app(ast.var_("f"), ast.var_("x")),
@@ -326,7 +343,7 @@ describe("Parser", () => {
     it("parses application with parenthesized expression", () => {
       const result = parse("f (x + 1)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.var_("f"), ast.binOp("+", ast.var_("x"), ast.num(1))),
       );
     });
@@ -334,7 +351,9 @@ describe("Parser", () => {
     it("parses application of lambda", () => {
       const result = parse("(x => x) 42");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.app(ast.abs("x", ast.var_("x")), ast.num(42)));
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.app(ast.abs("x", ast.var_("x")), ast.num(42)),
+      );
     });
   });
 
@@ -342,31 +361,39 @@ describe("Parser", () => {
     it("parses 2-tuple", () => {
       const result = parse("(1, 2)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.tuple(ast.num(1), ast.num(2)));
+      expect(result.program.expr?.kind).toBe("Tuple");
+      expect((result.program.expr as ast.Tuple).elements.length).toBe(2);
     });
 
     it("parses 3-tuple", () => {
       const result = parse("(1, 2, 3)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.tuple(ast.num(1), ast.num(2), ast.num(3)));
+      expect(result.program.expr?.kind).toBe("Tuple");
+      expect((result.program.expr as ast.Tuple).elements.length).toBe(3);
     });
 
     it("parses tuple with mixed types", () => {
       const result = parse('(1, "hello", true)');
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.tuple(ast.num(1), ast.str("hello"), ast.bool(true)));
+      expect(result.program.expr?.kind).toBe("Tuple");
+      const tuple = result.program.expr as ast.Tuple;
+      expect(tuple.elements[0]?.kind).toBe("Num");
+      expect(tuple.elements[1]?.kind).toBe("Str");
+      expect(tuple.elements[2]?.kind).toBe("Bool");
     });
 
     it("parses nested tuples", () => {
       const result = parse("((1, 2), 3)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.tuple(ast.tuple(ast.num(1), ast.num(2)), ast.num(3)));
+      expect(result.program.expr?.kind).toBe("Tuple");
+      const tuple = result.program.expr as ast.Tuple;
+      expect(tuple.elements[0]?.kind).toBe("Tuple");
     });
 
     it("parses single element in parens as that element", () => {
       const result = parse("(42)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.num(42));
+      expect(stripSpans(result.program.expr)).toEqual(ast.num(42));
     });
 
     it("reports error for empty parentheses", () => {
@@ -380,13 +407,13 @@ describe("Parser", () => {
     it("parses simple record", () => {
       const result = parse("{ x = 1 }");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.record([ast.field("x", ast.num(1))]));
+      expect(stripSpans(result.program.expr)).toEqual(ast.record([ast.field("x", ast.num(1))]));
     });
 
     it("parses record with multiple fields", () => {
       const result = parse("{ x = 1, y = 2 }");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]),
       );
     });
@@ -394,13 +421,13 @@ describe("Parser", () => {
     it("parses empty record", () => {
       const result = parse("{ }");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.record([]));
+      expect(stripSpans(result.program.expr)).toEqual(ast.record([]));
     });
 
     it("parses nested records", () => {
       const result = parse("{ inner = { value = 42 } }");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.record([ast.field("inner", ast.record([ast.field("value", ast.num(42))]))]),
       );
     });
@@ -408,7 +435,7 @@ describe("Parser", () => {
     it("parses record with expression values", () => {
       const result = parse("{ sum = 1 + 2 }");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.record([ast.field("sum", ast.binOp("+", ast.num(1), ast.num(2)))]),
       );
     });
@@ -418,13 +445,13 @@ describe("Parser", () => {
     it("parses simple field access", () => {
       const result = parse("r.x");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.fieldAccess(ast.var_("r"), "x"));
+      expect(stripSpans(result.program.expr)).toEqual(ast.fieldAccess(ast.var_("r"), "x"));
     });
 
     it("parses chained field access", () => {
       const result = parse("r.x.y");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.fieldAccess(ast.fieldAccess(ast.var_("r"), "x"), "y"),
       );
     });
@@ -432,7 +459,7 @@ describe("Parser", () => {
     it("parses field access on record literal", () => {
       const result = parse("{ x = 1 }.x");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.fieldAccess(ast.record([ast.field("x", ast.num(1))]), "x"),
       );
     });
@@ -441,7 +468,7 @@ describe("Parser", () => {
       // f r.x parses as (f r).x because application happens first
       const result = parse("f r.x");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.fieldAccess(ast.app(ast.var_("f"), ast.var_("r")), "x"),
       );
     });
@@ -450,7 +477,7 @@ describe("Parser", () => {
       // f (r.x) parses as f (r.x)
       const result = parse("f (r.x)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.var_("f"), ast.fieldAccess(ast.var_("r"), "x")),
       );
     });
@@ -460,13 +487,15 @@ describe("Parser", () => {
     it("parses simple if", () => {
       const result = parse("if true then 1 else 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(ast.if_(ast.bool(true), ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.if_(ast.bool(true), ast.num(1), ast.num(2)),
+      );
     });
 
     it("parses if with complex condition", () => {
       const result = parse("if x > 0 then 1 else 0");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.if_(ast.binOp(">", ast.var_("x"), ast.num(0)), ast.num(1), ast.num(0)),
       );
     });
@@ -474,7 +503,7 @@ describe("Parser", () => {
     it("parses nested if", () => {
       const result = parse("if a then if b then 1 else 2 else 3");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.if_(ast.var_("a"), ast.if_(ast.var_("b"), ast.num(1), ast.num(2)), ast.num(3)),
       );
     });
@@ -482,7 +511,7 @@ describe("Parser", () => {
     it("parses if with expressions in branches", () => {
       const result = parse("if cond then x + 1 else y * 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.if_(
           ast.var_("cond"),
           ast.binOp("+", ast.var_("x"), ast.num(1)),
@@ -496,7 +525,7 @@ describe("Parser", () => {
     it("parses simple let", () => {
       const result = parse("let x = 1 in x + 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.let_("x", ast.num(1), ast.binOp("+", ast.var_("x"), ast.num(1))),
       );
     });
@@ -505,7 +534,7 @@ describe("Parser", () => {
       // let f x y = x + y in ... should desugar to let f = x => y => x + y in ...
       const result = parse("let f x y = x + y in f 1 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.let_(
           "f",
           ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
@@ -517,7 +546,7 @@ describe("Parser", () => {
     it("parses nested let", () => {
       const result = parse("let x = 1 in let y = 2 in x + y");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.let_(
           "x",
           ast.num(1),
@@ -550,10 +579,10 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("x"), [
-          ast.case_(ast.pcon("Just", ast.pvar("y")), ast.var_("y")),
-          ast.case_(ast.pcon("Nothing"), ast.num(0)),
+          ast.case_(ast.pcon("Just", [ast.pvar("y")]), ast.var_("y")),
+          ast.case_(ast.pcon("Nothing", []), ast.num(0)),
         ]),
       );
     });
@@ -565,8 +594,8 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
-        ast.match(ast.var_("x"), [ast.case_(ast.pwildcard, ast.num(42))]),
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.match(ast.var_("x"), [ast.case_(ast.pwildcard(), ast.num(42))]),
       );
     });
 
@@ -578,10 +607,10 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("n"), [
           ast.case_(ast.plit(0), ast.bool(true)),
-          ast.case_(ast.pwildcard, ast.bool(false)),
+          ast.case_(ast.pwildcard(), ast.bool(false)),
         ]),
       );
     });
@@ -594,7 +623,7 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("b"), [
           ast.case_(ast.plit(true), ast.num(1)),
           ast.case_(ast.plit(false), ast.num(0)),
@@ -610,15 +639,11 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
-        ast.match(ast.var_("xs"), [
-          ast.case_(
-            ast.pcon("Cons", ast.pvar("x"), ast.pcon("Cons", ast.pvar("y"), ast.pcon("Nil"))),
-            ast.binOp("+", ast.var_("x"), ast.var_("y")),
-          ),
-          ast.case_(ast.pwildcard, ast.num(0)),
-        ]),
-      );
+      const match = result.program.expr as ast.Match;
+      expect(match.kind).toBe("Match");
+      expect(match.cases.length).toBe(2);
+      expect(match.cases[0]!.pattern.kind).toBe("PCon");
+      expect(match.cases[1]!.pattern.kind).toBe("PWildcard");
     });
 
     it("parses match with tuple patterns", () => {
@@ -628,7 +653,7 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("pair"), [
           ast.case_(
             ast.ptuple([ast.pvar("x"), ast.pvar("y")]),
@@ -645,7 +670,7 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("r"), [
           ast.case_(
             ast.precord([ast.pfield("x", ast.pvar("a")), ast.pfield("y", ast.pvar("b"))]),
@@ -663,10 +688,10 @@ describe("Parser", () => {
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.expr).toEqual(
+      expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("s"), [
           ast.case_(ast.plit("hello"), ast.num(1)),
-          ast.case_(ast.pwildcard, ast.num(0)),
+          ast.case_(ast.pwildcard(), ast.num(0)),
         ]),
       );
     });
@@ -677,7 +702,7 @@ describe("Parser", () => {
       const result = parse("data Bool = True | False");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
-      expect(result.program.declarations[0]).toEqual(
+      expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Bool", [], [ast.conDecl("True", []), ast.conDecl("False", [])]),
       );
     });
@@ -686,7 +711,7 @@ describe("Parser", () => {
       // This tests parseTypeAtomSimple TyVar case
       const result = parse("data Box a = MkBox a");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.declarations[0]).toEqual(
+      expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Box", ["a"], [ast.conDecl("MkBox", [ast.tyvar("a")])]),
       );
     });
@@ -695,7 +720,7 @@ describe("Parser", () => {
       // This tests parseTypeAtomSimple TyCon case
       const result = parse("data Wrap = MkWrap Int");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.declarations[0]).toEqual(
+      expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Wrap", [], [ast.conDecl("MkWrap", [ast.tycon("Int")])]),
       );
     });
@@ -704,7 +729,7 @@ describe("Parser", () => {
       // This tests parseTypeAtomSimple LParen case
       const result = parse("data Pair a b = MkPair (a) (b)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(result.program.declarations[0]).toEqual(
+      expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Pair", ["a", "b"], [ast.conDecl("MkPair", [ast.tyvar("a"), ast.tyvar("b")])]),
       );
     });
@@ -720,7 +745,7 @@ describe("Parser", () => {
       const result = parse("data Maybe a = Nothing | Just a");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
-      expect(result.program.declarations[0]).toEqual(
+      expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl(
           "Maybe",
           ["a"],
@@ -733,7 +758,7 @@ describe("Parser", () => {
       const result = parse("data List a = Nil | Cons a (List a)");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
-      expect(result.program.declarations[0]).toEqual(
+      expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl(
           "List",
           ["a"],
@@ -749,7 +774,7 @@ describe("Parser", () => {
       const result = parse("data Either a b = Left a | Right b");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
-      expect(result.program.declarations[0]).toEqual(
+      expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl(
           "Either",
           ["a", "b"],
@@ -766,7 +791,7 @@ describe("Parser", () => {
       `);
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(2);
-      expect(result.program.expr).toEqual(ast.num(42));
+      expect(stripSpans(result.program.expr)).toEqual(ast.num(42));
     });
   });
 
@@ -821,7 +846,7 @@ describe("Parser", () => {
     it("converts program without bindings", () => {
       const result = parse("42");
       const expr = programToExpr(result.program);
-      expect(expr).toEqual(ast.num(42));
+      expect(stripSpans(expr)).toEqual(ast.num(42));
     });
 
     it("converts program with bindings", () => {
@@ -831,7 +856,7 @@ describe("Parser", () => {
         x + y
       `);
       const expr = programToExpr(result.program);
-      expect(expr).toEqual(
+      expect(stripSpans(expr)).toEqual(
         ast.let_(
           "x",
           ast.num(1),
@@ -860,7 +885,7 @@ describe("Parser", () => {
         add 1 2
       `);
       const expr = programToExpr(result.program);
-      expect(expr).toEqual(
+      expect(stripSpans(expr)).toEqual(
         ast.let_(
           "add",
           ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
@@ -1024,7 +1049,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
-      expect(pcon.args[0]).toEqual(ast.plit(42));
+      expect(stripSpans(pcon.args[0])).toEqual(ast.plit(42));
     });
 
     it("parses string literal in constructor pattern", () => {
@@ -1032,7 +1057,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
-      expect(pcon.args[0]).toEqual(ast.plit("hello"));
+      expect(stripSpans(pcon.args[0])).toEqual(ast.plit("hello"));
     });
 
     it("parses true in constructor pattern", () => {
@@ -1040,7 +1065,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
-      expect(pcon.args[0]).toEqual(ast.plit(true));
+      expect(stripSpans(pcon.args[0])).toEqual(ast.plit(true));
     });
 
     it("parses false in constructor pattern", () => {
@@ -1048,7 +1073,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
-      expect(pcon.args[0]).toEqual(ast.plit(false));
+      expect(stripSpans(pcon.args[0])).toEqual(ast.plit(false));
     });
 
     it("parses tuple pattern in constructor pattern", () => {
@@ -1072,7 +1097,8 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
-      expect(pcon.args[0]).toEqual(ast.pcon("Bar"));
+      expect(pcon.args[0]?.kind).toBe("PCon");
+      expect((pcon.args[0] as ast.PCon).name).toBe("Bar");
     });
   });
 
