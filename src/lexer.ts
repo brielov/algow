@@ -58,6 +58,7 @@ export enum TokenKind {
   Comma, // ,
   Dot, // .
   Underscore, // _
+  ColonColon, // ::
 
   // Delimiters
   LParen, // (
@@ -125,6 +126,7 @@ const LPAREN = 0x28; // (
 const RPAREN = 0x29; // )
 const LBRACE = 0x7b; // {
 const RBRACE = 0x7d; // }
+const COLON = 0x3a; // :
 
 // =============================================================================
 // KEYWORD MAP
@@ -395,6 +397,13 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
 
     case RBRACE:
       return [TokenKind.RBrace, start, state.pos];
+
+    case COLON:
+      if (peek(state) === COLON) {
+        advance(state);
+        return [TokenKind.ColonColon, start, state.pos];
+      }
+      return [TokenKind.Error, start, state.pos];
 
     default:
       return [TokenKind.Error, start, state.pos];

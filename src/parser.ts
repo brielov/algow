@@ -56,6 +56,7 @@ type ParserState = {
 const enum Bp {
   None = 0,
   Pipe = 10, // |>
+  Cons = 15, // :: (right-associative)
   Equality = 20, // == !=
   Comparison = 30, // < <= > >=
   Additive = 40, // + -
@@ -444,6 +445,15 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
       return ast.app(right, left, span(start, end));
     }
 
+    case TokenKind.ColonColon: {
+      // :: is right-associative, so use bp - 1 for right side
+      advance(state);
+      const right = parsePrecedence(state, bp - 1);
+      const end = right.span?.end ?? state.current[1];
+      // Desugar a :: b to Cons a b
+      return ast.app(ast.app(ast.var_("Cons"), left), right, span(start, end));
+    }
+
     case TokenKind.Dot: {
       advance(state);
       const fieldToken = expect(state, TokenKind.Lower, "expected field name after '.'");
@@ -466,6 +476,9 @@ const infixBindingPower = (state: ParserState): number => {
   switch (kind) {
     case TokenKind.Pipe:
       return Bp.Pipe;
+
+    case TokenKind.ColonColon:
+      return Bp.Cons;
 
     case TokenKind.EqEq:
     case TokenKind.Ne:

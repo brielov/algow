@@ -1,12 +1,6 @@
 {
   "name": "algow",
-  "private": true,
-  "type": "module",
   "module": "src/index.ts",
-  "scripts": {
-    "lint": "oxlint --type-aware --type-check",
-    "format": "oxfmt --write"
-  },
   "devDependencies": {
     "@types/bun": "latest",
     "oxfmt": "^0.21.0",
@@ -16,5 +10,11 @@
   },
   "peerDependencies": {
     "typescript": "^5"
-  }
+  },
+  "private": true,
+  "scripts": {
+    "lint": "oxlint --type-aware --type-check",
+    "format": "oxfmt --write"
+  },
+  "type": "module"
 }

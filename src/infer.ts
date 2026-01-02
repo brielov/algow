@@ -77,7 +77,8 @@ const createContext = (): InferContext => ({
  */
 const addError = (ctx: InferContext, message: string, span?: ast.Span): void => {
   const start = span?.start ?? 0;
-  ctx.diagnostics.push(diagError(start, start, message));
+  const end = span?.end ?? start;
+  ctx.diagnostics.push(diagError(start, end, message));
 };
 
 // =============================================================================
@@ -524,7 +525,7 @@ const composeSubst = (s1: Subst, s2: Subst): Subst => {
  * @param t2 Second type
  * @returns Substitution that makes t1 and t2 equal (empty on error)
  */
-const unify = (ctx: InferContext, t1: Type, t2: Type): Subst => {
+const unify = (ctx: InferContext, t1: Type, t2: Type, span?: ast.Span): Subst => {
   // Same type variable - already equal, no substitution needed
   if (t1.kind === "TVar" && t2.kind === "TVar" && t1.name === t2.name) {
     return new Map();
@@ -585,7 +586,7 @@ const unify = (ctx: InferContext, t1: Type, t2: Type): Subst => {
   }
 
   // Types are incompatible
-  addError(ctx, `Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`);
+  addError(ctx, `Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`, span);
   return new Map();
 };
 
@@ -1282,7 +1283,7 @@ const inferBinOp = (
   const [s2, rightType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.right);
 
   // Operands must have the same type
-  const s3 = unify(ctx, applySubst(s2, leftType), rightType);
+  const s3 = unify(ctx, applySubst(s2, leftType), rightType, expr.span);
   const operandType = applySubst(s3, rightType);
 
   const subst = composeSubst(composeSubst(s1, s2), s3);
@@ -1299,7 +1300,7 @@ const inferBinOp = (
     case "-":
     case "/":
     case "*": {
-      const s4 = unify(ctx, operandType, tNum);
+      const s4 = unify(ctx, operandType, tNum, expr.span);
       return [composeSubst(subst, s4), tNum, constraints];
     }
 
@@ -1394,13 +1395,7 @@ const inferLet = (
 
   // Record the binding definition with inferred type
   if (expr.span) {
-    symbols.addDefinition(
-      ctx.symbols,
-      expr.name,
-      expr.span,
-      "variable",
-      applySubst(s1, valueType),
-    );
+    symbols.addDefinition(ctx.symbols, expr.name, expr.span, "variable", applySubst(s1, valueType));
   }
 
   // Add binding to environment
