@@ -189,6 +189,11 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
       return record.fields.get(expr.field)!;
     }
 
+    case "TupleIndex": {
+      const tuple = evaluate(env, expr.tuple) as VTuple;
+      return tuple.elements[expr.index]!;
+    }
+
     case "Match":
       return evalMatch(env, expr);
   }

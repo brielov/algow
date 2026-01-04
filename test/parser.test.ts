@@ -667,6 +667,46 @@ describe("Parser", () => {
     });
   });
 
+  describe("tuple indexing", () => {
+    it("parses simple tuple index", () => {
+      const result = parse("t.0");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.tupleIndex(ast.var_("t"), 0));
+    });
+
+    it("parses tuple index with larger index", () => {
+      const result = parse("t.2");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.tupleIndex(ast.var_("t"), 2));
+    });
+
+    it("parses chained tuple indexes with parentheses", () => {
+      // Note: t.0.1 parses as t.(0.1) due to lexer treating 0.1 as float
+      // Use parentheses for chained access: (t.0).1
+      const result = parse("(t.0).1");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.tupleIndex(ast.tupleIndex(ast.var_("t"), 0), 1),
+      );
+    });
+
+    it("parses tuple index on tuple literal", () => {
+      const result = parse("(1, 2).0");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.tupleIndex(ast.tuple([ast.num(1), ast.num(2)]), 0),
+      );
+    });
+
+    it("parses mixed field access and tuple index", () => {
+      const result = parse("r.x.0");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.tupleIndex(ast.fieldAccess(ast.var_("r"), "x"), 0),
+      );
+    });
+  });
+
   describe("if expressions", () => {
     it("parses simple if", () => {
       const result = parse("if true then 1 else 2");

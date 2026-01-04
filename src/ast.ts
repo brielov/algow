@@ -65,6 +65,7 @@ export type Expr =
   | Tuple // Tuples: (a, b, c)
   | Record // Records: { x: 1, y: "hello" }
   | FieldAccess // Field access: record.field
+  | TupleIndex // Tuple indexing: tuple.0, tuple.1
   | If // Conditional expressions
   | BinOp // Binary operators: +, -, ==, <, etc.
   | Match; // Pattern matching expressions
@@ -261,6 +262,21 @@ export interface FieldAccess extends Node {
   readonly kind: "FieldAccess";
   readonly record: Expr;
   readonly field: string;
+}
+
+/**
+ * Tuple index expression - extracts an element from a tuple by position.
+ *
+ * Syntax: tuple.0, tuple.1, tuple.2
+ * Example: pair.0, triple.2
+ *
+ * The index must be a non-negative integer within the tuple's bounds.
+ * The type checker validates that the index is valid for the tuple's arity.
+ */
+export interface TupleIndex extends Node {
+  readonly kind: "TupleIndex";
+  readonly tuple: Expr;
+  readonly index: number;
 }
 
 // -----------------------------------------------------------------------------
@@ -657,6 +673,13 @@ export const fieldAccess = (record: Expr, field: string, span?: Span): FieldAcce
   kind: "FieldAccess",
   record,
   field,
+  span,
+});
+
+export const tupleIndex = (tuple: Expr, index: number, span?: Span): TupleIndex => ({
+  kind: "TupleIndex",
+  tuple,
+  index,
   span,
 });
 

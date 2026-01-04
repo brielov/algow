@@ -814,6 +814,67 @@ describe("Type Inference", () => {
     });
   });
 
+  describe("tuple indexing", () => {
+    it("infers first element of pair", () => {
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.tupleIndex(ast.tuple([ast.num(1), ast.str("hello")]), 0),
+      );
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("number");
+    });
+
+    it("infers second element of pair", () => {
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.tupleIndex(ast.tuple([ast.num(1), ast.str("hello")]), 1),
+      );
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("string");
+    });
+
+    it("infers element of triple", () => {
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.tupleIndex(ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]), 2),
+      );
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("boolean");
+    });
+
+    it("reports error for out of bounds index", () => {
+      const { diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.tupleIndex(ast.tuple([ast.num(1), ast.num(2)]), 5),
+      );
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(diagnostics[0]!.message).toContain("out of bounds");
+    });
+
+    it("reports error for tuple index on non-tuple", () => {
+      const { diagnostics } = infer(baseEnv, new Map(), ast.tupleIndex(ast.num(42), 0));
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(diagnostics[0]!.message).toContain("non-tuple");
+    });
+
+    it("infers nested tuple indexing", () => {
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.tupleIndex(
+          ast.tupleIndex(ast.tuple([ast.tuple([ast.num(1), ast.str("inner")]), ast.bool(true)]), 0),
+          1,
+        ),
+      );
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("string");
+    });
+  });
+
   describe("pattern matching", () => {
     describe("basic patterns", () => {
       it("infers match with variable pattern", () => {

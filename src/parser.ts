@@ -510,7 +510,25 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
 
     case TokenKind.Dot: {
       advance(state);
-      const fieldToken = expect(state, TokenKind.Lower, "expected field name after '.'");
+      // Tuple indexing: tuple.0, tuple.1, etc.
+      if (at(state, TokenKind.Number)) {
+        const indexToken = state.current;
+        advance(state);
+        const indexStr = text(state, indexToken);
+        const index = parseInt(indexStr, 10);
+        if (!Number.isInteger(index) || index < 0) {
+          state.diagnostics.push({
+            start: indexToken[1],
+            end: indexToken[2],
+            message: "tuple index must be a non-negative integer",
+            severity: "error",
+          });
+        }
+        const end = indexToken[2];
+        return ast.tupleIndex(left, index, span(start, end));
+      }
+      // Record field access: record.field
+      const fieldToken = expect(state, TokenKind.Lower, "expected field name or index after '.'");
       const field = fieldToken ? text(state, fieldToken) : "?";
       const end = fieldToken ? fieldToken[2] : state.current[1];
       return ast.fieldAccess(left, field, span(start, end));

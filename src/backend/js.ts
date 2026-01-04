@@ -140,6 +140,11 @@ const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
       return `${record}.${binding.field}`;
     }
 
+    case "IRTupleIndexBinding": {
+      const tuple = genAtom(ctx, binding.tuple);
+      return `${tuple}[${binding.index}]`;
+    }
+
     case "IRMatchBinding":
       return genMatch(ctx, binding);
 

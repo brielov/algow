@@ -176,6 +176,7 @@ primary_expr = LOWER                           -- variable
              | tuple_expr
              | record_expr
              | field_access
+             | tuple_index
 
 tuple_expr   = "(" expression "," expression ("," expression)* ")"
 
@@ -183,7 +184,11 @@ record_expr  = "{" field ("," field)* "}"
 field        = LOWER "=" expression
 
 field_access = primary_expr "." LOWER
+tuple_index  = primary_expr "." NUMBER         -- tuple.0, tuple.1
 ```
+
+Note: `tuple.0.1` parses as `tuple.(0.1)` due to float literal parsing.
+Use parentheses for chained indexing: `(tuple.0).1`
 
 ### Types (in data declarations only)
 
@@ -322,6 +327,15 @@ let getX r = r.x
 -- Tuple creation
 let point = (10, 20)
 let triple = (1, "hello", true)
+
+-- Tuple indexing (0-based)
+point.0              -- 10
+point.1              -- 20
+triple.2             -- true
+
+-- For chained indexing, use parentheses (t.0.1 parses as t.(0.1))
+let nested = ((1, 2), 3)
+(nested.0).1         -- 2
 
 -- Tuple pattern matching
 let fst p = match p with

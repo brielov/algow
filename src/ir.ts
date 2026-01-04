@@ -104,6 +104,7 @@ export type IRBinding =
   | IRTupleBinding
   | IRRecordBinding
   | IRFieldAccessBinding
+  | IRTupleIndexBinding
   | IRMatchBinding
   | IRLambdaBinding
   | IRClosureBinding;
@@ -187,6 +188,17 @@ export type IRFieldAccessBinding = {
   readonly kind: "IRFieldAccessBinding";
   readonly record: IRAtom;
   readonly field: string;
+  readonly type: Type;
+};
+
+/**
+ * Tuple index access.
+ * Tuple must be atomic.
+ */
+export type IRTupleIndexBinding = {
+  readonly kind: "IRTupleIndexBinding";
+  readonly tuple: IRAtom;
+  readonly index: number;
   readonly type: Type;
 };
 
@@ -418,6 +430,17 @@ export const irFieldAccessBinding = (
   kind: "IRFieldAccessBinding",
   record,
   field,
+  type,
+});
+
+export const irTupleIndexBinding = (
+  tuple: IRAtom,
+  index: number,
+  type: Type,
+): IRTupleIndexBinding => ({
+  kind: "IRTupleIndexBinding",
+  tuple,
+  index,
   type,
 });
 

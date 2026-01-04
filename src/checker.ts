@@ -1104,6 +1104,8 @@ const inferExpr = (
       return inferMatch(ctx, env, registry, expr);
     case "FieldAccess":
       return inferFieldAccess(ctx, env, registry, expr);
+    case "TupleIndex":
+      return inferTupleIndex(ctx, env, registry, expr);
     case "Record":
       return inferRecord(ctx, env, registry, expr);
   }
@@ -1173,6 +1175,50 @@ const inferFieldAccess = (
     `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`,
   );
   return [s1, freshTypeVar(), constraints];
+};
+
+/**
+ * Infer the type of a tuple index expression (tuple.0, tuple.1).
+ *
+ * The index must be within bounds of the tuple's arity.
+ */
+const inferTupleIndex = (
+  ctx: CheckContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.TupleIndex,
+): InferResult => {
+  // Infer the tuple expression's type
+  const [s1, tupleType, constraints] = inferExpr(ctx, env, registry, expr.tuple);
+  const resolvedType = applySubst(s1, tupleType);
+
+  // Case 1: Type variable - constrain to tuple with at least index+1 elements
+  if (resolvedType.kind === "TVar") {
+    // We don't know the tuple arity yet, so create a fresh type for the element
+    // and let later unification resolve it
+    const elementType = freshTypeVar();
+    // We can't fully constrain this without knowing the arity, so just return
+    // the fresh type and let pattern matching or other operations constrain it
+    return [s1, elementType, constraints];
+  }
+
+  // Must be a tuple type
+  if (resolvedType.kind !== "TTuple") {
+    addError(ctx, `Cannot index into non-tuple type: ${typeToString(resolvedType)}`);
+    return [s1, freshTypeVar(), constraints];
+  }
+
+  // Check bounds
+  if (expr.index < 0 || expr.index >= resolvedType.elements.length) {
+    addError(
+      ctx,
+      `Tuple index ${expr.index} out of bounds for tuple of ${resolvedType.elements.length} element(s)`,
+    );
+    return [s1, freshTypeVar(), constraints];
+  }
+
+  // Return the type at the specified index (bounds already checked above)
+  return [s1, resolvedType.elements[expr.index]!, constraints];
 };
 
 /**

@@ -304,6 +304,9 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
     case "FieldAccess":
       return lowerFieldAccess(ctx, expr);
 
+    case "TupleIndex":
+      return lowerTupleIndex(ctx, expr);
+
     case "Match":
       return lowerMatch(ctx, expr);
   }
@@ -544,6 +547,29 @@ const lowerFieldAccess = (ctx: LowerContext, expr: ast.FieldAccess): ir.IRExpr =
   const result = ir.irLet(name, binding, ir.irAtomExpr(ir.irVar(name, fieldType)));
 
   return wrapWithBindings(recordResult.bindings, result);
+};
+
+const lowerTupleIndex = (ctx: LowerContext, expr: ast.TupleIndex): ir.IRExpr => {
+  // Normalize tuple to atom
+  const tupleResult = normalize(ctx, expr.tuple);
+
+  // Get the element type
+  const tupleType = tupleResult.atom.type;
+  if (tupleType.kind !== "TTuple") {
+    throw new Error(`Expected tuple type, got ${tupleType.kind}`);
+  }
+  const elementType = tupleType.elements[expr.index]!;
+
+  // Create the tuple index binding
+  const binding = ir.irTupleIndexBinding(tupleResult.atom, expr.index, elementType);
+
+  // Generate a name for the result
+  const name = freshVar(ctx);
+  extendEnv(ctx, name, elementType);
+
+  const result = ir.irLet(name, binding, ir.irAtomExpr(ir.irVar(name, elementType)));
+
+  return wrapWithBindings(tupleResult.bindings, result);
 };
 
 const lowerMatch = (ctx: LowerContext, expr: ast.Match): ir.IRExpr => {

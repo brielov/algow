@@ -238,6 +238,19 @@ describe("Interpreter", () => {
       const result = evaluate(emptyEnv, ast.tuple([ast.num(42)]));
       expect(result).toEqual(vnum(42));
     });
+
+    it("accesses tuple elements by index", () => {
+      const tuple = ast.tuple([ast.num(42), ast.str("hello"), ast.bool(true)]);
+      expect(evaluate(emptyEnv, ast.tupleIndex(tuple, 0))).toEqual(vnum(42));
+      expect(evaluate(emptyEnv, ast.tupleIndex(tuple, 1))).toEqual(vstr("hello"));
+      expect(evaluate(emptyEnv, ast.tupleIndex(tuple, 2))).toEqual(vbool(true));
+    });
+
+    it("accesses nested tuple elements", () => {
+      const inner = ast.tuple([ast.num(1), ast.num(2)]);
+      const outer = ast.tuple([inner, ast.num(3)]);
+      expect(evaluate(emptyEnv, ast.tupleIndex(ast.tupleIndex(outer, 0), 1))).toEqual(vnum(2));
+    });
   });
 
   describe("records", () => {
