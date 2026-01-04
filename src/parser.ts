@@ -646,12 +646,19 @@ const parseRecord = (state: ParserState): ast.Expr => {
       if (!nameToken) break;
       const name = text(state, nameToken);
       const fieldStart = nameToken[1];
+      const fieldEnd = nameToken[2];
 
-      expect(state, TokenKind.Eq, "expected '=' after field name");
-      const value = parseExpr(state);
-      const fieldEnd = value.span?.end ?? state.current[1];
-
-      fields.push(ast.field(name, value, span(fieldStart, fieldEnd)));
+      // Support field punning: { x, y } is shorthand for { x = x, y = y }
+      if (at(state, TokenKind.Eq)) {
+        advance(state);
+        const value = parseExpr(state);
+        const valueEnd = value.span?.end ?? state.current[1];
+        fields.push(ast.field(name, value, span(fieldStart, valueEnd)));
+      } else {
+        // Punning: { x } means { x = x }
+        const value = ast.var_(name, span(fieldStart, fieldEnd));
+        fields.push(ast.field(name, value, span(fieldStart, fieldEnd)));
+      }
     } while (at(state, TokenKind.Comma));
   }
 
@@ -912,12 +919,19 @@ const parseRecordPattern = (state: ParserState): ast.Pattern => {
       if (!nameToken) break;
       const name = text(state, nameToken);
       const fieldStart = nameToken[1];
+      const fieldEnd = nameToken[2];
 
-      expect(state, TokenKind.Eq, "expected '=' after field name");
-      const pattern = parsePattern(state);
-      const fieldEnd = pattern.span?.end ?? state.current[1];
-
-      fields.push(ast.pfield(name, pattern, span(fieldStart, fieldEnd)));
+      // Support field punning: { x, y } is shorthand for { x = x, y = y }
+      if (at(state, TokenKind.Eq)) {
+        advance(state);
+        const pattern = parsePattern(state);
+        const patternEnd = pattern.span?.end ?? state.current[1];
+        fields.push(ast.pfield(name, pattern, span(fieldStart, patternEnd)));
+      } else {
+        // Punning: { x } means { x = x } (binds field to variable of same name)
+        const pattern = ast.pvar(name, span(fieldStart, fieldEnd));
+        fields.push(ast.pfield(name, pattern, span(fieldStart, fieldEnd)));
+      }
     } while (at(state, TokenKind.Comma));
   }
 

@@ -623,6 +623,32 @@ describe("Parser", () => {
         ast.record([ast.field("sum", ast.binOp("+", ast.num(1), ast.num(2)))]),
       );
     });
+
+    it("parses record with field punning", () => {
+      const result = parse("{ x, y }");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.record([ast.field("x", ast.var_("x")), ast.field("y", ast.var_("y"))]),
+      );
+    });
+
+    it("parses record with mixed punning and explicit fields", () => {
+      const result = parse("{ x, y = 2, z }");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.record([
+          ast.field("x", ast.var_("x")),
+          ast.field("y", ast.num(2)),
+          ast.field("z", ast.var_("z")),
+        ]),
+      );
+    });
+
+    it("parses single punned field", () => {
+      const result = parse("{ x }");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.record([ast.field("x", ast.var_("x"))]));
+    });
   });
 
   describe("field access", () => {
@@ -999,6 +1025,44 @@ describe("Parser", () => {
           ast.case_(
             ast.precord([ast.pfield("x", ast.pvar("a")), ast.pfield("y", ast.pvar("b"))]),
             ast.binOp("+", ast.var_("a"), ast.var_("b")),
+          ),
+        ]),
+      );
+    });
+
+    it("parses match with punned record patterns", () => {
+      const result = parse(`
+        match r with
+          | { x, y } => x + y
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.match(ast.var_("r"), [
+          ast.case_(
+            ast.precord([ast.pfield("x", ast.pvar("x")), ast.pfield("y", ast.pvar("y"))]),
+            ast.binOp("+", ast.var_("x"), ast.var_("y")),
+          ),
+        ]),
+      );
+    });
+
+    it("parses match with mixed punned and explicit record patterns", () => {
+      const result = parse(`
+        match r with
+          | { x, y = b, z } => x + b + z
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.match(ast.var_("r"), [
+          ast.case_(
+            ast.precord([
+              ast.pfield("x", ast.pvar("x")),
+              ast.pfield("y", ast.pvar("b")),
+              ast.pfield("z", ast.pvar("z")),
+            ]),
+            ast.binOp("+", ast.binOp("+", ast.var_("x"), ast.var_("b")), ast.var_("z")),
           ),
         ]),
       );

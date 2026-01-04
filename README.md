@@ -40,7 +40,7 @@ A small, experimental type checker written in TypeScript. This is a learning pro
 - [ ] **Or-patterns** — `| Nothing | Just Nothing => ...`
 - [ ] **Optional type annotations** — `let add (x: number) y: number = x + y`
 - [ ] **Wildcard in expressions** — `let _ = expr in ...` to ignore values
-- [ ] **Record field punning** — `{ x, y }` as shorthand for `{ x = x, y = y }`
+- [x] **Record field punning** — `{ x, y }` as shorthand for `{ x = x, y = y }`
 
 #### Lower Priority
 

@@ -109,6 +109,7 @@ pattern      = LOWER                           -- variable
              | "{" field_pat ("," field_pat)* "}"  -- record
 
 field_pat    = LOWER "=" pattern
+             | LOWER                              -- punning: { x } means { x = x }
 ```
 
 Examples:
@@ -184,6 +185,7 @@ tuple_expr   = "(" expression "," expression ("," expression)* ")"
 
 record_expr  = "{" field ("," field)* "}"
 field        = LOWER "=" expression
+             | LOWER                             -- punning: { x } means { x = x }
 
 list_expr    = "[" (expression ("," expression)*)? "]"
 ```
@@ -320,9 +322,23 @@ end
 let person = { name = "Alice", age = 30 }
 let greeting = "Hello, " + person.name
 
+-- Field punning: { x } is shorthand for { x = x }
+let x = 10
+let y = 20
+let point = { x, y }           -- same as { x = x, y = y }
+
+-- Mixed punning and explicit fields
+let z = 30
+let point3d = { x, y, z = z + 1 }
+
 -- Record pattern matching
 let getAge p = match p with
   | { age = a } => a
+end
+
+-- Pattern punning: { x } matches field 'x' and binds to variable 'x'
+let getCoords p = match p with
+  | { x, y } => (x, y)         -- same as { x = x, y = y }
 end
 
 -- Row-polymorphic function (inferred: { x: a | r } -> a)
