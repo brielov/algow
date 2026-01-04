@@ -230,6 +230,10 @@ export type IRLambdaBinding = {
   readonly paramType: Type;
   readonly body: IRExpr;
   readonly type: Type; // Function type
+  readonly tailRecursive?: {
+    readonly selfName: string; // Name of the function for self-calls
+    readonly params: readonly string[]; // All parameter names (for multi-arg functions)
+  };
 };
 
 /**
@@ -493,12 +497,14 @@ export const irLambdaBinding = (
   paramType: Type,
   body: IRExpr,
   type: Type,
+  tailRecursive?: { selfName: string; params: readonly string[] },
 ): IRLambdaBinding => ({
   kind: "IRLambdaBinding",
   param,
   paramType,
   body,
   type,
+  tailRecursive,
 });
 
 export const irClosureBinding = (

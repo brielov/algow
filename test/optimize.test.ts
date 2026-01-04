@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import * as ir from "../src/ir";
-import { constantFolding, deadCodeElimination, optimize } from "../src/optimize";
+import {
+  constantFolding,
+  deadCodeElimination,
+  optimize,
+  tailCallOptimization,
+} from "../src/optimize";
 
 // Helper to create basic types
 const numType = { kind: "TCon" as const, name: "number" };
@@ -296,6 +301,129 @@ describe("Optimizations", () => {
         expect(result.binding.kind).toBe("IRAtomBinding");
         if (result.binding.kind === "IRAtomBinding" && result.binding.atom.kind === "IRLit") {
           expect(result.binding.atom.value).toBe(12);
+        }
+      }
+    });
+  });
+
+  describe("Tail-Call Optimization", () => {
+    it("marks simple tail-recursive function", () => {
+      // let rec f x = if x <= 0 then x else f (x - 1) in f 10
+      const funcType = { kind: "TFun" as const, param: numType, ret: numType };
+
+      // Build the tail call: f (x - 1)
+      // As IR: let _t1 = x - 1 in let _t2 = f _t1 in _t2
+      const tailCallExpr = ir.irLet(
+        "_t1",
+        ir.irBinOpBinding("-", ir.irVar("x", numType), ir.irLit(1, numType), numType, numType),
+        ir.irLet(
+          "_t2",
+          ir.irAppBinding(ir.irVar("f", funcType), ir.irVar("_t1", numType), numType),
+          ir.irAtomExpr(ir.irVar("_t2", numType)),
+        ),
+      );
+
+      // Build the if: if x <= 0 then x else <tail call>
+      const ifBinding = ir.irIfBinding(
+        ir.irVar("_cond", boolType),
+        ir.irAtomExpr(ir.irVar("x", numType)),
+        tailCallExpr,
+        numType,
+      );
+
+      // Full function body: let _cond = x <= 0 in let _result = if ... in _result
+      const funcBody = ir.irLet(
+        "_cond",
+        ir.irBinOpBinding("<=", ir.irVar("x", numType), ir.irLit(0, numType), numType, boolType),
+        ir.irLet("_result", ifBinding, ir.irAtomExpr(ir.irVar("_result", numType))),
+      );
+
+      const expr = ir.irLetRec(
+        [
+          {
+            name: "f",
+            binding: ir.irLambdaBinding("x", numType, funcBody, funcType),
+          },
+        ],
+        ir.irLet(
+          "result",
+          ir.irAppBinding(ir.irVar("f", funcType), ir.irLit(10, numType), numType),
+          ir.irAtomExpr(ir.irVar("result", numType)),
+        ),
+      );
+
+      const result = tailCallOptimization.run(expr);
+
+      // Should mark the function as tail-recursive
+      expect(result.kind).toBe("IRLetRec");
+      if (result.kind === "IRLetRec") {
+        const binding = result.bindings[0]!.binding;
+        expect(binding.kind).toBe("IRLambdaBinding");
+        if (binding.kind === "IRLambdaBinding") {
+          expect(binding.tailRecursive).toBeDefined();
+          expect(binding.tailRecursive?.selfName).toBe("f");
+          expect(binding.tailRecursive?.params).toEqual(["x"]);
+        }
+      }
+    });
+
+    it("does not mark non-tail-recursive function", () => {
+      // let rec f x = if x <= 0 then 0 else x + f (x - 1) in f 10
+      // The recursive call is NOT in tail position (it's an argument to +)
+      const funcType = { kind: "TFun" as const, param: numType, ret: numType };
+
+      // Non-tail call: x + f (x - 1)
+      // The f call is used as an argument to +, not returned directly
+      const recursiveCall = ir.irLet(
+        "_t1",
+        ir.irBinOpBinding("-", ir.irVar("x", numType), ir.irLit(1, numType), numType, numType),
+        ir.irLet(
+          "_t2",
+          ir.irAppBinding(ir.irVar("f", funcType), ir.irVar("_t1", numType), numType),
+          ir.irLet(
+            "_t3",
+            ir.irBinOpBinding("+", ir.irVar("x", numType), ir.irVar("_t2", numType), numType, numType),
+            ir.irAtomExpr(ir.irVar("_t3", numType)),
+          ),
+        ),
+      );
+
+      const ifBinding = ir.irIfBinding(
+        ir.irVar("_cond", boolType),
+        ir.irAtomExpr(ir.irLit(0, numType)),
+        recursiveCall,
+        numType,
+      );
+
+      const funcBody = ir.irLet(
+        "_cond",
+        ir.irBinOpBinding("<=", ir.irVar("x", numType), ir.irLit(0, numType), numType, boolType),
+        ir.irLet("_result", ifBinding, ir.irAtomExpr(ir.irVar("_result", numType))),
+      );
+
+      const expr = ir.irLetRec(
+        [
+          {
+            name: "f",
+            binding: ir.irLambdaBinding("x", numType, funcBody, funcType),
+          },
+        ],
+        ir.irLet(
+          "result",
+          ir.irAppBinding(ir.irVar("f", funcType), ir.irLit(10, numType), numType),
+          ir.irAtomExpr(ir.irVar("result", numType)),
+        ),
+      );
+
+      const result = tailCallOptimization.run(expr);
+
+      // Should NOT mark as tail-recursive
+      expect(result.kind).toBe("IRLetRec");
+      if (result.kind === "IRLetRec") {
+        const binding = result.bindings[0]!.binding;
+        expect(binding.kind).toBe("IRLambdaBinding");
+        if (binding.kind === "IRLambdaBinding") {
+          expect(binding.tailRecursive).toBeUndefined();
         }
       }
     });

@@ -431,13 +431,445 @@ const removeUnusedBinding = (binding: ir.IRBinding, uses: Map<string, number>): 
 };
 
 // =============================================================================
+// TAIL-CALL OPTIMIZATION
+// =============================================================================
+
+/**
+ * Collect all parameters from nested lambdas.
+ * `fn a => fn b => fn c => body` returns ["a", "b", "c"]
+ */
+const collectLambdaParams = (binding: ir.IRLambdaBinding): string[] => {
+  const params: string[] = [binding.param];
+  let body = binding.body;
+
+  // Unwrap nested lambdas bound to fresh names
+  while (body.kind === "IRLet" && body.binding.kind === "IRLambdaBinding") {
+    params.push(body.binding.param);
+    body = body.binding.body;
+  }
+
+  return params;
+};
+
+/**
+ * Get the innermost body of nested lambdas.
+ */
+const getInnermostBody = (binding: ir.IRLambdaBinding): ir.IRExpr => {
+  let body = binding.body;
+
+  while (body.kind === "IRLet" && body.binding.kind === "IRLambdaBinding") {
+    body = body.binding.body;
+  }
+
+  return body;
+};
+
+/**
+ * Check if an expression is in tail position and only contains
+ * tail calls to the specified function name.
+ *
+ * Returns true if all recursive calls are in tail position.
+ * Returns false if there are non-tail recursive calls.
+ * Returns null if there are no recursive calls.
+ */
+const checkTailCalls = (
+  expr: ir.IRExpr,
+  funcName: string,
+  paramCount: number,
+): boolean | null => {
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      // No recursive call in atoms
+      return null;
+
+    case "IRLet": {
+      // Check if this is a tail call: let result = funcName arg1 arg2 ... in result
+      const callInfo = extractTailCall(expr, funcName, paramCount);
+      if (callInfo) {
+        return true; // This is a valid tail call
+      }
+
+      // Check if binding contains non-tail recursive calls
+      if (hasRecursiveCall(expr.binding, funcName)) {
+        return false; // Recursive call not in tail position
+      }
+
+      // Check the body
+      return checkTailCalls(expr.body, funcName, paramCount);
+    }
+
+    case "IRLetRec":
+      // Nested letrec - check body, but bindings shouldn't have our function
+      return checkTailCalls(expr.body, funcName, paramCount);
+  }
+};
+
+/**
+ * Extract tail call information if expr ends with a tail call to funcName.
+ * Handles interleaved argument computations like:
+ *   let _t1 = n - 1 in
+ *   let _t2 = f _t1 in
+ *   let _t3 = n * acc in
+ *   let _t4 = _t2 _t3 in
+ *   _t4
+ */
+const extractTailCall = (
+  expr: ir.IRExpr,
+  funcName: string,
+  paramCount: number,
+): ir.IRAtom[] | null => {
+  // Collect all let bindings first
+  const bindings: Array<{ name: string; binding: ir.IRBinding }> = [];
+  let current: ir.IRExpr = expr;
+
+  while (current.kind === "IRLet") {
+    bindings.push({ name: current.name, binding: current.binding });
+    current = current.body;
+  }
+
+  // Final expression should be a variable
+  if (current.kind !== "IRAtomExpr" || current.atom.kind !== "IRVar") {
+    return null;
+  }
+
+  const resultVar = current.atom.name;
+
+  // Work backwards from the result to find the application chain
+  const args: ir.IRAtom[] = [];
+  let targetVar = resultVar;
+
+  for (let i = bindings.length - 1; i >= 0; i--) {
+    const { name, binding } = bindings[i]!;
+
+    if (name === targetVar && binding.kind === "IRAppBinding") {
+      // This is part of the application chain
+      args.unshift(binding.arg);
+
+      // Check what the function is
+      if (binding.func.kind === "IRVar") {
+        if (binding.func.name === funcName) {
+          // Found the start of the tail call!
+          if (args.length === paramCount) {
+            return args;
+          }
+          return null; // Wrong arity
+        }
+        // Continue searching - this is a partial application
+        targetVar = binding.func.name;
+      } else {
+        return null; // Function is not a variable
+      }
+    }
+    // Skip non-matching bindings (argument computations)
+  }
+
+  return null;
+};
+
+/**
+ * Check if a binding contains any call to funcName (non-tail position).
+ */
+const hasRecursiveCall = (binding: ir.IRBinding, funcName: string): boolean => {
+  const checkAtom = (atom: ir.IRAtom): boolean =>
+    atom.kind === "IRVar" && atom.name === funcName;
+
+  switch (binding.kind) {
+    case "IRAtomBinding":
+      return checkAtom(binding.atom);
+
+    case "IRAppBinding":
+      return checkAtom(binding.func) || checkAtom(binding.arg);
+
+    case "IRBinOpBinding":
+      return checkAtom(binding.left) || checkAtom(binding.right);
+
+    case "IRIfBinding": {
+      if (checkAtom(binding.cond)) return true;
+      // Branches are in tail position, so we need to check them differently
+      const thenResult = checkTailCalls(binding.thenBranch, funcName, 0);
+      const elseResult = checkTailCalls(binding.elseBranch, funcName, 0);
+      // If either branch has non-tail calls, return true
+      return thenResult === false || elseResult === false;
+    }
+
+    case "IRTupleBinding":
+      return binding.elements.some(checkAtom);
+
+    case "IRRecordBinding":
+      return binding.fields.some((f) => checkAtom(f.value));
+
+    case "IRFieldAccessBinding":
+      return checkAtom(binding.record);
+
+    case "IRTupleIndexBinding":
+      return checkAtom(binding.tuple);
+
+    case "IRMatchBinding": {
+      if (checkAtom(binding.scrutinee)) return true;
+      // Case bodies are in tail position
+      for (const c of binding.cases) {
+        if (c.guard && hasRecursiveCallExpr(c.guard, funcName)) return true;
+        const bodyResult = checkTailCalls(c.body, funcName, 0);
+        if (bodyResult === false) return true;
+      }
+      return false;
+    }
+
+    case "IRLambdaBinding":
+      // Lambdas capture funcName but don't call it in this context
+      return false;
+
+    case "IRClosureBinding":
+      return binding.captures.some(checkAtom);
+  }
+};
+
+/**
+ * Check if an expression contains any call to funcName.
+ */
+const hasRecursiveCallExpr = (expr: ir.IRExpr, funcName: string): boolean => {
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      return expr.atom.kind === "IRVar" && expr.atom.name === funcName;
+
+    case "IRLet":
+      return (
+        hasRecursiveCall(expr.binding, funcName) ||
+        hasRecursiveCallExpr(expr.body, funcName)
+      );
+
+    case "IRLetRec":
+      return (
+        expr.bindings.some((b) => hasRecursiveCall(b.binding, funcName)) ||
+        hasRecursiveCallExpr(expr.body, funcName)
+      );
+  }
+};
+
+/**
+ * Check if a binding in a letrec is tail-recursive.
+ */
+const isTailRecursive = (
+  name: string,
+  binding: ir.IRBinding,
+): { params: string[] } | null => {
+  if (binding.kind !== "IRLambdaBinding") {
+    return null;
+  }
+
+  const params = collectLambdaParams(binding);
+  const innerBody = getInnermostBody(binding);
+
+  // Check if the body only has tail calls
+  const result = checkTailCallsInBody(innerBody, name, params.length);
+
+  if (result) {
+    return { params };
+  }
+
+  return null;
+};
+
+/**
+ * Check the body of a function for tail-recursive calls.
+ * Handles if/match expressions where branches are in tail position.
+ */
+const checkTailCallsInBody = (
+  expr: ir.IRExpr,
+  funcName: string,
+  paramCount: number,
+): boolean => {
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      // Base case - no recursive call, that's fine
+      return true;
+
+    case "IRLet": {
+      // Check if this is a tail call
+      const callInfo = extractTailCall(expr, funcName, paramCount);
+      if (callInfo) {
+        return true;
+      }
+
+      // Check binding for non-tail recursive calls
+      const bindingCheck = checkBindingForTCO(expr.binding, funcName, paramCount);
+      if (bindingCheck === false) {
+        return false;
+      }
+      if (bindingCheck === true) {
+        return true; // Binding itself is tail-recursive (if/match)
+      }
+
+      // Continue checking body
+      return checkTailCallsInBody(expr.body, funcName, paramCount);
+    }
+
+    case "IRLetRec":
+      return checkTailCallsInBody(expr.body, funcName, paramCount);
+  }
+};
+
+/**
+ * Check a binding for TCO eligibility.
+ * Returns true if binding contains only tail calls.
+ * Returns false if binding contains non-tail calls.
+ * Returns null if binding doesn't involve funcName.
+ */
+const checkBindingForTCO = (
+  binding: ir.IRBinding,
+  funcName: string,
+  paramCount: number,
+): boolean | null => {
+  switch (binding.kind) {
+    case "IRIfBinding": {
+      // Both branches must be tail-recursive
+      const thenOk = checkTailCallsInBody(binding.thenBranch, funcName, paramCount);
+      const elseOk = checkTailCallsInBody(binding.elseBranch, funcName, paramCount);
+      if (!thenOk || !elseOk) return false;
+      return true;
+    }
+
+    case "IRMatchBinding": {
+      // All case bodies must be tail-recursive
+      for (const c of binding.cases) {
+        if (c.guard && hasRecursiveCallExpr(c.guard, funcName)) {
+          return false;
+        }
+        if (!checkTailCallsInBody(c.body, funcName, paramCount)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    case "IRAppBinding":
+      // Non-tail application - check if it involves funcName
+      if (binding.func.kind === "IRVar" && binding.func.name === funcName) {
+        return false; // Non-tail call to self
+      }
+      return null;
+
+    default:
+      // Check if binding references funcName
+      if (hasRecursiveCall(binding, funcName)) {
+        return false;
+      }
+      return null;
+  }
+};
+
+/**
+ * Mark a lambda as tail-recursive by adding the marker.
+ */
+const markTailRecursive = (
+  binding: ir.IRLambdaBinding,
+  selfName: string,
+  params: readonly string[],
+): ir.IRLambdaBinding => ({
+  ...binding,
+  tailRecursive: { selfName, params },
+});
+
+/**
+ * Tail-Call Optimization Pass
+ *
+ * Detects tail-recursive functions in letrec bindings and marks them
+ * for loop-based code generation in the backend.
+ */
+export const tailCallOptimization: OptPass = {
+  name: "tail-call-optimization",
+  run(expr) {
+    return transformTCO(expr);
+  },
+};
+
+/**
+ * Transform an expression, marking tail-recursive functions.
+ */
+const transformTCO = (expr: ir.IRExpr): ir.IRExpr => {
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      return expr;
+
+    case "IRLet": {
+      const newBinding = transformBindingTCO(expr.binding);
+      const newBody = transformTCO(expr.body);
+      return ir.irLet(expr.name, newBinding, newBody);
+    }
+
+    case "IRLetRec": {
+      // Check each binding for tail recursion
+      const newBindings = expr.bindings.map((b) => {
+        const tcoInfo = isTailRecursive(b.name, b.binding);
+        if (tcoInfo && b.binding.kind === "IRLambdaBinding") {
+          const marked = markTailRecursive(b.binding, b.name, tcoInfo.params);
+          return { name: b.name, binding: transformBindingTCO(marked) };
+        }
+        return { name: b.name, binding: transformBindingTCO(b.binding) };
+      });
+      const newBody = transformTCO(expr.body);
+      return ir.irLetRec(newBindings, newBody);
+    }
+  }
+};
+
+/**
+ * Transform bindings, recursing into nested expressions.
+ */
+const transformBindingTCO = (binding: ir.IRBinding): ir.IRBinding => {
+  switch (binding.kind) {
+    case "IRAtomBinding":
+    case "IRAppBinding":
+    case "IRBinOpBinding":
+    case "IRTupleBinding":
+    case "IRRecordBinding":
+    case "IRFieldAccessBinding":
+    case "IRTupleIndexBinding":
+    case "IRClosureBinding":
+      return binding;
+
+    case "IRIfBinding":
+      return ir.irIfBinding(
+        binding.cond,
+        transformTCO(binding.thenBranch),
+        transformTCO(binding.elseBranch),
+        binding.type,
+      );
+
+    case "IRMatchBinding":
+      return ir.irMatchBinding(
+        binding.scrutinee,
+        binding.cases.map((c) => ({
+          pattern: c.pattern,
+          guard: c.guard ? transformTCO(c.guard) : undefined,
+          body: transformTCO(c.body),
+        })),
+        binding.type,
+      );
+
+    case "IRLambdaBinding":
+      return ir.irLambdaBinding(
+        binding.param,
+        binding.paramType,
+        transformTCO(binding.body),
+        binding.type,
+        binding.tailRecursive,
+      );
+  }
+};
+
+// =============================================================================
 // OPTIMIZATION PIPELINE
 // =============================================================================
 
 /**
  * Default optimization passes in order of application.
  */
-const defaultPasses: readonly OptPass[] = [constantFolding, deadCodeElimination];
+const defaultPasses: readonly OptPass[] = [
+  constantFolding,
+  deadCodeElimination,
+  tailCallOptimization,
+];
 
 /**
  * Run all optimization passes on an IR expression.
