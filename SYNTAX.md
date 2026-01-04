@@ -123,6 +123,10 @@ let rec fact n = if n == 0 then 1 else n * fact (n - 1)
 let (x, y) = (10, 20)
 let {name = n, age = a} = person
 let ((a, b), c) = nested
+
+-- Wildcard to ignore values
+let _ = sideEffect in result
+let (x, _) = pair in x          -- extract first, ignore second
 ```
 
 ### Expressions
