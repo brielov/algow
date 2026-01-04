@@ -1888,10 +1888,7 @@ const inferPattern = (
         for (const [name, type1] of firstBindings) {
           const type2 = altBindings.get(name);
           if (!type2) {
-            addError(
-              ctx,
-              `Or-pattern alternative ${i + 1} is missing binding for '${name}'`,
-            );
+            addError(ctx, `Or-pattern alternative ${i + 1} is missing binding for '${name}'`);
           } else {
             // Unify the types
             const s3 = unify(ctx, applySubst(currentSubst, type1), applySubst(currentSubst, type2));

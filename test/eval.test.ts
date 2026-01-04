@@ -635,7 +635,10 @@ describe("Interpreter", () => {
     it("matches first alternative in or-pattern", () => {
       // Match Nothing against (Nothing | Just Nothing)
       const expr = ast.match(ast.var_("Nothing"), [
-        ast.case_(ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]), ast.num(1)),
+        ast.case_(
+          ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]),
+          ast.num(1),
+        ),
         ast.case_(ast.pwildcard(), ast.num(0)),
       ]);
       expect(evaluate(baseEnv, expr)).toEqual(vnum(1));
@@ -645,7 +648,10 @@ describe("Interpreter", () => {
       // Match Just(Nothing) against (Nothing | Just Nothing)
       const justNothing = ast.app(ast.var_("Just"), ast.var_("Nothing"));
       const expr = ast.match(justNothing, [
-        ast.case_(ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]), ast.num(1)),
+        ast.case_(
+          ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]),
+          ast.num(1),
+        ),
         ast.case_(ast.pwildcard(), ast.num(0)),
       ]);
       expect(evaluate(baseEnv, expr)).toEqual(vnum(1));
@@ -655,7 +661,10 @@ describe("Interpreter", () => {
       // Match Just(Just 1) against (Nothing | Just Nothing) - should fail
       const justJust = ast.app(ast.var_("Just"), ast.app(ast.var_("Just"), ast.num(1)));
       const expr = ast.match(justJust, [
-        ast.case_(ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]), ast.num(1)),
+        ast.case_(
+          ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]),
+          ast.num(1),
+        ),
         ast.case_(ast.pwildcard(), ast.num(0)),
       ]);
       expect(evaluate(baseEnv, expr)).toEqual(vnum(0));
@@ -665,7 +674,10 @@ describe("Interpreter", () => {
       // Match Just 5 against (Just x | Right x) - x should be 5
       const just5 = ast.app(ast.var_("Just"), ast.num(5));
       const expr = ast.match(just5, [
-        ast.case_(ast.por([ast.pcon("Just", [ast.pvar("x")]), ast.pcon("Right", [ast.pvar("x")])]), ast.var_("x")),
+        ast.case_(
+          ast.por([ast.pcon("Just", [ast.pvar("x")]), ast.pcon("Right", [ast.pvar("x")])]),
+          ast.var_("x"),
+        ),
         ast.case_(ast.pwildcard(), ast.num(0)),
       ]);
       expect(evaluate(baseEnv, expr)).toEqual(vnum(5));

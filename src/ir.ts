@@ -252,7 +252,15 @@ export type IRCase = {
 /**
  * IR patterns - simplified from AST patterns, with types.
  */
-export type IRPattern = IRPVar | IRPWildcard | IRPCon | IRPLit | IRPTuple | IRPRecord | IRPAs | IRPOr;
+export type IRPattern =
+  | IRPVar
+  | IRPWildcard
+  | IRPCon
+  | IRPLit
+  | IRPTuple
+  | IRPRecord
+  | IRPAs
+  | IRPOr;
 
 export type IRPVar = {
   readonly kind: "IRPVar";
