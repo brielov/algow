@@ -1869,7 +1869,9 @@ describe("Parser", () => {
     });
 
     it("parses annotated recursive binding", () => {
-      const result = parse("let rec fact (n : number) : number = if n <= 1 then 1 else n * fact (n - 1) in fact");
+      const result = parse(
+        "let rec fact (n : number) : number = if n <= 1 then 1 else n * fact (n - 1) in fact",
+      );
       expect(result.diagnostics).toHaveLength(0);
       const expr = result.program.expr;
       expect(expr?.kind).toBe("LetRec");

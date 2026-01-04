@@ -267,7 +267,10 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
 
     advance(state); // 'in'
     const continuation = parseExpr(state);
-    return { kind: "expr", expr: ast.let_(name, value, continuation, undefined, nameSpan, returnType) };
+    return {
+      kind: "expr",
+      expr: ast.let_(name, value, continuation, undefined, nameSpan, returnType),
+    };
   }
 
   return { kind: "binding", binding: { name, nameSpan, params, returnType, body, recursive } };

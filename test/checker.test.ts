@@ -1949,7 +1949,13 @@ describe("Type Inference", () => {
       // let f (x : number) = x + 1 in f
       const expr = ast.let_(
         "f",
-        ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1)), undefined, undefined, ast.tyvar("number")),
+        ast.abs(
+          "x",
+          ast.binOp("+", ast.var_("x"), ast.num(1)),
+          undefined,
+          undefined,
+          ast.tyvar("number"),
+        ),
         ast.var_("f"),
       );
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
@@ -2030,7 +2036,11 @@ describe("Type Inference", () => {
       const factBody = ast.if_(
         ast.binOp("<=", ast.var_("n"), ast.num(1)),
         ast.num(1),
-        ast.binOp("*", ast.var_("n"), ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1)))),
+        ast.binOp(
+          "*",
+          ast.var_("n"),
+          ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+        ),
       );
       const recBinding: ast.RecBinding = {
         name: "fact",
