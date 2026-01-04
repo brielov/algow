@@ -1,6 +1,8 @@
 import { bindWithConstructors } from "./binder";
 import { check, processDeclarations, typeToString } from "./checker";
 import { createConstructorEnv, evaluate, type Env } from "./eval";
+import { generateJS } from "./backend/js";
+import { lowerToIR } from "./lower";
 import { offsetToLineCol } from "./lsp/positions";
 import { type Diagnostic, parse, programToExpr } from "./parser";
 import { declarations as preludeDeclarations } from "./prelude";
@@ -125,13 +127,94 @@ const typeCheck = (source: string, filename: string): void => {
   console.log(typeToString(checkResult.type));
 };
 
+const emitIR = (source: string, filename: string): void => {
+  const parseResult = parse(source);
+  const expr = programToExpr(parseResult.program);
+
+  if (parseResult.diagnostics.length > 0) {
+    printDiagnostics(parseResult.diagnostics, source, filename);
+    process.exit(1);
+  }
+
+  if (!expr) {
+    console.error(`${filename}: No expression to lower`);
+    process.exit(1);
+  }
+
+  // Process prelude + user data declarations
+  const prelude = processDeclarations(preludeDeclarations);
+  const { typeEnv, registry, constructorNames } = processDeclarations(
+    parseResult.program.declarations,
+    prelude,
+  );
+
+  // Bind and type check
+  const bindResult = bindWithConstructors(constructorNames, expr);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
+
+  const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
+  if (allDiagnostics.length > 0) {
+    printDiagnostics(allDiagnostics, source, filename);
+    process.exit(1);
+  }
+
+  // Lower to IR
+  const ir = lowerToIR(expr, typeEnv, checkResult);
+  console.log(JSON.stringify(ir, null, 2));
+};
+
+const compile = (source: string, filename: string): void => {
+  const parseResult = parse(source);
+  const expr = programToExpr(parseResult.program);
+
+  if (parseResult.diagnostics.length > 0) {
+    printDiagnostics(parseResult.diagnostics, source, filename);
+    process.exit(1);
+  }
+
+  if (!expr) {
+    console.error(`${filename}: No expression to compile`);
+    process.exit(1);
+  }
+
+  // Process prelude + user data declarations
+  const prelude = processDeclarations(preludeDeclarations);
+  const { typeEnv, registry, constructorNames } = processDeclarations(
+    parseResult.program.declarations,
+    prelude,
+  );
+
+  // Bind and type check
+  const bindResult = bindWithConstructors(constructorNames, expr);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
+
+  const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
+  if (allDiagnostics.length > 0) {
+    printDiagnostics(allDiagnostics, source, filename);
+    process.exit(1);
+  }
+
+  // Lower to IR and generate JS
+  const ir = lowerToIR(expr, typeEnv, checkResult);
+  const output = generateJS(ir, constructorNames);
+
+  // Print any warnings
+  for (const warning of output.warnings) {
+    console.warn(`Warning: ${warning}`);
+  }
+
+  console.log(output.code);
+};
+
 const main = async (): Promise<void> => {
   const args = process.argv.slice(2);
 
   if (args.length === 0) {
     console.error("Usage: algow <file.alg>");
     console.error("       algow -e <expression>");
-    console.error("       algow -t <file.alg>    (type check only)");
+    console.error("       algow -t <file.alg>       (type check only)");
+    console.error("       algow -c <file.alg>       (compile to JS)");
+    console.error("       algow --emit-ir <file.alg> (emit IR)");
     process.exit(1);
   }
 
@@ -141,6 +224,12 @@ const main = async (): Promise<void> => {
     } else if (args[0] === "-t" && args[1]) {
       const source = await Bun.file(args[1]).text();
       typeCheck(source, args[1]);
+    } else if (args[0] === "-c" && args[1]) {
+      const source = await Bun.file(args[1]).text();
+      compile(source, args[1]);
+    } else if (args[0] === "--emit-ir" && args[1]) {
+      const source = await Bun.file(args[1]).text();
+      emitIR(source, args[1]);
     } else {
       const filename = args[0]!;
       const source = await Bun.file(filename).text();

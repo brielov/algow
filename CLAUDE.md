@@ -13,6 +13,8 @@ bun install          # Install dependencies
 bun run src/index.ts # Run with a file: bun run src/index.ts examples/demo.alg
 bun run src/index.ts -e "1 + 2"  # Run inline expression
 bun run src/index.ts -t file.alg # Type check only (show inferred type)
+bun run src/index.ts -c file.alg # Compile to JavaScript
+bun run src/index.ts --emit-ir file.alg # Emit IR (for debugging)
 bun test             # Run all tests
 bun test src/infer.test.ts       # Run single test file
 bunx oxlint          # Run linter
@@ -27,7 +29,11 @@ bun run playground:serve  # Start dev server at http://localhost:3000
 
 ## Architecture
 
-The compiler pipeline flows: **Source** → Lexer → Parser → Type Checker → Interpreter → **Value**
+The compiler has two execution modes:
+
+**Interpreter**: Source → Lexer → Parser → Type Checker → Interpreter → **Value**
+
+**Compiler**: Source → Lexer → Parser → Type Checker → IR → JS Backend → **JavaScript**
 
 ### `src/lexer.ts` — Tokenization
 
@@ -64,6 +70,40 @@ Key functions:
 ### `src/eval.ts` — Tree-walking Interpreter
 
 Evaluates type-checked AST to runtime values (`VNum`, `VStr`, `VBool`, `VClosure`, `VCon`, `VTuple`, `VRecord`). Trusts the type checker—minimal runtime checks.
+
+### `src/ir.ts` — Intermediate Representation
+
+A-Normal Form (ANF) IR where all intermediate values are named. Key types:
+
+- **Atoms**: `IRLit`, `IRVar` (trivial values)
+- **Expressions**: `IRAtomExpr`, `IRLet`, `IRLetRec`
+- **Bindings**: `IRAppBinding`, `IRBinOpBinding`, `IRIfBinding`, `IRMatchBinding`, `IRLambdaBinding`, etc.
+- **Patterns**: `IRPVar`, `IRPWildcard`, `IRPCon`, `IRPLit`, `IRPTuple`, `IRPRecord`
+
+Every IR node carries its inferred type for type-directed code generation.
+
+### `src/lower.ts` — AST to IR Lowering
+
+Transforms typed AST to ANF IR. Key operations:
+
+- `lowerToIR(expr, typeEnv, checkOutput)` → Main entry point
+- `normalize(ctx, expr)` → Ensures expression is atomic (binds to fresh variable if needed)
+- Preserves type information from the type checker
+
+### `src/backend/` — Code Generation
+
+JavaScript backend that generates optimized JS from IR:
+
+- `runtime.ts` — Runtime helpers (`$apply`, `$con`, `$eq`)
+- `js.ts` — IR to JavaScript code generation
+
+Runtime value representations:
+
+- Primitives: JS primitives directly
+- Closures: Native JS closures
+- Constructors: `{ $tag: "Name", $args: [...] }`
+- Tuples: Arrays
+- Records: Plain objects
 
 ### `src/prelude.ts` — Standard Library
 
