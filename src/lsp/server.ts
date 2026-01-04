@@ -27,6 +27,10 @@ type InitializeResult = {
   };
 };
 
+// LSP constants
+const SYNC_FULL: TextDocumentSyncKind = 1;
+const SEVERITY_ERROR = 1;
+
 import {
   bindWithConstructors,
   findAllOccurrences,
@@ -38,10 +42,7 @@ import {
 import {
   check,
   type ConstructorRegistry,
-  mergeEnvs,
-  mergeRegistries,
-  processDataDecl,
-  type TypeEnv,
+  processDeclarations,
   type TypeMap,
   typeToString,
 } from "../checker";
@@ -223,7 +224,7 @@ export const createServer = (transport: Transport): void => {
 
   const handleInitialize = (_params: InitializeParams): InitializeResult => ({
     capabilities: {
-      textDocumentSync: 1 as TextDocumentSyncKind, // Full sync
+      textDocumentSync: SYNC_FULL,
       hoverProvider: true,
       definitionProvider: true,
       renameProvider: {
@@ -257,30 +258,15 @@ export const createServer = (transport: Transport): void => {
 
   const handleHover = (params: TextDocumentPositionParams): Hover | null => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.symbols) return null;
+    if (!doc?.symbols || !doc.types) return null;
 
     const offset = positionToOffset(doc.text, params.position);
     const { symbols, types } = doc;
 
-    // Check if hovering over a definition
-    const def = findDefinitionAt(symbols, offset);
-    if (def) {
-      const type = types?.get(def);
-      if (type) {
-        return {
-          contents: {
-            kind: "markdown" as MarkupKind,
-            value: `\`\`\`algow\n${def.name}: ${typeToString(type)}\n\`\`\``,
-          },
-          range: spanToRange(doc.text, def.span),
-        };
-      }
-    }
-
-    // Check if hovering over a reference
+    // Check reference first (more common), then definition
     const ref = findReferenceAt(symbols, offset);
-    if (ref && ref.definition) {
-      const type = types?.get(ref.definition);
+    if (ref?.definition) {
+      const type = types.get(ref.definition);
       if (type) {
         return {
           contents: {
@@ -288,6 +274,20 @@ export const createServer = (transport: Transport): void => {
             value: `\`\`\`algow\n${ref.name}: ${typeToString(type)}\n\`\`\``,
           },
           range: spanToRange(doc.text, ref.span),
+        };
+      }
+    }
+
+    const def = findDefinitionAt(symbols, offset);
+    if (def) {
+      const type = types.get(def);
+      if (type) {
+        return {
+          contents: {
+            kind: "markdown" as MarkupKind,
+            value: `\`\`\`algow\n${def.name}: ${typeToString(type)}\n\`\`\``,
+          },
+          range: spanToRange(doc.text, def.span),
         };
       }
     }
@@ -312,25 +312,16 @@ export const createServer = (transport: Transport): void => {
 
   const handlePrepareRename = (params: TextDocumentPositionParams): Range | null => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.symbols) return null;
+    if (!doc?.symbols) return null;
 
     const offset = positionToOffset(doc.text, params.position);
-    const { definition } = findAllOccurrences(doc.symbols, offset);
 
-    if (!definition) return null;
-
-    // Return the range of the symbol at the cursor position
-    // First check if we're on a reference
+    // Check reference first, then definition
     const ref = findReferenceAt(doc.symbols, offset);
-    if (ref) {
-      return spanToRange(doc.text, ref.span);
-    }
+    if (ref?.definition) return spanToRange(doc.text, ref.span);
 
-    // Otherwise check if we're on a definition
     const def = findDefinitionAt(doc.symbols, offset);
-    if (def) {
-      return spanToRange(doc.text, def.span);
-    }
+    if (def) return spanToRange(doc.text, def.span);
 
     return null;
   };
@@ -375,7 +366,7 @@ export const createServer = (transport: Transport): void => {
     }
 
     // Don't evaluate if there are errors
-    if (doc.diagnostics.some((d) => d.severity === 1)) {
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
       return { success: false, error: "Cannot evaluate: document has errors" };
     }
 
@@ -385,18 +376,9 @@ export const createServer = (transport: Transport): void => {
     }
 
     try {
-      // Extract constructor names from prelude + user declarations
-      const constructorNames: string[] = [];
-      for (const decl of preludeDeclarations) {
-        for (const con of decl.constructors) {
-          constructorNames.push(con.name);
-        }
-      }
-      for (const decl of doc.program.declarations) {
-        for (const con of decl.constructors) {
-          constructorNames.push(con.name);
-        }
-      }
+      // Get constructor names from prelude + user declarations
+      const prelude = processDeclarations(preludeDeclarations);
+      const { constructorNames } = processDeclarations(doc.program.declarations, prelude);
 
       const constructorEnv = createConstructorEnv(constructorNames);
       const result = evaluate(constructorEnv, expr);
@@ -419,28 +401,12 @@ export const createServer = (transport: Transport): void => {
       lspDiagnostics.push(convertDiagnostic(text, diag));
     }
 
-    // Build type environment from prelude + user declarations
-    let typeEnv: TypeEnv = new Map();
-    let registry: ConstructorRegistry = new Map();
-    const constructorNames: string[] = [];
-
-    for (const decl of preludeDeclarations) {
-      const [newEnv, newReg] = processDataDecl(decl);
-      typeEnv = mergeEnvs(typeEnv, newEnv);
-      registry = mergeRegistries(registry, newReg);
-      for (const con of decl.constructors) {
-        constructorNames.push(con.name);
-      }
-    }
-
-    for (const decl of parseResult.program.declarations) {
-      const [newEnv, newReg] = processDataDecl(decl);
-      typeEnv = mergeEnvs(typeEnv, newEnv);
-      registry = mergeRegistries(registry, newReg);
-      for (const con of decl.constructors) {
-        constructorNames.push(con.name);
-      }
-    }
+    // Process prelude + user declarations
+    const prelude = processDeclarations(preludeDeclarations);
+    const { typeEnv, registry, constructorNames } = processDeclarations(
+      parseResult.program.declarations,
+      prelude,
+    );
 
     // Bind and type check if we have an expression
     const expr = programToExpr(parseResult.program);

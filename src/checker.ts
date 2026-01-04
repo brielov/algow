@@ -269,7 +269,7 @@ const tBool = tcon("boolean");
  * Later, we verify that the concrete type actually supports equality.
  */
 type Constraint = {
-  readonly class_: string; // The type class name (Eq, Ord, Add)
+  readonly className: string; // The type class name (Eq, Ord, Add)
   readonly type: Type; // The type that must be an instance
 };
 
@@ -476,7 +476,7 @@ const applySubstEnv = (subst: Subst, env: TypeEnv): TypeEnv => {
  * Apply a substitution to a type class constraint.
  */
 const applySubstConstraint = (subst: Subst, c: Constraint): Constraint => ({
-  class_: c.class_,
+  className: c.className,
   type: applySubst(subst, c.type),
 });
 
@@ -983,15 +983,15 @@ const solveConstraints = (ctx: CheckContext, constraints: readonly Constraint[])
 
     // Concrete type - check it has the required instance
     if (c.type.kind === "TCon") {
-      const classInstances = instances.get(c.class_);
+      const classInstances = instances.get(c.className);
       if (!classInstances?.has(c.type.name)) {
-        addError(ctx, `Type '${c.type.name}' does not satisfy ${c.class_}`);
+        addError(ctx, `Type '${c.type.name}' does not satisfy ${c.className}`);
       }
     }
 
     // Function types never satisfy our type classes
     if (c.type.kind === "TFun") {
-      addError(ctx, `Function types do not satisfy ${c.class_}`);
+      addError(ctx, `Function types do not satisfy ${c.className}`);
     }
   }
 };
@@ -1051,9 +1051,6 @@ export const check = (
     types: ctx.types,
   };
 };
-
-// Keep old name as alias for compatibility during migration
-export const infer = check;
 
 // =============================================================================
 // EXPRESSION INFERENCE
@@ -1319,7 +1316,7 @@ const inferBinOp = (
   switch (expr.op) {
     // Addition: polymorphic (Add class), returns operand type
     case "+": {
-      constraints.push({ class_: "Add", type: operandType });
+      constraints.push({ className: "Add", type: operandType });
       return [subst, operandType, constraints];
     }
 
@@ -1336,14 +1333,14 @@ const inferBinOp = (
     case ">":
     case "<=":
     case ">=": {
-      constraints.push({ class_: "Ord", type: operandType });
+      constraints.push({ className: "Ord", type: operandType });
       return [subst, tBool, constraints];
     }
 
     // Equality: Eq constraint, returns boolean
     case "==":
     case "!=": {
-      constraints.push({ class_: "Eq", type: operandType });
+      constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }
   }
@@ -2031,6 +2028,42 @@ export const mergeRegistries = (
     }
   }
   return result;
+};
+
+/**
+ * Result of processing data declarations.
+ */
+export type ProcessedDeclarations = {
+  readonly typeEnv: TypeEnv;
+  readonly registry: ConstructorRegistry;
+  readonly constructorNames: readonly string[];
+};
+
+/**
+ * Process multiple data declarations and collect their environments, registries, and constructor names.
+ */
+export const processDeclarations = (
+  declarations: readonly ast.DataDecl[],
+  initial: ProcessedDeclarations = {
+    typeEnv: new Map(),
+    registry: new Map(),
+    constructorNames: [],
+  },
+): ProcessedDeclarations => {
+  let typeEnv = initial.typeEnv;
+  let registry = initial.registry;
+  const constructorNames = [...initial.constructorNames];
+
+  for (const decl of declarations) {
+    const [newEnv, newReg] = processDataDecl(decl);
+    typeEnv = mergeEnvs(typeEnv, newEnv);
+    registry = mergeRegistries(registry, newReg);
+    for (const con of decl.constructors) {
+      constructorNames.push(con.name);
+    }
+  }
+
+  return { typeEnv, registry, constructorNames };
 };
 
 // =============================================================================

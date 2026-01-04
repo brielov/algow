@@ -1,14 +1,7 @@
 import { bindWithConstructors } from "./binder";
-import {
-  type ConstructorRegistry,
-  check,
-  mergeEnvs,
-  mergeRegistries,
-  processDataDecl,
-  typeToString,
-  type TypeEnv,
-} from "./checker";
+import { check, processDeclarations, typeToString } from "./checker";
 import { createConstructorEnv, evaluate, type Env } from "./eval";
+import { offsetToLineCol } from "./lsp/positions";
 import { type Diagnostic, parse, programToExpr } from "./parser";
 import { declarations as preludeDeclarations } from "./prelude";
 
@@ -18,21 +11,6 @@ const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 const GRAY = "\x1b[90m";
 const RESET = "\x1b[0m";
-
-/** Convert byte offset to line and column */
-const offsetToLineCol = (source: string, offset: number): { line: number; col: number } => {
-  let line = 1;
-  let col = 1;
-  for (let i = 0; i < offset && i < source.length; i++) {
-    if (source[i] === "\n") {
-      line++;
-      col = 1;
-    } else {
-      col++;
-    }
-  }
-  return { line, col };
-};
 
 /** Get the line content at a given line number */
 const getLine = (source: string, lineNum: number): string => {
@@ -83,40 +61,21 @@ const run = (source: string, filename: string): void => {
   const parseResult = parse(source);
   diagnostics.push(...parseResult.diagnostics);
 
-  const { declarations } = parseResult.program;
   const expr = programToExpr(parseResult.program);
-
   if (!expr) {
     console.error(`${filename}: No expression to evaluate`);
     process.exit(1);
   }
 
-  // Start with prelude data declarations (Maybe, Either, List)
-  let typeEnv: TypeEnv = new Map();
-  let registry: ConstructorRegistry = new Map();
-  const allConstructors: string[] = [];
-
-  for (const decl of preludeDeclarations) {
-    const [newEnv, newReg] = processDataDecl(decl);
-    typeEnv = mergeEnvs(typeEnv, newEnv);
-    registry = mergeRegistries(registry, newReg);
-    for (const con of decl.constructors) {
-      allConstructors.push(con.name);
-    }
-  }
-
-  // Process user data declarations
-  for (const decl of declarations) {
-    const [newEnv, newReg] = processDataDecl(decl);
-    typeEnv = mergeEnvs(typeEnv, newEnv);
-    registry = mergeRegistries(registry, newReg);
-    for (const con of decl.constructors) {
-      allConstructors.push(con.name);
-    }
-  }
+  // Process prelude + user data declarations
+  const prelude = processDeclarations(preludeDeclarations);
+  const { typeEnv, registry, constructorNames } = processDeclarations(
+    parseResult.program.declarations,
+    prelude,
+  );
 
   // Bind and type check
-  const bindResult = bindWithConstructors(allConstructors, expr);
+  const bindResult = bindWithConstructors(constructorNames, expr);
   diagnostics.push(...bindResult.diagnostics);
   const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
   diagnostics.push(...checkResult.diagnostics);
@@ -127,7 +86,7 @@ const run = (source: string, filename: string): void => {
   }
 
   // Evaluate with constructor environment
-  const evalEnv: Env = createConstructorEnv(allConstructors);
+  const evalEnv: Env = createConstructorEnv(constructorNames);
   const result = evaluate(evalEnv, expr);
   console.log(result);
 };
@@ -146,32 +105,15 @@ const typeCheck = (source: string, filename: string): void => {
     process.exit(1);
   }
 
-  let typeEnv: TypeEnv = new Map();
-  let registry: ConstructorRegistry = new Map();
-
-  for (const decl of preludeDeclarations) {
-    const [newEnv, newReg] = processDataDecl(decl);
-    typeEnv = mergeEnvs(typeEnv, newEnv);
-    registry = mergeRegistries(registry, newReg);
-  }
-
-  const allConstructors: string[] = [];
-  for (const decl of preludeDeclarations) {
-    for (const con of decl.constructors) {
-      allConstructors.push(con.name);
-    }
-  }
-  for (const decl of parseResult.program.declarations) {
-    const [newEnv, newReg] = processDataDecl(decl);
-    typeEnv = mergeEnvs(typeEnv, newEnv);
-    registry = mergeRegistries(registry, newReg);
-    for (const con of decl.constructors) {
-      allConstructors.push(con.name);
-    }
-  }
+  // Process prelude + user data declarations
+  const prelude = processDeclarations(preludeDeclarations);
+  const { typeEnv, registry, constructorNames } = processDeclarations(
+    parseResult.program.declarations,
+    prelude,
+  );
 
   // Bind and type check
-  const bindResult = bindWithConstructors(allConstructors, expr);
+  const bindResult = bindWithConstructors(constructorNames, expr);
   const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];

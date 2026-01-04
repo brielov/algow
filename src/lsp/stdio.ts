@@ -7,6 +7,8 @@
 
 import type { JsonRpcMessage, Transport } from "./transport";
 
+const CONTENT_LENGTH_RE = /Content-Length: (\d+)/;
+
 /**
  * Create a stdio transport for LSP communication.
  */
@@ -33,7 +35,7 @@ export const createStdioTransport = (): Transport => {
       if (headerEnd === -1) return;
 
       const header = buffer.slice(0, headerEnd);
-      const match = header.match(/Content-Length: (\d+)/);
+      const match = header.match(CONTENT_LENGTH_RE);
       if (!match) {
         // Invalid header, skip to next potential header
         buffer = buffer.slice(headerEnd + 4);

@@ -19,7 +19,6 @@ declare const self: {
  */
 export const createWorkerTransport = (): Transport => {
   let messageHandler: ((msg: JsonRpcMessage) => void) | null = null;
-  let _closeHandler: (() => void) | null = null;
 
   self.onmessage = (event: MessageEvent<JsonRpcMessage>) => {
     messageHandler?.(event.data);
@@ -34,8 +33,8 @@ export const createWorkerTransport = (): Transport => {
       messageHandler = handler;
     },
 
-    onClose(handler: () => void): void {
-      _closeHandler = handler;
+    onClose(): void {
+      // Web workers don't have a close event
     },
   };
 };

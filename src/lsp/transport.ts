@@ -51,9 +51,6 @@ export type JsonRpcError = {
 export const isRequest = (msg: JsonRpcMessage): msg is JsonRpcRequest =>
   "id" in msg && "method" in msg;
 
-export const isResponse = (msg: JsonRpcMessage): msg is JsonRpcResponse =>
-  "id" in msg && !("method" in msg);
-
 export const isNotification = (msg: JsonRpcMessage): msg is JsonRpcNotification =>
   !("id" in msg) && "method" in msg;
 

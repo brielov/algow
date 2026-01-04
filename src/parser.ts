@@ -664,7 +664,19 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
 // PATTERNS
 // =============================================================================
 
-const parsePattern = (state: ParserState): ast.Pattern => {
+const PATTERN_STARTS = new Set([
+  TokenKind.Underscore,
+  TokenKind.Lower,
+  TokenKind.Upper,
+  TokenKind.Number,
+  TokenKind.String,
+  TokenKind.True,
+  TokenKind.False,
+  TokenKind.LParen,
+  TokenKind.LBrace,
+]);
+
+const parsePattern = (state: ParserState, allowArgs = true): ast.Pattern => {
   const token = state.current;
   const kind = token[0];
   const start = token[1];
@@ -681,26 +693,23 @@ const parsePattern = (state: ParserState): ast.Pattern => {
     case TokenKind.Upper: {
       advance(state);
       const name = text(state, token);
+      if (!allowArgs) return ast.pcon(name, [], tokenSpan(token));
+
       const args: ast.Pattern[] = [];
-
-      while (isPatternStart(state)) {
-        args.push(parsePatternAtom(state));
+      while (PATTERN_STARTS.has(state.current[0])) {
+        args.push(parsePattern(state, false));
       }
-
-      const end =
-        args.length > 0 ? (args[args.length - 1]!.span?.end ?? state.current[1]) : token[2];
+      const end = args[args.length - 1]?.span?.end ?? token[2];
       return ast.pcon(name, args, span(start, end));
     }
 
-    case TokenKind.Number: {
+    case TokenKind.Number:
       advance(state);
       return ast.plit(parseFloat(text(state, token)), tokenSpan(token));
-    }
 
-    case TokenKind.String: {
+    case TokenKind.String:
       advance(state);
       return ast.plit(parseStringContent(text(state, token)), tokenSpan(token));
-    }
 
     case TokenKind.True:
       advance(state);
@@ -718,71 +727,10 @@ const parsePattern = (state: ParserState): ast.Pattern => {
 
     default:
       error(state, `unexpected token in pattern: ${TokenKind[kind]}`);
-      advance(state);
+      if (allowArgs) advance(state);
       return ast.pwildcard();
   }
 };
-
-const parsePatternAtom = (state: ParserState): ast.Pattern => {
-  const token = state.current;
-  const kind = token[0];
-
-  switch (kind) {
-    case TokenKind.Underscore:
-      advance(state);
-      return ast.pwildcard(tokenSpan(token));
-
-    case TokenKind.Lower:
-      advance(state);
-      return ast.pvar(text(state, token), tokenSpan(token));
-
-    case TokenKind.Upper:
-      advance(state);
-      return ast.pcon(text(state, token), [], tokenSpan(token));
-
-    case TokenKind.Number: {
-      advance(state);
-      return ast.plit(parseFloat(text(state, token)), tokenSpan(token));
-    }
-
-    case TokenKind.String: {
-      advance(state);
-      return ast.plit(parseStringContent(text(state, token)), tokenSpan(token));
-    }
-
-    case TokenKind.True:
-      advance(state);
-      return ast.plit(true, tokenSpan(token));
-
-    case TokenKind.False:
-      advance(state);
-      return ast.plit(false, tokenSpan(token));
-
-    case TokenKind.LParen:
-      return parseTuplePattern(state);
-
-    case TokenKind.LBrace:
-      return parseRecordPattern(state);
-
-    default:
-      error(state, `unexpected token in pattern: ${TokenKind[kind]}`);
-      return ast.pwildcard();
-  }
-};
-
-const isPatternStart = (state: ParserState): boolean =>
-  atAny(
-    state,
-    TokenKind.Underscore,
-    TokenKind.Lower,
-    TokenKind.Upper,
-    TokenKind.Number,
-    TokenKind.String,
-    TokenKind.True,
-    TokenKind.False,
-    TokenKind.LParen,
-    TokenKind.LBrace,
-  );
 
 const parseTuplePattern = (state: ParserState): ast.Pattern => {
   const start = state.current[1];

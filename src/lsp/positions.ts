@@ -12,6 +12,23 @@ import type { Position, Range } from "vscode-languageserver-types";
 import type { Span } from "../ast";
 
 /**
+ * Convert byte offset to 1-based line:col (for CLI error messages).
+ */
+export const offsetToLineCol = (source: string, offset: number): { line: number; col: number } => {
+  let line = 1;
+  let col = 1;
+  for (let i = 0; i < offset && i < source.length; i++) {
+    if (source[i] === "\n") {
+      line++;
+      col = 1;
+    } else {
+      col++;
+    }
+  }
+  return { line, col };
+};
+
+/**
  * Convert byte offset to LSP Position (0-based line:character).
  */
 export const offsetToPosition = (source: string, offset: number): Position => {
