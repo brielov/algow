@@ -724,7 +724,19 @@ const parseMatch = (state: ParserState): ast.Expr => {
   while (at(state, TokenKind.Bar)) {
     const caseStart = state.current[1];
     advance(state);
-    const pattern = parsePattern(state);
+    let pattern = parsePattern(state);
+
+    // Check for or-pattern: | pat1 | pat2 | pat3 => ...
+    // If we see another | and it's not followed by =>, it's an or-pattern
+    if (at(state, TokenKind.Bar)) {
+      const alternatives: ast.Pattern[] = [pattern];
+      while (at(state, TokenKind.Bar)) {
+        advance(state);
+        alternatives.push(parsePattern(state));
+      }
+      const orEnd = alternatives[alternatives.length - 1]?.span?.end ?? state.current[1];
+      pattern = ast.por(alternatives, span(caseStart, orEnd));
+    }
 
     // Parse optional guard: | pattern if condition => body
     let guard: ast.Expr | undefined;

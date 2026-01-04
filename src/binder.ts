@@ -368,6 +368,15 @@ const bindPattern = (ctx: BindContext, pattern: ast.Pattern): string[] => {
       const innerBindings = bindPattern(ctx, pattern.pattern);
       return [pattern.name, ...innerBindings];
     }
+
+    case "POr": {
+      // Or-patterns: all alternatives bind the same variables (validated by type checker)
+      // Just bind the first alternative since they all have the same bindings
+      if (pattern.alternatives.length > 0) {
+        return bindPattern(ctx, pattern.alternatives[0]!);
+      }
+      return [];
+    }
   }
 };
 

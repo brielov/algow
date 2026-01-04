@@ -338,7 +338,7 @@ export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=" |
  * Pattern matching is exhaustive: the type checker verifies that all possible
  * cases are covered for algebraic data types.
  */
-export type Pattern = PVar | PWildcard | PCon | PLit | PRecord | PTuple | PAs;
+export type Pattern = PVar | PWildcard | PCon | PLit | PRecord | PTuple | PAs | POr;
 
 /**
  * Variable pattern - binds the matched value to a name.
@@ -448,6 +448,20 @@ export interface PAs extends Node {
   readonly pattern: Pattern;
   readonly name: string;
   readonly nameSpan?: Span;
+}
+
+/**
+ * Or-pattern - matches if any of the alternatives match.
+ *
+ * Syntax: pattern1 | pattern2 | ...
+ * Example: | Nothing | Just Nothing => handleEmpty
+ *
+ * All alternatives must bind the same variables with compatible types.
+ * If any alternative matches, the bindings from that alternative are used.
+ */
+export interface POr extends Node {
+  readonly kind: "POr";
+  readonly alternatives: readonly Pattern[];
 }
 
 /**
@@ -759,6 +773,12 @@ export const pas = (pattern: Pattern, name: string, span?: Span, nameSpan?: Span
   name,
   span,
   nameSpan,
+});
+
+export const por = (alternatives: readonly Pattern[], span?: Span): POr => ({
+  kind: "POr",
+  alternatives,
+  span,
 });
 
 export const case_ = (pattern: Pattern, body: Expr, guard?: Expr, span?: Span): Case => ({

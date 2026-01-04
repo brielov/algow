@@ -400,6 +400,15 @@ const matchPattern = (pattern: ast.Pattern, value: Value): MatchResult => {
       result.bindings.set(pattern.name, value);
       return result;
     }
+
+    case "POr": {
+      // Try each alternative until one matches
+      for (const alt of pattern.alternatives) {
+        const result = matchPattern(alt, value);
+        if (result.matched) return result;
+      }
+      return { matched: false };
+    }
   }
 };
 

@@ -78,7 +78,7 @@ A-Normal Form (ANF) IR where all intermediate values are named. Key types:
 - **Atoms**: `IRLit`, `IRVar` (trivial values)
 - **Expressions**: `IRAtomExpr`, `IRLet`, `IRLetRec`
 - **Bindings**: `IRAppBinding`, `IRBinOpBinding`, `IRIfBinding`, `IRMatchBinding`, `IRLambdaBinding`, etc.
-- **Patterns**: `IRPVar`, `IRPWildcard`, `IRPCon`, `IRPLit`, `IRPTuple`, `IRPRecord`
+- **Patterns**: `IRPVar`, `IRPWildcard`, `IRPCon`, `IRPLit`, `IRPTuple`, `IRPRecord`, `IRPAs`, `IRPOr`
 
 Every IR node carries its inferred type for type-directed code generation.
 
@@ -154,6 +154,24 @@ let rec fact n = if n == 0 then 1 else n * fact (n - 1)
 match xs with
 | Nil => 0
 | Cons x rest => 1 + length rest
+end
+
+-- Pattern guards
+match n with
+| x if x > 0 => x
+| _ => 0
+end
+
+-- As-patterns (bind whole value while destructuring)
+match xs with
+| Cons x rest as whole => whole
+| Nil => Nil
+end
+
+-- Or-patterns (match multiple patterns with same result)
+match x with
+| Nothing | Just Nothing => 0
+| Just (Just n) => n
 end
 
 -- Operators: +, -, *, /, <, <=, >, >=, ==, !=

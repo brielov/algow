@@ -415,6 +415,24 @@ const genPatternMatch = (
       result.bindings.push([pattern.name, scrutinee]);
       return result;
     }
+
+    case "IRPOr": {
+      // Or-pattern: try each alternative until one matches
+      // All alternatives bind the same variables, so we use the first one's bindings
+      const conditions: string[] = [];
+      let bindings: Array<[string, string]> = [];
+
+      for (let i = 0; i < pattern.alternatives.length; i++) {
+        const result = genPatternMatch(scrutinee, pattern.alternatives[i]!);
+        conditions.push(`(${result.condition})`);
+        // Use bindings from first alternative (all should be the same)
+        if (i === 0) {
+          bindings = result.bindings;
+        }
+      }
+
+      return { condition: conditions.join(" || "), bindings };
+    }
   }
 };
 

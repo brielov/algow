@@ -1847,6 +1847,61 @@ const inferPattern = (
 
       return [s, allBindings];
     }
+
+    case "POr": {
+      // Or-pattern: all alternatives must match and bind the same variables
+      if (pattern.alternatives.length === 0) {
+        addError(ctx, "Or-pattern must have at least one alternative");
+        return [subst, new Map()];
+      }
+
+      // Infer first alternative to get the reference bindings
+      const [s1, firstBindings] = inferPattern(
+        ctx,
+        env,
+        pattern.alternatives[0]!,
+        expectedType,
+        subst,
+      );
+      let currentSubst = s1;
+
+      // Check remaining alternatives have the same bindings
+      for (let i = 1; i < pattern.alternatives.length; i++) {
+        const [s2, altBindings] = inferPattern(
+          ctx,
+          env,
+          pattern.alternatives[i]!,
+          applySubst(currentSubst, expectedType),
+          currentSubst,
+        );
+        currentSubst = s2;
+
+        // Check that bindings match
+        if (firstBindings.size !== altBindings.size) {
+          addError(
+            ctx,
+            `Or-pattern alternatives must bind the same variables (alternative ${i + 1} binds different variables)`,
+          );
+          continue;
+        }
+
+        for (const [name, type1] of firstBindings) {
+          const type2 = altBindings.get(name);
+          if (!type2) {
+            addError(
+              ctx,
+              `Or-pattern alternative ${i + 1} is missing binding for '${name}'`,
+            );
+          } else {
+            // Unify the types
+            const s3 = unify(ctx, applySubst(currentSubst, type1), applySubst(currentSubst, type2));
+            currentSubst = composeSubst(currentSubst, s3);
+          }
+        }
+      }
+
+      return [currentSubst, firstBindings];
+    }
   }
 };
 
@@ -2028,7 +2083,7 @@ const getPatternConstructors = (patterns: readonly ast.Pattern[]): Set<string> =
       case "PLit":
         // Literals don't cover all constructors
         break;
-      case "PAs":
+      case "PAs": {
         // Unwrap as-pattern and check inner pattern
         const inner = getPatternConstructors([pattern.pattern]);
         for (const c of inner) {
@@ -2036,6 +2091,16 @@ const getPatternConstructors = (patterns: readonly ast.Pattern[]): Set<string> =
         }
         if (inner.has("*")) return new Set(["*"]);
         break;
+      }
+      case "POr": {
+        // Or-pattern: collect constructors from all alternatives
+        const inner = getPatternConstructors(pattern.alternatives);
+        for (const c of inner) {
+          constructors.add(c);
+        }
+        if (inner.has("*")) return new Set(["*"]);
+        break;
+      }
     }
   }
   return constructors;

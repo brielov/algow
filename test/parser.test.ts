@@ -1145,6 +1145,61 @@ describe("Parser", () => {
       expect(asPattern.name).toBe("whole");
       expect(asPattern.pattern.kind).toBe("PCon");
     });
+
+    it("parses match with or-pattern", () => {
+      const result = parse(`
+        match x with
+          | Nothing | Just Nothing => 0
+          | Just (Just n) => n
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.cases[0]!.pattern.kind).toBe("POr");
+      const orPattern = matchExpr.cases[0]!.pattern as ast.POr;
+      expect(orPattern.alternatives).toHaveLength(2);
+      expect(orPattern.alternatives[0]!.kind).toBe("PCon");
+      expect(orPattern.alternatives[1]!.kind).toBe("PCon");
+    });
+
+    it("parses or-pattern with multiple alternatives", () => {
+      const result = parse(`
+        match n with
+          | 0 | 1 | 2 => true
+          | _ => false
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.cases[0]!.pattern.kind).toBe("POr");
+      const orPattern = matchExpr.cases[0]!.pattern as ast.POr;
+      expect(orPattern.alternatives).toHaveLength(3);
+    });
+
+    it("parses or-pattern with variable bindings", () => {
+      const result = parse(`
+        match x with
+          | Just x | Right x => x
+          | _ => 0
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.cases[0]!.pattern.kind).toBe("POr");
+    });
+
+    it("parses or-pattern with guard", () => {
+      const result = parse(`
+        match x with
+          | Just n | Right n if n > 0 => n
+          | _ => 0
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.cases[0]!.pattern.kind).toBe("POr");
+      expect(matchExpr.cases[0]!.guard).toBeDefined();
+    });
   });
 
   describe("data declarations", () => {

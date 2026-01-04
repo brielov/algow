@@ -679,6 +679,11 @@ const lowerPattern = (pattern: ast.Pattern, type: Type): ir.IRPattern => {
       const innerPattern = lowerPattern(pattern.pattern, type);
       return ir.irPAs(innerPattern, pattern.name, type);
     }
+
+    case "POr": {
+      const alternatives = pattern.alternatives.map((alt) => lowerPattern(alt, type));
+      return ir.irPOr(alternatives, type);
+    }
   }
 };
 
@@ -727,6 +732,13 @@ const extendPatternBindings = (ctx: LowerContext, pattern: ast.Pattern, type: Ty
       // Extend with the as-binding and inner pattern bindings
       extendEnv(ctx, pattern.name, type);
       extendPatternBindings(ctx, pattern.pattern, type);
+      break;
+
+    case "POr":
+      // Or-patterns: all alternatives bind same variables, so just use the first
+      if (pattern.alternatives.length > 0) {
+        extendPatternBindings(ctx, pattern.alternatives[0]!, type);
+      }
       break;
   }
 };

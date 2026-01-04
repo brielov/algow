@@ -252,7 +252,7 @@ export type IRCase = {
 /**
  * IR patterns - simplified from AST patterns, with types.
  */
-export type IRPattern = IRPVar | IRPWildcard | IRPCon | IRPLit | IRPTuple | IRPRecord | IRPAs;
+export type IRPattern = IRPVar | IRPWildcard | IRPCon | IRPLit | IRPTuple | IRPRecord | IRPAs | IRPOr;
 
 export type IRPVar = {
   readonly kind: "IRPVar";
@@ -299,6 +299,12 @@ export type IRPAs = {
   readonly kind: "IRPAs";
   readonly pattern: IRPattern;
   readonly name: string;
+  readonly type: Type;
+};
+
+export type IRPOr = {
+  readonly kind: "IRPOr";
+  readonly alternatives: readonly IRPattern[];
   readonly type: Type;
 };
 
@@ -534,6 +540,12 @@ export const irPAs = (pattern: IRPattern, name: string, type: Type): IRPAs => ({
   kind: "IRPAs",
   pattern,
   name,
+  type,
+});
+
+export const irPOr = (alternatives: readonly IRPattern[], type: Type): IRPOr => ({
+  kind: "IRPOr",
+  alternatives,
   type,
 });
 
