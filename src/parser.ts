@@ -693,14 +693,15 @@ const parsePattern = (state: ParserState, allowArgs = true): ast.Pattern => {
     case TokenKind.Upper: {
       advance(state);
       const name = text(state, token);
-      if (!allowArgs) return ast.pcon(name, [], tokenSpan(token));
+      const nameSpan = tokenSpan(token);
+      if (!allowArgs) return ast.pcon(name, [], nameSpan, nameSpan);
 
       const args: ast.Pattern[] = [];
       while (PATTERN_STARTS.has(state.current[0])) {
         args.push(parsePattern(state, false));
       }
       const end = args[args.length - 1]?.span?.end ?? token[2];
-      return ast.pcon(name, args, span(start, end));
+      return ast.pcon(name, args, span(start, end), nameSpan);
     }
 
     case TokenKind.Number:

@@ -10,7 +10,7 @@ import type * as ast from "./ast";
 // Runtime Values
 // =============================================================================
 
-export type Value = VNum | VStr | VBool | VClosure | VCon | VTuple | VRecord;
+export type Value = VNum | VStr | VBool | VClosure | VCon | VTuple | VRecord | VRef;
 
 /** Number value */
 export type VNum = {
@@ -57,6 +57,12 @@ export type VRecord = {
   readonly fields: ReadonlyMap<string, Value>;
 };
 
+/** Mutable reference cell for recursive bindings (textbook letrec pattern) */
+export type VRef = {
+  readonly kind: "VRef";
+  value: Value | null; // Intentionally mutable - filled after closure creation
+};
+
 // =============================================================================
 // Value Constructors
 // =============================================================================
@@ -77,6 +83,7 @@ export const vcon = (name: string, args: readonly Value[] = []): Value => ({
 });
 export const vtuple = (elements: readonly Value[]): Value => ({ kind: "VTuple", elements });
 export const vrecord = (fields: ReadonlyMap<string, Value>): Value => ({ kind: "VRecord", fields });
+export const vref = (): VRef => ({ kind: "VRef", value: null });
 
 // =============================================================================
 // Environment
@@ -120,8 +127,17 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
     case "Bool":
       return vbool(expr.value);
 
-    case "Var":
-      return env.get(expr.name)!;
+    case "Var": {
+      const value = env.get(expr.name)!;
+      // Dereference if it's a ref cell (from letrec)
+      if (value.kind === "VRef") {
+        if (value.value === null) {
+          throw new RuntimeError(`Uninitialized recursive binding: ${expr.name}`);
+        }
+        return value.value;
+      }
+      return value;
+    }
 
     case "Abs":
       return vclosure(expr.param, expr.body, env);
@@ -139,27 +155,11 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
     }
 
     case "LetRec": {
-      // Create a mutable cell for the recursive binding
-      const newEnv = new Map(env);
-      // Placeholder - will be replaced
-      const placeholder = vcon("__placeholder__");
-      newEnv.set(expr.name, placeholder);
-
-      // Evaluate the value (which may reference itself)
+      // Textbook letrec: create ref cell, evaluate with ref in scope, fill ref
+      const ref = vref();
+      const newEnv = extendEnv(env, expr.name, ref);
       const value = evaluate(newEnv, expr.value);
-
-      // Update the environment with the actual value
-      newEnv.set(expr.name, value);
-
-      // If it's a closure, we need to update its captured env too
-      if (value.kind === "VClosure") {
-        const closureEnv = new Map(value.env);
-        closureEnv.set(expr.name, value);
-        const fixedClosure = vclosure(value.param, value.body, closureEnv);
-        newEnv.set(expr.name, fixedClosure);
-        return evaluate(newEnv, expr.body);
-      }
-
+      ref.value = value;
       return evaluate(newEnv, expr.body);
     }
 
@@ -289,7 +289,8 @@ const valuesEqual = (a: Value, b: Value): boolean => {
       return true;
     }
     case "VClosure":
-      // Functions are not comparable
+    case "VRef":
+      // Functions and refs are not comparable
       return false;
   }
 };
@@ -435,6 +436,8 @@ export const valueToString = (value: Value): string => {
         .join(", ");
       return `{ ${fields} }`;
     }
+    case "VRef":
+      return value.value ? valueToString(value.value) : "<uninitialized>";
   }
 };
 

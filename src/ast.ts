@@ -366,6 +366,7 @@ export interface PCon extends Node {
   readonly kind: "PCon";
   readonly name: string;
   readonly args: readonly Pattern[];
+  readonly nameSpan?: Span; // Precise span of constructor name for LSP
 }
 
 /**
@@ -674,11 +675,17 @@ export const pwildcard = (span?: Span): PWildcard => ({ kind: "PWildcard", span 
 
 export const pvar = (name: string, span?: Span): PVar => ({ kind: "PVar", name, span });
 
-export const pcon = (name: string, args: readonly Pattern[], span?: Span): PCon => ({
+export const pcon = (
+  name: string,
+  args: readonly Pattern[],
+  span?: Span,
+  nameSpan?: Span,
+): PCon => ({
   kind: "PCon",
   name,
   args,
   span,
+  nameSpan,
 });
 
 export const plit = (value: string | number | boolean, span?: Span): PLit => ({

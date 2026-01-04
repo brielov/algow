@@ -321,14 +321,17 @@ const bindPattern = (ctx: BindContext, pattern: ast.Pattern): string[] => {
       return [];
 
     case "PCon": {
-      // Constructor is a reference
-      if (pattern.span) {
-        // The constructor name span is approximately the start of the pattern
-        // We don't have a separate span for just the constructor name
-        addReference(ctx, pattern.name, {
-          start: pattern.span.start,
-          end: pattern.span.start + pattern.name.length,
-        });
+      // Constructor is a reference - use precise nameSpan if available
+      const conSpan =
+        pattern.nameSpan ??
+        (pattern.span
+          ? {
+              start: pattern.span.start,
+              end: pattern.span.start + pattern.name.length,
+            }
+          : null);
+      if (conSpan) {
+        addReference(ctx, pattern.name, conSpan);
       }
 
       // Bind nested patterns
