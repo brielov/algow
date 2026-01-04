@@ -1,295 +1,3 @@
-// src/eval.ts
-var vnum = (value) => ({ kind: "VNum", value });
-var vstr = (value) => ({ kind: "VStr", value });
-var vbool = (value) => ({ kind: "VBool", value });
-var vclosure = (param, body, env) => ({
-  kind: "VClosure",
-  param,
-  body,
-  env
-});
-var vcon = (name, args = []) => ({
-  kind: "VCon",
-  name,
-  args
-});
-var vtuple = (elements) => ({ kind: "VTuple", elements });
-var vrecord = (fields) => ({ kind: "VRecord", fields });
-var emptyEnv = new Map;
-var extendEnv = (env, name, value) => {
-  const newEnv = new Map(env);
-  newEnv.set(name, value);
-  return newEnv;
-};
-
-class RuntimeError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "RuntimeError";
-  }
-}
-var evaluate = (env, expr) => {
-  switch (expr.kind) {
-    case "Num":
-      return vnum(expr.value);
-    case "Str":
-      return vstr(expr.value);
-    case "Bool":
-      return vbool(expr.value);
-    case "Var":
-      return env.get(expr.name);
-    case "Abs":
-      return vclosure(expr.param, expr.body, env);
-    case "App": {
-      const func = evaluate(env, expr.func);
-      const arg = evaluate(env, expr.param);
-      return apply(func, arg);
-    }
-    case "Let": {
-      const value = evaluate(env, expr.value);
-      const newEnv = extendEnv(env, expr.name, value);
-      return evaluate(newEnv, expr.body);
-    }
-    case "LetRec": {
-      const newEnv = new Map(env);
-      const placeholder = vcon("__placeholder__");
-      newEnv.set(expr.name, placeholder);
-      const value = evaluate(newEnv, expr.value);
-      newEnv.set(expr.name, value);
-      if (value.kind === "VClosure") {
-        const closureEnv = new Map(value.env);
-        closureEnv.set(expr.name, value);
-        const fixedClosure = vclosure(value.param, value.body, closureEnv);
-        newEnv.set(expr.name, fixedClosure);
-        return evaluate(newEnv, expr.body);
-      }
-      return evaluate(newEnv, expr.body);
-    }
-    case "If": {
-      const cond = evaluate(env, expr.cond);
-      return cond.value ? evaluate(env, expr.then) : evaluate(env, expr.else);
-    }
-    case "BinOp":
-      return evalBinOp(env, expr);
-    case "Tuple": {
-      const elements = expr.elements.map((e) => evaluate(env, e));
-      return elements.length === 1 ? elements[0] : vtuple(elements);
-    }
-    case "Record": {
-      const fields = new Map;
-      for (const field of expr.fields) {
-        fields.set(field.name, evaluate(env, field.value));
-      }
-      return vrecord(fields);
-    }
-    case "FieldAccess": {
-      const record = evaluate(env, expr.record);
-      return record.fields.get(expr.field);
-    }
-    case "Match":
-      return evalMatch(env, expr);
-  }
-};
-var apply = (func, arg) => {
-  if (func.kind === "VClosure") {
-    const newEnv = extendEnv(func.env, func.param, arg);
-    return evaluate(newEnv, func.body);
-  }
-  return vcon(func.name, [...func.args, arg]);
-};
-var evalBinOp = (env, expr) => {
-  const left = evaluate(env, expr.left);
-  const right = evaluate(env, expr.right);
-  switch (expr.op) {
-    case "-":
-      return vnum(left.value - right.value);
-    case "*":
-      return vnum(left.value * right.value);
-    case "/": {
-      const divisor = right.value;
-      if (divisor === 0)
-        throw new RuntimeError("Division by zero");
-      return vnum(left.value / divisor);
-    }
-    case "+":
-      if (left.kind === "VNum") {
-        return vnum(left.value + right.value);
-      }
-      return vstr(left.value + right.value);
-    case "<":
-      if (left.kind === "VNum")
-        return vbool(left.value < right.value);
-      return vbool(left.value < right.value);
-    case ">":
-      if (left.kind === "VNum")
-        return vbool(left.value > right.value);
-      return vbool(left.value > right.value);
-    case "<=":
-      if (left.kind === "VNum")
-        return vbool(left.value <= right.value);
-      return vbool(left.value <= right.value);
-    case ">=":
-      if (left.kind === "VNum")
-        return vbool(left.value >= right.value);
-      return vbool(left.value >= right.value);
-    case "==":
-      return vbool(valuesEqual(left, right));
-    case "!=":
-      return vbool(!valuesEqual(left, right));
-  }
-};
-var valuesEqual = (a, b) => {
-  if (a.kind !== b.kind)
-    return false;
-  switch (a.kind) {
-    case "VNum":
-      return a.value === b.value;
-    case "VStr":
-      return a.value === b.value;
-    case "VBool":
-      return a.value === b.value;
-    case "VCon": {
-      const bCon = b;
-      if (a.name !== bCon.name || a.args.length !== bCon.args.length)
-        return false;
-      return a.args.every((arg, i) => valuesEqual(arg, bCon.args[i]));
-    }
-    case "VTuple": {
-      const bTuple = b;
-      if (a.elements.length !== bTuple.elements.length)
-        return false;
-      return a.elements.every((elem, i) => valuesEqual(elem, bTuple.elements[i]));
-    }
-    case "VRecord": {
-      const bRecord = b;
-      if (a.fields.size !== bRecord.fields.size)
-        return false;
-      for (const [key, val] of a.fields) {
-        const bVal = bRecord.fields.get(key);
-        if (bVal === undefined || !valuesEqual(val, bVal))
-          return false;
-      }
-      return true;
-    }
-    case "VClosure":
-      return false;
-  }
-};
-var matchPattern = (pattern, value) => {
-  switch (pattern.kind) {
-    case "PWildcard":
-      return { matched: true, bindings: new Map };
-    case "PVar":
-      return { matched: true, bindings: new Map([[pattern.name, value]]) };
-    case "PLit": {
-      if (typeof pattern.value === "number" && value.kind === "VNum") {
-        return pattern.value === value.value ? { matched: true, bindings: new Map } : { matched: false };
-      }
-      if (typeof pattern.value === "string" && value.kind === "VStr") {
-        return pattern.value === value.value ? { matched: true, bindings: new Map } : { matched: false };
-      }
-      if (typeof pattern.value === "boolean" && value.kind === "VBool") {
-        return pattern.value === value.value ? { matched: true, bindings: new Map } : { matched: false };
-      }
-      return { matched: false };
-    }
-    case "PCon": {
-      if (value.kind !== "VCon" || value.name !== pattern.name) {
-        return { matched: false };
-      }
-      if (value.args.length !== pattern.args.length) {
-        return { matched: false };
-      }
-      const bindings = new Map;
-      for (let i = 0;i < pattern.args.length; i++) {
-        const result = matchPattern(pattern.args[i], value.args[i]);
-        if (!result.matched)
-          return { matched: false };
-        for (const [name, val] of result.bindings) {
-          bindings.set(name, val);
-        }
-      }
-      return { matched: true, bindings };
-    }
-    case "PTuple": {
-      if (value.kind !== "VTuple" || value.elements.length !== pattern.elements.length) {
-        return { matched: false };
-      }
-      const bindings = new Map;
-      for (let i = 0;i < pattern.elements.length; i++) {
-        const result = matchPattern(pattern.elements[i], value.elements[i]);
-        if (!result.matched)
-          return { matched: false };
-        for (const [name, val] of result.bindings) {
-          bindings.set(name, val);
-        }
-      }
-      return { matched: true, bindings };
-    }
-    case "PRecord": {
-      if (value.kind !== "VRecord") {
-        return { matched: false };
-      }
-      const bindings = new Map;
-      for (const field of pattern.fields) {
-        const fieldValue = value.fields.get(field.name);
-        if (fieldValue === undefined)
-          return { matched: false };
-        const result = matchPattern(field.pattern, fieldValue);
-        if (!result.matched)
-          return { matched: false };
-        for (const [name, val] of result.bindings) {
-          bindings.set(name, val);
-        }
-      }
-      return { matched: true, bindings };
-    }
-  }
-};
-var evalMatch = (env, expr) => {
-  const scrutinee = evaluate(env, expr.expr);
-  for (const case_ of expr.cases) {
-    const result = matchPattern(case_.pattern, scrutinee);
-    if (result.matched) {
-      let caseEnv = env;
-      for (const [name, value] of result.bindings) {
-        caseEnv = extendEnv(caseEnv, name, value);
-      }
-      return evaluate(caseEnv, case_.body);
-    }
-  }
-  throw new Error("Unreachable: exhaustiveness check failed");
-};
-var valueToString = (value) => {
-  switch (value.kind) {
-    case "VNum":
-      return String(value.value);
-    case "VStr":
-      return `"${value.value}"`;
-    case "VBool":
-      return String(value.value);
-    case "VClosure":
-      return "<function>";
-    case "VCon":
-      if (value.args.length === 0)
-        return value.name;
-      return `(${value.name} ${value.args.map(valueToString).join(" ")})`;
-    case "VTuple":
-      return `(${value.elements.map(valueToString).join(", ")})`;
-    case "VRecord": {
-      const fields = [...value.fields.entries()].map(([k, v]) => `${k}: ${valueToString(v)}`).join(", ");
-      return `{ ${fields} }`;
-    }
-  }
-};
-var createConstructorEnv = (constructorNames) => {
-  const env = new Map;
-  for (const name of constructorNames) {
-    env.set(name, vcon(name));
-  }
-  return env;
-};
-
 // src/diagnostics.ts
 var error = (start, end, message) => ({
   start,
@@ -297,41 +5,248 @@ var error = (start, end, message) => ({
   message,
   severity: "error"
 });
+var typeMismatch = (start, end, expected, actual, context) => ({
+  start,
+  end,
+  message: context ? `Type mismatch in ${context}` : "Type mismatch",
+  severity: "error",
+  kind: "type-mismatch",
+  expected,
+  actual
+});
+var unboundVariable = (start, end, name, suggestions) => ({
+  start,
+  end,
+  message: `Unknown variable: ${name}`,
+  severity: "error",
+  kind: "unbound-variable",
+  suggestions
+});
+var levenshteinDistance = (a, b) => {
+  if (a.length === 0)
+    return b.length;
+  if (b.length === 0)
+    return a.length;
+  const matrix = [];
+  for (let i = 0;i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0;j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+  for (let i = 1;i <= b.length; i++) {
+    for (let j = 1;j <= a.length; j++) {
+      const cost = a[j - 1] === b[i - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+    }
+  }
+  return matrix[b.length][a.length];
+};
+var findSimilarNames = (name, candidates, maxDistance = 2, maxSuggestions = 3) => {
+  const scored = [];
+  for (const candidate of candidates) {
+    if (candidate === name)
+      continue;
+    const dist = levenshteinDistance(name.toLowerCase(), candidate.toLowerCase());
+    if (dist <= maxDistance) {
+      scored.push([candidate, dist]);
+    }
+  }
+  return scored.sort((a, b) => a[1] - b[1]).slice(0, maxSuggestions).map(([s]) => s);
+};
 
-// src/symbols.ts
-var createSymbolTableBuilder = () => ({
+// src/binder.ts
+var createContext = () => ({
   definitions: [],
   references: [],
+  diagnostics: [],
   scope: new Map
 });
-var addDefinition = (builder, name, span, kind, type = null) => {
-  const def = { name, span, kind, type };
-  builder.definitions.push(def);
-  const stack = builder.scope.get(name);
+var addDefinition = (ctx, name, span, kind) => {
+  const def = { name, span, kind };
+  ctx.definitions.push(def);
+  const stack = ctx.scope.get(name);
   if (stack) {
     stack.push(def);
   } else {
-    builder.scope.set(name, [def]);
+    ctx.scope.set(name, [def]);
   }
   return def;
 };
-var addReference = (builder, name, span) => {
-  const stack = builder.scope.get(name);
+var addReference = (ctx, name, span) => {
+  const stack = ctx.scope.get(name);
   const definition = stack && stack.length > 0 ? stack[stack.length - 1] : null;
   const ref = { name, span, definition };
-  builder.references.push(ref);
+  ctx.references.push(ref);
+  if (!definition) {
+    const suggestions = findSimilarNames(name, ctx.scope.keys());
+    ctx.diagnostics.push(unboundVariable(span.start, span.end, name, suggestions.length > 0 ? suggestions : undefined));
+  }
   return ref;
 };
-var popScope = (builder, name) => {
-  const stack = builder.scope.get(name);
+var popScope = (ctx, name) => {
+  const stack = ctx.scope.get(name);
   if (stack && stack.length > 0) {
     stack.pop();
   }
 };
-var finalize = (builder) => ({
-  definitions: builder.definitions,
-  references: builder.references
+var finalize = (ctx) => ({
+  definitions: ctx.definitions,
+  references: ctx.references
 });
+var bindWithConstructors = (constructorNames, expr) => {
+  const ctx = createContext();
+  for (const name of constructorNames) {
+    addDefinition(ctx, name, { start: 0, end: 0 }, "constructor");
+  }
+  bindExpr(ctx, expr);
+  return {
+    symbols: finalize(ctx),
+    diagnostics: ctx.diagnostics
+  };
+};
+var bindExpr = (ctx, expr) => {
+  switch (expr.kind) {
+    case "Num":
+    case "Bool":
+    case "Str":
+      break;
+    case "Var":
+      bindVar(ctx, expr);
+      break;
+    case "Let":
+      bindLet(ctx, expr);
+      break;
+    case "LetRec":
+      bindLetRec(ctx, expr);
+      break;
+    case "Abs":
+      bindAbs(ctx, expr);
+      break;
+    case "App":
+      bindExpr(ctx, expr.func);
+      bindExpr(ctx, expr.param);
+      break;
+    case "If":
+      bindExpr(ctx, expr.cond);
+      bindExpr(ctx, expr.then);
+      bindExpr(ctx, expr.else);
+      break;
+    case "BinOp":
+      bindExpr(ctx, expr.left);
+      bindExpr(ctx, expr.right);
+      break;
+    case "Tuple":
+      for (const element of expr.elements) {
+        bindExpr(ctx, element);
+      }
+      break;
+    case "Record":
+      for (const field of expr.fields) {
+        bindExpr(ctx, field.value);
+      }
+      break;
+    case "FieldAccess":
+      bindExpr(ctx, expr.record);
+      break;
+    case "Match":
+      bindMatch(ctx, expr);
+      break;
+  }
+};
+var bindVar = (ctx, expr) => {
+  const span = expr.span ?? { start: 0, end: 0 };
+  addReference(ctx, expr.name, span);
+};
+var bindLet = (ctx, expr) => {
+  bindExpr(ctx, expr.value);
+  const nameSpan = expr.nameSpan ?? expr.span ?? { start: 0, end: 0 };
+  addDefinition(ctx, expr.name, nameSpan, "variable");
+  bindExpr(ctx, expr.body);
+  popScope(ctx, expr.name);
+};
+var bindLetRec = (ctx, expr) => {
+  for (const binding of expr.bindings) {
+    const nameSpan = binding.nameSpan ?? expr.span ?? { start: 0, end: 0 };
+    addDefinition(ctx, binding.name, nameSpan, "variable");
+  }
+  for (const binding of expr.bindings) {
+    bindExpr(ctx, binding.value);
+  }
+  bindExpr(ctx, expr.body);
+  for (let i = expr.bindings.length - 1;i >= 0; i--) {
+    popScope(ctx, expr.bindings[i].name);
+  }
+};
+var bindAbs = (ctx, expr) => {
+  const paramSpan = expr.paramSpan ?? expr.span ?? { start: 0, end: 0 };
+  addDefinition(ctx, expr.param, paramSpan, "parameter");
+  bindExpr(ctx, expr.body);
+  popScope(ctx, expr.param);
+};
+var bindMatch = (ctx, expr) => {
+  bindExpr(ctx, expr.expr);
+  for (const case_ of expr.cases) {
+    const bindings = bindPattern(ctx, case_.pattern);
+    bindExpr(ctx, case_.body);
+    for (const name of bindings) {
+      popScope(ctx, name);
+    }
+  }
+};
+var bindPattern = (ctx, pattern) => {
+  switch (pattern.kind) {
+    case "PVar": {
+      const span = pattern.span ?? { start: 0, end: 0 };
+      addDefinition(ctx, pattern.name, span, "parameter");
+      return [pattern.name];
+    }
+    case "PWildcard":
+      return [];
+    case "PCon": {
+      const conSpan = pattern.nameSpan ?? (pattern.span ? {
+        start: pattern.span.start,
+        end: pattern.span.start + pattern.name.length
+      } : null);
+      if (conSpan) {
+        addReference(ctx, pattern.name, conSpan);
+      }
+      const bindings = [];
+      for (const arg of pattern.args) {
+        bindings.push(...bindPattern(ctx, arg));
+      }
+      return bindings;
+    }
+    case "PLit":
+      return [];
+    case "PTuple": {
+      const bindings = [];
+      for (const element of pattern.elements) {
+        bindings.push(...bindPattern(ctx, element));
+      }
+      return bindings;
+    }
+    case "PRecord": {
+      const bindings = [];
+      for (const field of pattern.fields) {
+        bindings.push(...bindPattern(ctx, field.pattern));
+      }
+      return bindings;
+    }
+    case "PAs": {
+      const span = pattern.nameSpan ?? pattern.span ?? { start: 0, end: 0 };
+      addDefinition(ctx, pattern.name, span, "parameter");
+      const innerBindings = bindPattern(ctx, pattern.pattern);
+      return [pattern.name, ...innerBindings];
+    }
+    case "POr": {
+      if (pattern.alternatives.length > 0) {
+        return bindPattern(ctx, pattern.alternatives[0]);
+      }
+      return [];
+    }
+  }
+};
 var findDefinitionAt = (table, position) => {
   for (const def of table.definitions) {
     if (position >= def.span.start && position < def.span.end) {
@@ -370,15 +285,24 @@ var findAllOccurrences = (table, position) => {
   return { definition, references: findReferences(table, definition) };
 };
 
-// src/infer.ts
-var createContext = () => ({
+// src/checker.ts
+var createContext2 = (symbols) => ({
   diagnostics: [],
-  symbols: createSymbolTableBuilder()
+  types: new Map,
+  symbols
 });
 var addError = (ctx, message, span) => {
   const start = span?.start ?? 0;
   const end = span?.end ?? start;
   ctx.diagnostics.push(error(start, end, message));
+};
+var recordType = (ctx, span, type) => {
+  for (const def of ctx.symbols.definitions) {
+    if (def.span.start === span.start && def.span.end === span.end) {
+      ctx.types.set(def, type);
+      return;
+    }
+  }
 };
 var tvar = (name) => ({ kind: "TVar", name });
 var tcon = (name) => ({ kind: "TCon", name });
@@ -442,7 +366,7 @@ var applySubstEnv = (subst, env) => {
   return result;
 };
 var applySubstConstraint = (subst, c) => ({
-  class_: c.class_,
+  className: c.className,
   type: applySubst(subst, c.type)
 });
 var applySubstConstraints = (subst, cs) => cs.map((c) => applySubstConstraint(subst, c));
@@ -463,10 +387,10 @@ var unify = (ctx, t1, t2, span) => {
     return new Map;
   }
   if (t1.kind === "TVar") {
-    return bindVar(ctx, t1.name, t2);
+    return bindVar2(ctx, t1.name, t2);
   }
   if (t2.kind === "TVar") {
-    return bindVar(ctx, t2.name, t1);
+    return bindVar2(ctx, t2.name, t1);
   }
   if (t1.kind === "TCon" && t2.kind === "TCon" && t1.name === t2.name) {
     return new Map;
@@ -498,10 +422,12 @@ var unify = (ctx, t1, t2, span) => {
     }
     return currentSubst;
   }
-  addError(ctx, `Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`, span);
+  const start = span?.start ?? 0;
+  const end = span?.end ?? start;
+  ctx.diagnostics.push(typeMismatch(start, end, typeToString(t1), typeToString(t2)));
   return new Map;
 };
-var bindVar = (ctx, name, type) => {
+var bindVar2 = (ctx, name, type) => {
   if (type.kind === "TVar" && type.name === name) {
     return new Map;
   }
@@ -675,19 +601,19 @@ var solveConstraints = (ctx, constraints) => {
       continue;
     }
     if (c.type.kind === "TCon") {
-      const classInstances = instances.get(c.class_);
+      const classInstances = instances.get(c.className);
       if (!classInstances?.has(c.type.name)) {
-        addError(ctx, `Type '${c.type.name}' does not satisfy ${c.class_}`);
+        addError(ctx, `Type '${c.type.name}' does not satisfy ${c.className}`);
       }
     }
     if (c.type.kind === "TFun") {
-      addError(ctx, `Function types do not satisfy ${c.class_}`);
+      addError(ctx, `Function types do not satisfy ${c.className}`);
     }
   }
 };
-var infer = (env, registry, expr) => {
+var check = (env, registry, expr, symbols) => {
   typeVarCounter = 0;
-  const ctx = createContext();
+  const ctx = createContext2(symbols);
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
   solveConstraints(ctx, finalConstraints);
@@ -696,7 +622,7 @@ var infer = (env, registry, expr) => {
     type,
     constraints: finalConstraints,
     diagnostics: ctx.diagnostics,
-    symbols: finalize(ctx.symbols)
+    types: ctx.types
   };
 };
 var inferExpr = (ctx, env, registry, expr) => {
@@ -727,13 +653,15 @@ var inferExpr = (ctx, env, registry, expr) => {
       return inferMatch(ctx, env, registry, expr);
     case "FieldAccess":
       return inferFieldAccess(ctx, env, registry, expr);
+    case "TupleIndex":
+      return inferTupleIndex(ctx, env, registry, expr);
     case "Record":
       return inferRecord(ctx, env, registry, expr);
   }
 };
 var inferFieldAccess = (ctx, env, registry, expr) => {
-  const [s1, recordType, constraints] = inferExpr(ctx, env, registry, expr.record);
-  const resolvedType = applySubst(s1, recordType);
+  const [s1, recordType2, constraints] = inferExpr(ctx, env, registry, expr.record);
+  const resolvedType = applySubst(s1, recordType2);
   if (resolvedType.kind === "TVar") {
     const fieldType2 = freshTypeVar();
     const rowVar = freshTypeVar();
@@ -758,6 +686,23 @@ var inferFieldAccess = (ctx, env, registry, expr) => {
   addError(ctx, `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`);
   return [s1, freshTypeVar(), constraints];
 };
+var inferTupleIndex = (ctx, env, registry, expr) => {
+  const [s1, tupleType, constraints] = inferExpr(ctx, env, registry, expr.tuple);
+  const resolvedType = applySubst(s1, tupleType);
+  if (resolvedType.kind === "TVar") {
+    const elementType = freshTypeVar();
+    return [s1, elementType, constraints];
+  }
+  if (resolvedType.kind !== "TTuple") {
+    addError(ctx, `Cannot index into non-tuple type: ${typeToString(resolvedType)}`);
+    return [s1, freshTypeVar(), constraints];
+  }
+  if (expr.index < 0 || expr.index >= resolvedType.elements.length) {
+    addError(ctx, `Tuple index ${expr.index} out of bounds for tuple of ${resolvedType.elements.length} element(s)`);
+    return [s1, freshTypeVar(), constraints];
+  }
+  return [s1, resolvedType.elements[expr.index], constraints];
+};
 var inferRecord = (ctx, env, registry, expr) => {
   let subst = new Map;
   let constraints = [];
@@ -771,15 +716,23 @@ var inferRecord = (ctx, env, registry, expr) => {
   return [subst, trecord([...fieldTypes.entries()]), constraints];
 };
 var inferAbs = (ctx, env, registry, expr) => {
-  const paramType = freshTypeVar();
-  const paramSpan = expr.paramSpan ?? expr.span;
-  if (paramSpan) {
-    addDefinition(ctx.symbols, expr.param, paramSpan, "parameter", paramType);
+  let paramType;
+  let subst = new Map;
+  if (expr.paramType) {
+    const [annotatedType, tvSubst] = instantiateTypeExpr(expr.paramType);
+    paramType = annotatedType;
+    subst = tvSubst;
+  } else {
+    paramType = freshTypeVar();
   }
   const newEnv = new Map(env);
   newEnv.set(expr.param, scheme([], paramType));
-  const [subst, bodyType, constraints] = inferExpr(ctx, newEnv, registry, expr.body);
-  popScope(ctx.symbols, expr.param);
+  const [bodySubst, bodyType, constraints] = inferExpr(ctx, newEnv, registry, expr.body);
+  subst = composeSubst(subst, bodySubst);
+  const paramSpan = expr.paramSpan ?? expr.span;
+  if (paramSpan) {
+    recordType(ctx, paramSpan, applySubst(subst, paramType));
+  }
   return [subst, tfun(applySubst(subst, paramType), bodyType), constraints];
 };
 var inferApp = (ctx, env, registry, expr) => {
@@ -800,7 +753,7 @@ var inferBinOp = (ctx, env, registry, expr) => {
   const constraints = [...applySubstConstraints(subst, c1), ...applySubstConstraints(subst, c2)];
   switch (expr.op) {
     case "+": {
-      constraints.push({ class_: "Add", type: operandType });
+      constraints.push({ className: "Add", type: operandType });
       return [subst, operandType, constraints];
     }
     case "-":
@@ -813,13 +766,17 @@ var inferBinOp = (ctx, env, registry, expr) => {
     case ">":
     case "<=":
     case ">=": {
-      constraints.push({ class_: "Ord", type: operandType });
+      constraints.push({ className: "Ord", type: operandType });
       return [subst, tBool, constraints];
     }
     case "==":
     case "!=": {
-      constraints.push({ class_: "Eq", type: operandType });
+      constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
+    }
+    case "++": {
+      const s4 = unify(ctx, operandType, tStr, expr.span);
+      return [composeSubst(subst, s4), tStr, constraints];
     }
   }
 };
@@ -837,54 +794,79 @@ var inferIf = (ctx, env, registry, expr) => {
   return [finalSubst, applySubst(s5, elseType), constraints];
 };
 var inferLet = (ctx, env, registry, expr) => {
-  const [s1, valueType, c1] = inferExpr(ctx, env, registry, expr.value);
+  let [s1, valueType, c1] = inferExpr(ctx, env, registry, expr.value);
+  if (expr.returnType) {
+    const [annotatedType] = instantiateTypeExpr(expr.returnType);
+    let currentType = applySubst(s1, valueType);
+    while (currentType.kind === "TFun") {
+      currentType = currentType.ret;
+    }
+    const s3 = unify(ctx, currentType, annotatedType, expr.nameSpan ?? expr.span);
+    s1 = composeSubst(s1, s3);
+    valueType = applySubst(s3, valueType);
+  }
   const env1 = applySubstEnv(s1, env);
   const generalizedScheme = generalize(env1, applySubst(s1, valueType));
   const nameSpan = expr.nameSpan ?? expr.span;
   if (nameSpan) {
-    addDefinition(ctx.symbols, expr.name, nameSpan, "variable", applySubst(s1, valueType));
+    recordType(ctx, nameSpan, applySubst(s1, valueType));
   }
   const env2 = new Map(env1);
   env2.set(expr.name, generalizedScheme);
   const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
-  popScope(ctx.symbols, expr.name);
   const subst = composeSubst(s1, s2);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
   return [subst, bodyType, constraints];
 };
 var inferLetRec = (ctx, env, registry, expr) => {
-  const placeholderType = freshTypeVar();
-  const envWithPlaceholder = new Map(env);
-  envWithPlaceholder.set(expr.name, scheme([], placeholderType));
-  const nameSpan = expr.nameSpan ?? expr.span;
-  if (nameSpan) {
-    addDefinition(ctx.symbols, expr.name, nameSpan, "variable", null);
+  const placeholders = new Map;
+  const envWithPlaceholders = new Map(env);
+  for (const binding of expr.bindings) {
+    const placeholder = freshTypeVar();
+    placeholders.set(binding.name, placeholder);
+    envWithPlaceholders.set(binding.name, scheme([], placeholder));
   }
-  const [s1, valueType, c1] = inferExpr(ctx, envWithPlaceholder, registry, expr.value);
-  const env1 = applySubstEnv(s1, env);
-  const generalizedScheme = generalize(env1, applySubst(s1, valueType));
-  if (nameSpan) {
-    const defStack = ctx.symbols.scope.get(expr.name);
-    if (defStack && defStack.length > 0) {
-      const def = defStack[defStack.length - 1];
-      def.type = applySubst(s1, valueType);
+  let subst = new Map;
+  const valueTypes = new Map;
+  let constraints = [];
+  for (const binding of expr.bindings) {
+    let [s, valueType, c] = inferExpr(ctx, applySubstEnv(subst, envWithPlaceholders), registry, binding.value);
+    subst = composeSubst(subst, s);
+    if (binding.returnType) {
+      const [annotatedType] = instantiateTypeExpr(binding.returnType);
+      let currentType = applySubst(subst, valueType);
+      while (currentType.kind === "TFun") {
+        currentType = currentType.ret;
+      }
+      const s3 = unify(ctx, currentType, annotatedType, binding.nameSpan);
+      subst = composeSubst(subst, s3);
+      valueType = applySubst(s3, valueType);
+    }
+    valueTypes.set(binding.name, valueType);
+    constraints = [...applySubstConstraints(subst, constraints), ...c];
+    const placeholder = applySubst(subst, placeholders.get(binding.name));
+    const s22 = unify(ctx, placeholder, valueType, binding.value.span);
+    subst = composeSubst(subst, s22);
+  }
+  const env1 = applySubstEnv(subst, env);
+  const env2 = new Map(env1);
+  for (const binding of expr.bindings) {
+    const valueType = applySubst(subst, valueTypes.get(binding.name));
+    const generalizedScheme = generalize(env1, valueType);
+    env2.set(binding.name, generalizedScheme);
+    const nameSpan = binding.nameSpan ?? expr.span;
+    if (nameSpan) {
+      recordType(ctx, nameSpan, valueType);
     }
   }
-  const env2 = new Map(env1);
-  env2.set(expr.name, generalizedScheme);
   const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
-  popScope(ctx.symbols, expr.name);
-  const subst = composeSubst(s1, s2);
-  const constraints = applySubstConstraints(subst, [...c1, ...c2]);
-  return [subst, bodyType, constraints];
+  const finalSubst = composeSubst(subst, s2);
+  const finalConstraints = applySubstConstraints(finalSubst, [...constraints, ...c2]);
+  return [finalSubst, bodyType, finalConstraints];
 };
 var inferVar = (ctx, env, expr) => {
-  if (expr.span) {
-    addReference(ctx.symbols, expr.name, expr.span);
-  }
   const s = env.get(expr.name);
   if (!s) {
-    addError(ctx, `Unknown variable: ${expr.name}`, expr.span);
     return [new Map, freshTypeVar(), []];
   }
   return [new Map, instantiate(s), []];
@@ -913,7 +895,7 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
     case "PVar": {
       const boundType = applySubst(subst, expectedType);
       if (pattern.span) {
-        addDefinition(ctx.symbols, pattern.name, pattern.span, "parameter", boundType);
+        recordType(ctx, pattern.span, boundType);
       }
       return [subst, new Map([[pattern.name, boundType]])];
     }
@@ -926,9 +908,6 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
       return [composeSubst(subst, s), new Map];
     }
     case "PCon": {
-      if (pattern.span) {
-        addReference(ctx.symbols, pattern.name, pattern.span);
-      }
       const conScheme = env.get(pattern.name);
       if (!conScheme) {
         addError(ctx, `Unknown constructor: ${pattern.name}`, pattern.span);
@@ -974,8 +953,8 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
           }
         }
         const rowVar = freshTypeVar();
-        const recordType = trecord([...fieldTypes.entries()], rowVar);
-        const s = unify(ctx, applySubst(currentSubst2, expectedType), recordType);
+        const recordType2 = trecord([...fieldTypes.entries()], rowVar);
+        const s = unify(ctx, applySubst(currentSubst2, expectedType), recordType2);
         return [composeSubst(currentSubst2, s), allBindings2];
       }
       if (expectedResolved.kind !== "TRecord") {
@@ -1044,6 +1023,42 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
       }
       return [currentSubst, allBindings];
     }
+    case "PAs": {
+      const [s, innerBindings] = inferPattern(ctx, env, pattern.pattern, expectedType, subst);
+      const boundType = applySubst(s, expectedType);
+      if (pattern.nameSpan) {
+        recordType(ctx, pattern.nameSpan, boundType);
+      }
+      const allBindings = new Map(innerBindings);
+      allBindings.set(pattern.name, boundType);
+      return [s, allBindings];
+    }
+    case "POr": {
+      if (pattern.alternatives.length === 0) {
+        addError(ctx, "Or-pattern must have at least one alternative");
+        return [subst, new Map];
+      }
+      const [s1, firstBindings] = inferPattern(ctx, env, pattern.alternatives[0], expectedType, subst);
+      let currentSubst = s1;
+      for (let i = 1;i < pattern.alternatives.length; i++) {
+        const [s2, altBindings] = inferPattern(ctx, env, pattern.alternatives[i], applySubst(currentSubst, expectedType), currentSubst);
+        currentSubst = s2;
+        if (firstBindings.size !== altBindings.size) {
+          addError(ctx, `Or-pattern alternatives must bind the same variables (alternative ${i + 1} binds different variables)`);
+          continue;
+        }
+        for (const [name, type1] of firstBindings) {
+          const type2 = altBindings.get(name);
+          if (!type2) {
+            addError(ctx, `Or-pattern alternative ${i + 1} is missing binding for '${name}'`);
+          } else {
+            const s3 = unify(ctx, applySubst(currentSubst, type1), applySubst(currentSubst, type2));
+            currentSubst = composeSubst(currentSubst, s3);
+          }
+        }
+      }
+      return [currentSubst, firstBindings];
+    }
   }
 };
 var inferMatch = (ctx, env, registry, expr) => {
@@ -1062,6 +1077,13 @@ var inferMatch = (ctx, env, registry, expr) => {
     for (const [name, type] of bindings) {
       caseEnv.set(name, scheme([], applySubst(subst, type)));
     }
+    if (case_.guard) {
+      const [sg, guardType, cg] = inferExpr(ctx, caseEnv, registry, case_.guard);
+      subst = composeSubst(subst, sg);
+      constraints = [...applySubstConstraints(subst, constraints), ...cg];
+      const s4 = unify(ctx, applySubst(subst, guardType), tBool);
+      subst = composeSubst(subst, s4);
+    }
     const [s3, bodyType, c2] = inferExpr(ctx, caseEnv, registry, case_.body);
     subst = composeSubst(subst, s3);
     constraints = [...applySubstConstraints(subst, constraints), ...c2];
@@ -1073,7 +1095,7 @@ var inferMatch = (ctx, env, registry, expr) => {
       resultType = applySubst(s4, bodyType);
     }
   }
-  const patterns = expr.cases.map((c) => c.pattern);
+  const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
   const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
   if (missing.length > 0) {
     addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
@@ -1091,6 +1113,34 @@ var typeExprToType = (texpr) => {
     case "TyVar":
       return tvar(texpr.name);
   }
+};
+var PRIMITIVE_TYPES = new Set(["number", "string", "boolean"]);
+var instantiateTypeExpr = (texpr) => {
+  const varMapping = new Map;
+  const convert = (t) => {
+    switch (t.kind) {
+      case "TyApp":
+        return tapp(convert(t.con), convert(t.arg));
+      case "TyCon":
+        return tcon(t.name);
+      case "TyFun":
+        return tfun(convert(t.param), convert(t.ret));
+      case "TyVar": {
+        if (PRIMITIVE_TYPES.has(t.name)) {
+          return tcon(t.name);
+        }
+        let fresh = varMapping.get(t.name);
+        if (!fresh) {
+          fresh = freshTypeVar();
+          varMapping.set(t.name, fresh);
+        }
+        return fresh;
+      }
+    }
+  };
+  const result = convert(texpr);
+  const subst = new Map;
+  return [result, subst];
 };
 var processDataDecl = (decl) => {
   const env = new Map;
@@ -1133,6 +1183,24 @@ var getPatternConstructors = (patterns) => {
         return new Set(["*"]);
       case "PLit":
         break;
+      case "PAs": {
+        const inner = getPatternConstructors([pattern.pattern]);
+        for (const c of inner) {
+          constructors.add(c);
+        }
+        if (inner.has("*"))
+          return new Set(["*"]);
+        break;
+      }
+      case "POr": {
+        const inner = getPatternConstructors(pattern.alternatives);
+        for (const c of inner) {
+          constructors.add(c);
+        }
+        if (inner.has("*"))
+          return new Set(["*"]);
+        break;
+      }
     }
   }
   return constructors;
@@ -1175,7 +1243,355 @@ var mergeRegistries = (...registries) => {
   }
   return result;
 };
+var processDeclarations = (declarations, initial = {
+  typeEnv: new Map,
+  registry: new Map,
+  constructorNames: []
+}) => {
+  let typeEnv = initial.typeEnv;
+  let registry = initial.registry;
+  const constructorNames = [...initial.constructorNames];
+  for (const decl of declarations) {
+    const [newEnv, newReg] = processDataDecl(decl);
+    typeEnv = mergeEnvs(typeEnv, newEnv);
+    registry = mergeRegistries(registry, newReg);
+    for (const con of decl.constructors) {
+      constructorNames.push(con.name);
+    }
+  }
+  return { typeEnv, registry, constructorNames };
+};
 var baseEnv = new Map;
+
+// src/eval.ts
+var vnum = (value) => ({ kind: "VNum", value });
+var vstr = (value) => ({ kind: "VStr", value });
+var vbool = (value) => ({ kind: "VBool", value });
+var vclosure = (param, body, env) => ({
+  kind: "VClosure",
+  param,
+  body,
+  env
+});
+var vcon = (name, args = []) => ({
+  kind: "VCon",
+  name,
+  args
+});
+var vtuple = (elements) => ({ kind: "VTuple", elements });
+var vrecord = (fields) => ({ kind: "VRecord", fields });
+var vref = () => ({ kind: "VRef", value: null });
+var emptyEnv = new Map;
+var extendEnv = (env, name, value) => {
+  const newEnv = new Map(env);
+  newEnv.set(name, value);
+  return newEnv;
+};
+
+class RuntimeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RuntimeError";
+  }
+}
+var evaluate = (env, expr) => {
+  switch (expr.kind) {
+    case "Num":
+      return vnum(expr.value);
+    case "Str":
+      return vstr(expr.value);
+    case "Bool":
+      return vbool(expr.value);
+    case "Var": {
+      const value = env.get(expr.name);
+      if (value.kind === "VRef") {
+        if (value.value === null) {
+          throw new RuntimeError(`Uninitialized recursive binding: ${expr.name}`);
+        }
+        return value.value;
+      }
+      return value;
+    }
+    case "Abs":
+      return vclosure(expr.param, expr.body, env);
+    case "App": {
+      const func = evaluate(env, expr.func);
+      const arg = evaluate(env, expr.param);
+      return apply(func, arg);
+    }
+    case "Let": {
+      const value = evaluate(env, expr.value);
+      const newEnv = extendEnv(env, expr.name, value);
+      return evaluate(newEnv, expr.body);
+    }
+    case "LetRec": {
+      const refs = new Map;
+      let newEnv = env;
+      for (const binding of expr.bindings) {
+        const ref = vref();
+        refs.set(binding.name, ref);
+        newEnv = extendEnv(newEnv, binding.name, ref);
+      }
+      for (const binding of expr.bindings) {
+        const value = evaluate(newEnv, binding.value);
+        refs.get(binding.name).value = value;
+      }
+      return evaluate(newEnv, expr.body);
+    }
+    case "If": {
+      const cond = evaluate(env, expr.cond);
+      return cond.value ? evaluate(env, expr.then) : evaluate(env, expr.else);
+    }
+    case "BinOp":
+      return evalBinOp(env, expr);
+    case "Tuple": {
+      const elements = expr.elements.map((e) => evaluate(env, e));
+      return elements.length === 1 ? elements[0] : vtuple(elements);
+    }
+    case "Record": {
+      const fields = new Map;
+      for (const field of expr.fields) {
+        fields.set(field.name, evaluate(env, field.value));
+      }
+      return vrecord(fields);
+    }
+    case "FieldAccess": {
+      const record = evaluate(env, expr.record);
+      return record.fields.get(expr.field);
+    }
+    case "TupleIndex": {
+      const tuple = evaluate(env, expr.tuple);
+      return tuple.elements[expr.index];
+    }
+    case "Match":
+      return evalMatch(env, expr);
+  }
+};
+var apply = (func, arg) => {
+  if (func.kind === "VClosure") {
+    const newEnv = extendEnv(func.env, func.param, arg);
+    return evaluate(newEnv, func.body);
+  }
+  return vcon(func.name, [...func.args, arg]);
+};
+var evalBinOp = (env, expr) => {
+  const left = evaluate(env, expr.left);
+  const right = evaluate(env, expr.right);
+  switch (expr.op) {
+    case "-":
+      return vnum(left.value - right.value);
+    case "*":
+      return vnum(left.value * right.value);
+    case "/": {
+      const divisor = right.value;
+      if (divisor === 0)
+        throw new RuntimeError("Division by zero");
+      return vnum(left.value / divisor);
+    }
+    case "+":
+      if (left.kind === "VNum") {
+        return vnum(left.value + right.value);
+      }
+      return vstr(left.value + right.value);
+    case "<":
+      if (left.kind === "VNum")
+        return vbool(left.value < right.value);
+      return vbool(left.value < right.value);
+    case ">":
+      if (left.kind === "VNum")
+        return vbool(left.value > right.value);
+      return vbool(left.value > right.value);
+    case "<=":
+      if (left.kind === "VNum")
+        return vbool(left.value <= right.value);
+      return vbool(left.value <= right.value);
+    case ">=":
+      if (left.kind === "VNum")
+        return vbool(left.value >= right.value);
+      return vbool(left.value >= right.value);
+    case "==":
+      return vbool(valuesEqual(left, right));
+    case "!=":
+      return vbool(!valuesEqual(left, right));
+    case "++":
+      return vstr(left.value + right.value);
+  }
+};
+var valuesEqual = (a, b) => {
+  if (a.kind !== b.kind)
+    return false;
+  switch (a.kind) {
+    case "VNum":
+      return a.value === b.value;
+    case "VStr":
+      return a.value === b.value;
+    case "VBool":
+      return a.value === b.value;
+    case "VCon": {
+      const bCon = b;
+      if (a.name !== bCon.name || a.args.length !== bCon.args.length)
+        return false;
+      return a.args.every((arg, i) => valuesEqual(arg, bCon.args[i]));
+    }
+    case "VTuple": {
+      const bTuple = b;
+      if (a.elements.length !== bTuple.elements.length)
+        return false;
+      return a.elements.every((elem, i) => valuesEqual(elem, bTuple.elements[i]));
+    }
+    case "VRecord": {
+      const bRecord = b;
+      if (a.fields.size !== bRecord.fields.size)
+        return false;
+      for (const [key, val] of a.fields) {
+        const bVal = bRecord.fields.get(key);
+        if (bVal === undefined || !valuesEqual(val, bVal))
+          return false;
+      }
+      return true;
+    }
+    case "VClosure":
+    case "VRef":
+      return false;
+  }
+};
+var matchPattern = (pattern, value) => {
+  switch (pattern.kind) {
+    case "PWildcard":
+      return { matched: true, bindings: new Map };
+    case "PVar":
+      return { matched: true, bindings: new Map([[pattern.name, value]]) };
+    case "PLit": {
+      if (typeof pattern.value === "number" && value.kind === "VNum") {
+        return pattern.value === value.value ? { matched: true, bindings: new Map } : { matched: false };
+      }
+      if (typeof pattern.value === "string" && value.kind === "VStr") {
+        return pattern.value === value.value ? { matched: true, bindings: new Map } : { matched: false };
+      }
+      if (typeof pattern.value === "boolean" && value.kind === "VBool") {
+        return pattern.value === value.value ? { matched: true, bindings: new Map } : { matched: false };
+      }
+      return { matched: false };
+    }
+    case "PCon": {
+      if (value.kind !== "VCon" || value.name !== pattern.name) {
+        return { matched: false };
+      }
+      if (value.args.length !== pattern.args.length) {
+        return { matched: false };
+      }
+      const bindings = new Map;
+      for (let i = 0;i < pattern.args.length; i++) {
+        const result = matchPattern(pattern.args[i], value.args[i]);
+        if (!result.matched)
+          return { matched: false };
+        for (const [name, val] of result.bindings) {
+          bindings.set(name, val);
+        }
+      }
+      return { matched: true, bindings };
+    }
+    case "PTuple": {
+      if (value.kind !== "VTuple" || value.elements.length !== pattern.elements.length) {
+        return { matched: false };
+      }
+      const bindings = new Map;
+      for (let i = 0;i < pattern.elements.length; i++) {
+        const result = matchPattern(pattern.elements[i], value.elements[i]);
+        if (!result.matched)
+          return { matched: false };
+        for (const [name, val] of result.bindings) {
+          bindings.set(name, val);
+        }
+      }
+      return { matched: true, bindings };
+    }
+    case "PRecord": {
+      if (value.kind !== "VRecord") {
+        return { matched: false };
+      }
+      const bindings = new Map;
+      for (const field of pattern.fields) {
+        const fieldValue = value.fields.get(field.name);
+        if (fieldValue === undefined)
+          return { matched: false };
+        const result = matchPattern(field.pattern, fieldValue);
+        if (!result.matched)
+          return { matched: false };
+        for (const [name, val] of result.bindings) {
+          bindings.set(name, val);
+        }
+      }
+      return { matched: true, bindings };
+    }
+    case "PAs": {
+      const result = matchPattern(pattern.pattern, value);
+      if (!result.matched)
+        return { matched: false };
+      result.bindings.set(pattern.name, value);
+      return result;
+    }
+    case "POr": {
+      for (const alt of pattern.alternatives) {
+        const result = matchPattern(alt, value);
+        if (result.matched)
+          return result;
+      }
+      return { matched: false };
+    }
+  }
+};
+var evalMatch = (env, expr) => {
+  const scrutinee = evaluate(env, expr.expr);
+  for (const case_ of expr.cases) {
+    const result = matchPattern(case_.pattern, scrutinee);
+    if (result.matched) {
+      let caseEnv = env;
+      for (const [name, value] of result.bindings) {
+        caseEnv = extendEnv(caseEnv, name, value);
+      }
+      if (case_.guard) {
+        const guardResult = evaluate(caseEnv, case_.guard);
+        if (!guardResult.value) {
+          continue;
+        }
+      }
+      return evaluate(caseEnv, case_.body);
+    }
+  }
+  throw new Error("Unreachable: exhaustiveness check failed");
+};
+var valueToString = (value) => {
+  switch (value.kind) {
+    case "VNum":
+      return String(value.value);
+    case "VStr":
+      return `"${value.value}"`;
+    case "VBool":
+      return String(value.value);
+    case "VClosure":
+      return "<function>";
+    case "VCon":
+      if (value.args.length === 0)
+        return value.name;
+      return `(${value.name} ${value.args.map(valueToString).join(" ")})`;
+    case "VTuple":
+      return `(${value.elements.map(valueToString).join(", ")})`;
+    case "VRecord": {
+      const fields = [...value.fields.entries()].map(([k, v]) => `${k}: ${valueToString(v)}`).join(", ");
+      return `{ ${fields} }`;
+    }
+    case "VRef":
+      return value.value ? valueToString(value.value) : "<uninitialized>";
+  }
+};
+var createConstructorEnv = (constructorNames) => {
+  const env = new Map;
+  for (const name of constructorNames) {
+    env.set(name, vcon(name));
+  }
+  return env;
+};
 
 // src/ast.ts
 var num = (value, span) => ({ kind: "Num", value, span });
@@ -1188,27 +1604,33 @@ var if_ = (cond, then, else_, span) => ({
   else: else_,
   span
 });
-var let_ = (name, value, body, span, nameSpan) => ({
+var let_ = (name, value, body, span, nameSpan, returnType) => ({
   kind: "Let",
   name,
   nameSpan,
+  returnType,
   value,
   body,
   span
 });
-var letRec = (name, value, body, span, nameSpan) => ({
-  kind: "LetRec",
+var recBinding = (name, value, nameSpan, returnType) => ({
   name,
   nameSpan,
-  value,
+  returnType,
+  value
+});
+var letRec = (bindings, body, span) => ({
+  kind: "LetRec",
+  bindings,
   body,
   span
 });
 var var_ = (name, span) => ({ kind: "Var", name, span });
-var abs = (param, body, span, paramSpan) => ({
+var abs = (param, body, span, paramSpan, paramType) => ({
   kind: "Abs",
   param,
   paramSpan,
+  paramType,
   body,
   span
 });
@@ -1239,6 +1661,12 @@ var fieldAccess = (record2, field2, span) => ({
   field: field2,
   span
 });
+var tupleIndex = (tuple2, index, span) => ({
+  kind: "TupleIndex",
+  tuple: tuple2,
+  index,
+  span
+});
 var binOp = (op, left, right, span) => ({
   kind: "BinOp",
   op,
@@ -1248,11 +1676,12 @@ var binOp = (op, left, right, span) => ({
 });
 var pwildcard = (span) => ({ kind: "PWildcard", span });
 var pvar = (name, span) => ({ kind: "PVar", name, span });
-var pcon = (name, args, span) => ({
+var pcon = (name, args, span, nameSpan) => ({
   kind: "PCon",
   name,
   args,
-  span
+  span,
+  nameSpan
 });
 var plit = (value, span) => ({
   kind: "PLit",
@@ -1274,8 +1703,21 @@ var ptuple = (elements, span) => ({
   elements,
   span
 });
-var case_ = (pattern, body, span) => ({
+var pas = (pattern, name, span, nameSpan) => ({
+  kind: "PAs",
   pattern,
+  name,
+  span,
+  nameSpan
+});
+var por = (alternatives, span) => ({
+  kind: "POr",
+  alternatives,
+  span
+});
+var case_ = (pattern, body, guard, span) => ({
+  pattern,
+  guard,
   body,
   span
 });
@@ -1291,6 +1733,12 @@ var tyapp = (con, arg, span) => ({
   kind: "TyApp",
   con,
   arg,
+  span
+});
+var tyfun = (param, ret, span) => ({
+  kind: "TyFun",
+  param,
+  ret,
   span
 });
 var conDecl = (name, fields, span) => ({
@@ -1320,29 +1768,37 @@ var TokenKind;
   TokenKind2[TokenKind2["Data"] = 14] = "Data";
   TokenKind2[TokenKind2["True"] = 15] = "True";
   TokenKind2[TokenKind2["False"] = 16] = "False";
-  TokenKind2[TokenKind2["Plus"] = 17] = "Plus";
-  TokenKind2[TokenKind2["Minus"] = 18] = "Minus";
-  TokenKind2[TokenKind2["Star"] = 19] = "Star";
-  TokenKind2[TokenKind2["Slash"] = 20] = "Slash";
-  TokenKind2[TokenKind2["Lt"] = 21] = "Lt";
-  TokenKind2[TokenKind2["Le"] = 22] = "Le";
-  TokenKind2[TokenKind2["Gt"] = 23] = "Gt";
-  TokenKind2[TokenKind2["Ge"] = 24] = "Ge";
-  TokenKind2[TokenKind2["EqEq"] = 25] = "EqEq";
-  TokenKind2[TokenKind2["Ne"] = 26] = "Ne";
-  TokenKind2[TokenKind2["Pipe"] = 27] = "Pipe";
-  TokenKind2[TokenKind2["Arrow"] = 28] = "Arrow";
-  TokenKind2[TokenKind2["Eq"] = 29] = "Eq";
-  TokenKind2[TokenKind2["Bar"] = 30] = "Bar";
-  TokenKind2[TokenKind2["Comma"] = 31] = "Comma";
-  TokenKind2[TokenKind2["Dot"] = 32] = "Dot";
-  TokenKind2[TokenKind2["Underscore"] = 33] = "Underscore";
-  TokenKind2[TokenKind2["ColonColon"] = 34] = "ColonColon";
-  TokenKind2[TokenKind2["LParen"] = 35] = "LParen";
-  TokenKind2[TokenKind2["RParen"] = 36] = "RParen";
-  TokenKind2[TokenKind2["LBrace"] = 37] = "LBrace";
-  TokenKind2[TokenKind2["RBrace"] = 38] = "RBrace";
-  TokenKind2[TokenKind2["Error"] = 39] = "Error";
+  TokenKind2[TokenKind2["As"] = 17] = "As";
+  TokenKind2[TokenKind2["AndKw"] = 18] = "AndKw";
+  TokenKind2[TokenKind2["Plus"] = 19] = "Plus";
+  TokenKind2[TokenKind2["Minus"] = 20] = "Minus";
+  TokenKind2[TokenKind2["Star"] = 21] = "Star";
+  TokenKind2[TokenKind2["Slash"] = 22] = "Slash";
+  TokenKind2[TokenKind2["Lt"] = 23] = "Lt";
+  TokenKind2[TokenKind2["Le"] = 24] = "Le";
+  TokenKind2[TokenKind2["Gt"] = 25] = "Gt";
+  TokenKind2[TokenKind2["Ge"] = 26] = "Ge";
+  TokenKind2[TokenKind2["EqEq"] = 27] = "EqEq";
+  TokenKind2[TokenKind2["Ne"] = 28] = "Ne";
+  TokenKind2[TokenKind2["Pipe"] = 29] = "Pipe";
+  TokenKind2[TokenKind2["Arrow"] = 30] = "Arrow";
+  TokenKind2[TokenKind2["Eq"] = 31] = "Eq";
+  TokenKind2[TokenKind2["Bar"] = 32] = "Bar";
+  TokenKind2[TokenKind2["Comma"] = 33] = "Comma";
+  TokenKind2[TokenKind2["Dot"] = 34] = "Dot";
+  TokenKind2[TokenKind2["Underscore"] = 35] = "Underscore";
+  TokenKind2[TokenKind2["ColonColon"] = 36] = "ColonColon";
+  TokenKind2[TokenKind2["And"] = 37] = "And";
+  TokenKind2[TokenKind2["Or"] = 38] = "Or";
+  TokenKind2[TokenKind2["PlusPlus"] = 39] = "PlusPlus";
+  TokenKind2[TokenKind2["Colon"] = 40] = "Colon";
+  TokenKind2[TokenKind2["LParen"] = 41] = "LParen";
+  TokenKind2[TokenKind2["RParen"] = 42] = "RParen";
+  TokenKind2[TokenKind2["LBrace"] = 43] = "LBrace";
+  TokenKind2[TokenKind2["RBrace"] = 44] = "RBrace";
+  TokenKind2[TokenKind2["LBracket"] = 45] = "LBracket";
+  TokenKind2[TokenKind2["RBracket"] = 46] = "RBracket";
+  TokenKind2[TokenKind2["Error"] = 47] = "Error";
 })(TokenKind ||= {});
 var EOF = -1;
 var TAB = 9;
@@ -1373,7 +1829,10 @@ var LPAREN = 40;
 var RPAREN = 41;
 var LBRACE = 123;
 var RBRACE = 125;
+var LBRACKET = 91;
+var RBRACKET = 93;
 var COLON = 58;
+var AMPERSAND = 38;
 var keywords = new Map([
   ["let", 5 /* Let */],
   ["rec", 6 /* Rec */],
@@ -1386,7 +1845,9 @@ var keywords = new Map([
   ["end", 13 /* End */],
   ["data", 14 /* Data */],
   ["true", 15 /* True */],
-  ["false", 16 /* False */]
+  ["false", 16 /* False */],
+  ["as", 17 /* As */],
+  ["and", 18 /* AndKw */]
 ]);
 var isDigit = (ch) => ch >= DIGIT_0 && ch <= DIGIT_9;
 var isLower = (ch) => ch >= LOWER_A && ch <= LOWER_Z;
@@ -1474,7 +1935,7 @@ var scanString = (state, start) => {
     advance(state);
   }
   if (peek(state) === EOF) {
-    return [39 /* Error */, start, state.pos];
+    return [47 /* Error */, start, state.pos];
   }
   advance(state);
   return [2 /* String */, start, state.pos];
@@ -1482,7 +1943,7 @@ var scanString = (state, start) => {
 var scanLowerOrKeyword = (state, start) => {
   if (peek(state) === UNDERSCORE && !isIdentContinue(peekAt(state, 1))) {
     advance(state);
-    return [33 /* Underscore */, start, state.pos];
+    return [35 /* Underscore */, start, state.pos];
   }
   while (isIdentContinue(peek(state))) {
     advance(state);
@@ -1504,67 +1965,85 @@ var scanOperator = (state, start, ch) => {
   advance(state);
   switch (ch) {
     case PLUS:
-      return [17 /* Plus */, start, state.pos];
+      if (peek(state) === PLUS) {
+        advance(state);
+        return [39 /* PlusPlus */, start, state.pos];
+      }
+      return [19 /* Plus */, start, state.pos];
     case MINUS:
-      return [18 /* Minus */, start, state.pos];
+      return [20 /* Minus */, start, state.pos];
     case STAR:
-      return [19 /* Star */, start, state.pos];
+      return [21 /* Star */, start, state.pos];
     case SLASH:
-      return [20 /* Slash */, start, state.pos];
+      return [22 /* Slash */, start, state.pos];
     case LT:
       if (peek(state) === EQ) {
         advance(state);
-        return [22 /* Le */, start, state.pos];
+        return [24 /* Le */, start, state.pos];
       }
-      return [21 /* Lt */, start, state.pos];
+      return [23 /* Lt */, start, state.pos];
     case GT:
       if (peek(state) === EQ) {
         advance(state);
-        return [24 /* Ge */, start, state.pos];
+        return [26 /* Ge */, start, state.pos];
       }
-      return [23 /* Gt */, start, state.pos];
+      return [25 /* Gt */, start, state.pos];
     case EQ:
       if (peek(state) === EQ) {
         advance(state);
-        return [25 /* EqEq */, start, state.pos];
+        return [27 /* EqEq */, start, state.pos];
       }
       if (peek(state) === GT) {
         advance(state);
-        return [28 /* Arrow */, start, state.pos];
+        return [30 /* Arrow */, start, state.pos];
       }
-      return [29 /* Eq */, start, state.pos];
+      return [31 /* Eq */, start, state.pos];
     case BANG:
       if (peek(state) === EQ) {
         advance(state);
-        return [26 /* Ne */, start, state.pos];
+        return [28 /* Ne */, start, state.pos];
       }
-      return [39 /* Error */, start, state.pos];
+      return [47 /* Error */, start, state.pos];
     case PIPE:
       if (peek(state) === GT) {
         advance(state);
-        return [27 /* Pipe */, start, state.pos];
+        return [29 /* Pipe */, start, state.pos];
       }
-      return [30 /* Bar */, start, state.pos];
+      if (peek(state) === PIPE) {
+        advance(state);
+        return [38 /* Or */, start, state.pos];
+      }
+      return [32 /* Bar */, start, state.pos];
+    case AMPERSAND:
+      if (peek(state) === AMPERSAND) {
+        advance(state);
+        return [37 /* And */, start, state.pos];
+      }
+      return [47 /* Error */, start, state.pos];
     case COMMA:
-      return [31 /* Comma */, start, state.pos];
+      return [33 /* Comma */, start, state.pos];
     case DOT:
-      return [32 /* Dot */, start, state.pos];
+      return [34 /* Dot */, start, state.pos];
     case LPAREN:
-      return [35 /* LParen */, start, state.pos];
+      return [41 /* LParen */, start, state.pos];
     case RPAREN:
-      return [36 /* RParen */, start, state.pos];
+      return [42 /* RParen */, start, state.pos];
     case LBRACE:
-      return [37 /* LBrace */, start, state.pos];
+      return [43 /* LBrace */, start, state.pos];
     case RBRACE:
-      return [38 /* RBrace */, start, state.pos];
+      return [44 /* RBrace */, start, state.pos];
+    case LBRACKET:
+      return [45 /* LBracket */, start, state.pos];
+    case RBRACKET:
+      return [46 /* RBracket */, start, state.pos];
     case COLON:
       if (peek(state) === COLON) {
         advance(state);
-        return [34 /* ColonColon */, start, state.pos];
+        return [36 /* ColonColon */, start, state.pos];
       }
-      return [39 /* Error */, start, state.pos];
+      return [40 /* Colon */, start, state.pos];
     default:
-      return [39 /* Error */, start, state.pos];
+      return [47 /* Error */, start, state.pos];
   }
 };
 var nextToken = (state) => {
@@ -1623,7 +2102,7 @@ var error2 = (state, message) => {
 };
 var span = (start, end) => ({ start, end });
 var tokenSpan = (token) => span(token[1], token[2]);
-var atNewStatement = (state) => state.lexer.atLineStart && !at(state, 30 /* Bar */);
+var atNewStatement = (state) => state.lexer.atLineStart && !at(state, 32 /* Bar */);
 var synchronize = (state) => {
   while (!at(state, 0 /* Eof */)) {
     if (atAny(state, 5 /* Let */, 14 /* Data */, 8 /* If */, 11 /* Match */, 13 /* End */)) {
@@ -1661,10 +2140,20 @@ var parse = (source) => {
   };
 };
 var parseLetBindingOrExpr = (state) => {
+  const start = state.current[1];
   advance2(state);
   const recursive = at(state, 6 /* Rec */);
   if (recursive)
     advance2(state);
+  if (!recursive && atAny(state, 41 /* LParen */, 43 /* LBrace */, 35 /* Underscore */, 4 /* Upper */)) {
+    const pattern = parsePattern(state);
+    expect(state, 31 /* Eq */, "expected '=' after pattern");
+    const value = parseExpr(state);
+    expect(state, 7 /* In */, "expected 'in' after let value");
+    const body2 = parseExpr(state);
+    const end = body2.span?.end ?? state.current[1];
+    return { kind: "expr", expr: match(value, [case_(pattern, body2)], span(start, end)) };
+  }
   const nameToken = expect(state, 3 /* Lower */, "expected binding name");
   if (!nameToken) {
     synchronize(state);
@@ -1673,27 +2162,59 @@ var parseLetBindingOrExpr = (state) => {
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
   const params = [];
-  while (at(state, 3 /* Lower */)) {
-    const paramToken = advance2(state);
-    params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+  while (at(state, 3 /* Lower */) || at(state, 41 /* LParen */)) {
+    if (at(state, 41 /* LParen */)) {
+      advance2(state);
+      const paramToken = expect(state, 3 /* Lower */, "expected parameter name");
+      if (!paramToken)
+        break;
+      const paramName = text(state, paramToken);
+      let paramType;
+      if (at(state, 40 /* Colon */)) {
+        advance2(state);
+        paramType = parseType(state) ?? undefined;
+      }
+      expect(state, 42 /* RParen */, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      const paramToken = advance2(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
   }
-  if (!expect(state, 29 /* Eq */, "expected '=' after parameters")) {
+  let returnType;
+  if (at(state, 40 /* Colon */)) {
+    advance2(state);
+    returnType = parseType(state) ?? undefined;
+  }
+  if (!expect(state, 31 /* Eq */, "expected '=' after parameters")) {
     synchronize(state);
     return { kind: "expr", expr: num(0) };
   }
   const body = parseExpr(state);
-  if (at(state, 7 /* In */)) {
-    advance2(state);
+  if (at(state, 7 /* In */) || recursive && at(state, 18 /* AndKw */)) {
     let value = body;
     for (let i = params.length - 1;i >= 0; i--) {
       const p = params[i];
-      value = abs(p.name, value, undefined, p.span);
+      value = abs(p.name, value, undefined, p.span, p.type);
     }
+    if (recursive) {
+      const bindings = [recBinding(name, value, nameSpan, returnType)];
+      while (at(state, 18 /* AndKw */)) {
+        advance2(state);
+        bindings.push(parseRecBinding(state));
+      }
+      expect(state, 7 /* In */, "expected 'in' after let rec bindings");
+      const continuation2 = parseExpr(state);
+      return { kind: "expr", expr: letRec(bindings, continuation2) };
+    }
+    advance2(state);
     const continuation = parseExpr(state);
-    const expr = recursive ? letRec(name, value, continuation, undefined, nameSpan) : let_(name, value, continuation, undefined, nameSpan);
-    return { kind: "expr", expr };
+    return {
+      kind: "expr",
+      expr: let_(name, value, continuation, undefined, nameSpan, returnType)
+    };
   }
-  return { kind: "binding", binding: { name, nameSpan, params, body, recursive } };
+  return { kind: "binding", binding: { name, nameSpan, params, returnType, body, recursive } };
 };
 var parseDataDecl = (state) => {
   advance2(state);
@@ -1707,7 +2228,7 @@ var parseDataDecl = (state) => {
   while (at(state, 3 /* Lower */)) {
     typeParams.push(text(state, advance2(state)));
   }
-  if (!expect(state, 29 /* Eq */, "expected '=' after type parameters")) {
+  if (!expect(state, 31 /* Eq */, "expected '=' after type parameters")) {
     synchronize(state);
     return null;
   }
@@ -1715,7 +2236,7 @@ var parseDataDecl = (state) => {
   const first = parseConstructor(state);
   if (first)
     constructors.push(first);
-  while (at(state, 30 /* Bar */)) {
+  while (at(state, 32 /* Bar */)) {
     advance2(state);
     const con = parseConstructor(state);
     if (con)
@@ -1729,7 +2250,7 @@ var parseConstructor = (state) => {
     return null;
   const name = text(state, nameToken);
   const fields = [];
-  while (atAny(state, 3 /* Lower */, 4 /* Upper */, 35 /* LParen */) && !atNewStatement(state)) {
+  while (atAny(state, 3 /* Lower */, 4 /* Upper */, 41 /* LParen */) && !atNewStatement(state)) {
     const field2 = parseTypeAtom(state);
     if (field2)
       fields.push(field2);
@@ -1738,13 +2259,27 @@ var parseConstructor = (state) => {
   }
   return conDecl(name, fields);
 };
+var parseType = (state) => {
+  const left = parseTypeAtom(state);
+  if (!left)
+    return null;
+  if (at(state, 20 /* Minus */) && state.lexer.source.charCodeAt(state.current[2]) === 62) {
+    advance2(state);
+    advance2(state);
+    const right = parseType(state);
+    if (!right)
+      return left;
+    return tyfun(left, right);
+  }
+  return left;
+};
 var parseTypeAtom = (state) => {
   if (at(state, 3 /* Lower */)) {
     return tyvar(text(state, advance2(state)));
   }
   if (at(state, 4 /* Upper */)) {
     let type = tycon(text(state, advance2(state)));
-    while (atAny(state, 3 /* Lower */, 4 /* Upper */, 35 /* LParen */) && !atNewStatement(state)) {
+    while (atAny(state, 3 /* Lower */, 4 /* Upper */, 41 /* LParen */) && !atNewStatement(state)) {
       const arg = parseTypeAtomSimple(state);
       if (arg) {
         type = tyapp(type, arg);
@@ -1754,10 +2289,10 @@ var parseTypeAtom = (state) => {
     }
     return type;
   }
-  if (at(state, 35 /* LParen */)) {
+  if (at(state, 41 /* LParen */)) {
     advance2(state);
     const inner = parseTypeAtom(state);
-    expect(state, 36 /* RParen */, "expected ')' after type");
+    expect(state, 42 /* RParen */, "expected ')' after type");
     return inner;
   }
   return null;
@@ -1769,10 +2304,10 @@ var parseTypeAtomSimple = (state) => {
   if (at(state, 4 /* Upper */)) {
     return tycon(text(state, advance2(state)));
   }
-  if (at(state, 35 /* LParen */)) {
+  if (at(state, 41 /* LParen */)) {
     advance2(state);
     const inner = parseTypeAtom(state);
-    expect(state, 36 /* RParen */, "expected ')' after type");
+    expect(state, 42 /* RParen */, "expected ')' after type");
     return inner;
   }
   return null;
@@ -1799,7 +2334,7 @@ var parsePrefix = (state) => {
     }
     case 2 /* String */: {
       advance2(state);
-      return str(parseStringContent(text(state, token)), tokenSpan(token));
+      return str(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
     }
     case 15 /* True */:
       advance2(state);
@@ -1811,7 +2346,7 @@ var parsePrefix = (state) => {
       advance2(state);
       const name = text(state, token);
       const paramSpan = tokenSpan(token);
-      if (at(state, 28 /* Arrow */)) {
+      if (at(state, 30 /* Arrow */)) {
         advance2(state);
         const body = parseExpr(state);
         const end = body.span?.end ?? state.current[1];
@@ -1823,10 +2358,18 @@ var parsePrefix = (state) => {
       advance2(state);
       return var_(text(state, token), tokenSpan(token));
     }
-    case 35 /* LParen */:
+    case 41 /* LParen */:
       return parseParenOrTuple(state);
-    case 37 /* LBrace */:
+    case 20 /* Minus */: {
+      advance2(state);
+      const operand = parsePrecedence(state, 50 /* Multiplicative */ + 1);
+      const end = operand.span?.end ?? state.current[1];
+      return binOp("-", num(0, span(start, start)), operand, span(start, end));
+    }
+    case 43 /* LBrace */:
       return parseRecord(state);
+    case 45 /* LBracket */:
+      return parseListLiteral(state);
     case 8 /* If */:
       return parseIf(state);
     case 11 /* Match */:
@@ -1850,41 +2393,71 @@ var parseInfix = (state, left, bp) => {
     return binOp(op, left, right, span(start, end));
   };
   switch (kind) {
-    case 17 /* Plus */:
+    case 19 /* Plus */:
       return binOp2("+");
-    case 18 /* Minus */:
+    case 20 /* Minus */:
       return binOp2("-");
-    case 19 /* Star */:
+    case 21 /* Star */:
       return binOp2("*");
-    case 20 /* Slash */:
+    case 22 /* Slash */:
       return binOp2("/");
-    case 21 /* Lt */:
+    case 23 /* Lt */:
       return binOp2("<");
-    case 22 /* Le */:
+    case 24 /* Le */:
       return binOp2("<=");
-    case 23 /* Gt */:
+    case 25 /* Gt */:
       return binOp2(">");
-    case 24 /* Ge */:
+    case 26 /* Ge */:
       return binOp2(">=");
-    case 25 /* EqEq */:
+    case 27 /* EqEq */:
       return binOp2("==");
-    case 26 /* Ne */:
+    case 28 /* Ne */:
       return binOp2("!=");
-    case 27 /* Pipe */: {
+    case 39 /* PlusPlus */:
+      return binOp2("++");
+    case 37 /* And */: {
+      advance2(state);
+      const right = parsePrecedence(state, bp);
+      const end = right.span?.end ?? state.current[1];
+      return if_(left, right, bool(false), span(start, end));
+    }
+    case 38 /* Or */: {
+      advance2(state);
+      const right = parsePrecedence(state, bp);
+      const end = right.span?.end ?? state.current[1];
+      return if_(left, bool(true), right, span(start, end));
+    }
+    case 29 /* Pipe */: {
       advance2(state);
       const right = parsePrecedence(state, bp);
       const end = right.span?.end ?? state.current[1];
       return app(right, left, span(start, end));
     }
-    case 34 /* ColonColon */: {
+    case 36 /* ColonColon */: {
       advance2(state);
       const right = parsePrecedence(state, bp - 1);
       const end = right.span?.end ?? state.current[1];
       return app(app(var_("Cons"), left), right, span(start, end));
     }
-    case 32 /* Dot */: {
+    case 34 /* Dot */: {
       advance2(state);
-      const fieldToken = expect(state, 3 /* Lower */, "expected field name after '.'");
+      if (at(state, 1 /* Number */)) {
+        const indexToken = state.current;
+        advance2(state);
+        const indexStr = text(state, indexToken);
+        const index = parseInt(indexStr, 10);
+        if (!Number.isInteger(index) || index < 0) {
+          state.diagnostics.push({
+            start: indexToken[1],
+            end: indexToken[2],
+            message: "tuple index must be a non-negative integer",
+            severity: "error"
+          });
+        }
+        const end2 = indexToken[2];
+        return tupleIndex(left, index, span(start, end2));
+      }
+      const fieldToken = expect(state, 3 /* Lower */, "expected field name or index after '.'");
       const field2 = fieldToken ? text(state, fieldToken) : "?";
       const end = fieldToken ? fieldToken[2] : state.current[1];
       return fieldAccess(left, field2, span(start, end));
@@ -1899,25 +2472,30 @@ var parseInfix = (state, left, bp) => {
 var infixBindingPower = (state) => {
   const kind = state.current[0];
   switch (kind) {
-    case 27 /* Pipe */:
+    case 29 /* Pipe */:
       return 10 /* Pipe */;
-    case 34 /* ColonColon */:
+    case 38 /* Or */:
+      return 12 /* Or */;
+    case 37 /* And */:
+      return 14 /* And */;
+    case 36 /* ColonColon */:
       return 15 /* Cons */;
-    case 25 /* EqEq */:
-    case 26 /* Ne */:
+    case 27 /* EqEq */:
+    case 28 /* Ne */:
       return 20 /* Equality */;
-    case 21 /* Lt */:
-    case 22 /* Le */:
-    case 23 /* Gt */:
-    case 24 /* Ge */:
+    case 23 /* Lt */:
+    case 24 /* Le */:
+    case 25 /* Gt */:
+    case 26 /* Ge */:
       return 30 /* Comparison */;
-    case 17 /* Plus */:
-    case 18 /* Minus */:
+    case 19 /* Plus */:
+    case 20 /* Minus */:
+    case 39 /* PlusPlus */:
       return 40 /* Additive */;
-    case 19 /* Star */:
-    case 20 /* Slash */:
+    case 21 /* Star */:
+    case 22 /* Slash */:
       return 50 /* Multiplicative */;
-    case 32 /* Dot */:
+    case 34 /* Dot */:
       return 70 /* FieldAccess */;
     case 3 /* Lower */:
     case 4 /* Upper */:
@@ -1925,8 +2503,8 @@ var infixBindingPower = (state) => {
     case 2 /* String */:
     case 15 /* True */:
     case 16 /* False */:
-    case 35 /* LParen */:
-    case 37 /* LBrace */:
+    case 41 /* LParen */:
+    case 43 /* LBrace */:
       if (state.lexer.atLineStart) {
         return 0 /* None */;
       }
@@ -1938,47 +2516,94 @@ var infixBindingPower = (state) => {
 var parseParenOrTuple = (state) => {
   const start = state.current[1];
   advance2(state);
-  if (at(state, 36 /* RParen */)) {
+  if (at(state, 42 /* RParen */)) {
     advance2(state);
     error2(state, "empty parentheses");
     return num(0);
   }
+  if (at(state, 3 /* Lower */)) {
+    const savedPos = state.lexer.pos;
+    const savedCurrent = state.current;
+    const nameToken = advance2(state);
+    if (at(state, 40 /* Colon */)) {
+      advance2(state);
+      const paramType = parseType(state);
+      expect(state, 42 /* RParen */, "expected ')' after type");
+      if (at(state, 30 /* Arrow */)) {
+        advance2(state);
+        const body = parseExpr(state);
+        const end = body.span?.end ?? state.current[1];
+        return abs(text(state, nameToken), body, span(start, end), tokenSpan(nameToken), paramType ?? undefined);
+      }
+      error2(state, "expected '=>' after annotated parameter");
+      return num(0);
+    }
+    state.lexer.pos = savedPos;
+    state.current = savedCurrent;
+  }
   const first = parseExpr(state);
-  if (at(state, 31 /* Comma */)) {
+  if (at(state, 33 /* Comma */)) {
     const elements = [first];
-    while (at(state, 31 /* Comma */)) {
+    while (at(state, 33 /* Comma */)) {
       advance2(state);
       elements.push(parseExpr(state));
     }
-    const endToken = expect(state, 36 /* RParen */, "expected ')' after tuple");
+    const endToken = expect(state, 42 /* RParen */, "expected ')' after tuple");
     const end = endToken ? endToken[2] : state.current[1];
     return tuple(elements, span(start, end));
   }
-  expect(state, 36 /* RParen */, "expected ')' after expression");
+  expect(state, 42 /* RParen */, "expected ')' after expression");
   return first;
 };
 var parseRecord = (state) => {
   const start = state.current[1];
   advance2(state);
   const fields = [];
-  if (!at(state, 38 /* RBrace */)) {
+  if (!at(state, 44 /* RBrace */)) {
     do {
-      if (at(state, 31 /* Comma */))
+      if (at(state, 33 /* Comma */))
         advance2(state);
       const nameToken = expect(state, 3 /* Lower */, "expected field name");
       if (!nameToken)
         break;
       const name = text(state, nameToken);
       const fieldStart = nameToken[1];
-      expect(state, 29 /* Eq */, "expected '=' after field name");
-      const value = parseExpr(state);
-      const fieldEnd = value.span?.end ?? state.current[1];
-      fields.push(field(name, value, span(fieldStart, fieldEnd)));
-    } while (at(state, 31 /* Comma */));
+      const fieldEnd = nameToken[2];
+      if (at(state, 31 /* Eq */)) {
+        advance2(state);
+        const value = parseExpr(state);
+        const valueEnd = value.span?.end ?? state.current[1];
+        fields.push(field(name, value, span(fieldStart, valueEnd)));
+      } else {
+        const value = var_(name, span(fieldStart, fieldEnd));
+        fields.push(field(name, value, span(fieldStart, fieldEnd)));
+      }
+    } while (at(state, 33 /* Comma */));
   }
-  const endToken = expect(state, 38 /* RBrace */, "expected '}' after record");
+  const endToken = expect(state, 44 /* RBrace */, "expected '}' after record");
   const end = endToken ? endToken[2] : state.current[1];
   return record(fields, span(start, end));
+};
+var parseListLiteral = (state) => {
+  const start = state.current[1];
+  advance2(state);
+  const elements = [];
+  if (!at(state, 46 /* RBracket */)) {
+    do {
+      if (at(state, 33 /* Comma */))
+        advance2(state);
+      elements.push(parseExpr(state));
+    } while (at(state, 33 /* Comma */));
+  }
+  const endToken = expect(state, 46 /* RBracket */, "expected ']' after list");
+  const end = endToken ? endToken[2] : state.current[1];
+  let result = var_("Nil", span(end - 1, end));
+  for (let i = elements.length - 1;i >= 0; i--) {
+    const elem = elements[i];
+    const elemStart = elem.span?.start ?? start;
+    result = app(app(var_("Cons"), elem), result, span(elemStart, end));
+  }
+  return result;
 };
 var parseIf = (state) => {
   const start = state.current[1];
@@ -1997,18 +2622,72 @@ var parseMatch = (state) => {
   const scrutinee = parseExpr(state);
   expect(state, 12 /* With */, "expected 'with' after match expression");
   const cases = [];
-  while (at(state, 30 /* Bar */)) {
+  while (at(state, 32 /* Bar */)) {
     const caseStart = state.current[1];
     advance2(state);
-    const pattern = parsePattern(state);
-    expect(state, 28 /* Arrow */, "expected '=>' after pattern");
+    let pattern = parsePattern(state);
+    if (at(state, 32 /* Bar */)) {
+      const alternatives = [pattern];
+      while (at(state, 32 /* Bar */)) {
+        advance2(state);
+        alternatives.push(parsePattern(state));
+      }
+      const orEnd = alternatives[alternatives.length - 1]?.span?.end ?? state.current[1];
+      pattern = por(alternatives, span(caseStart, orEnd));
+    }
+    let guard;
+    if (at(state, 8 /* If */)) {
+      advance2(state);
+      guard = parseExpr(state);
+    }
+    expect(state, 30 /* Arrow */, "expected '=>' after pattern");
     const body = parseExpr(state);
     const caseEnd = body.span?.end ?? state.current[1];
-    cases.push(case_(pattern, body, span(caseStart, caseEnd)));
+    cases.push(case_(pattern, body, guard, span(caseStart, caseEnd)));
   }
   const endToken = expect(state, 13 /* End */, "expected 'end' after match cases");
   const end = endToken ? endToken[2] : state.current[1];
   return match(scrutinee, cases, span(start, end));
+};
+var parseRecBinding = (state) => {
+  const nameToken = expect(state, 3 /* Lower */, "expected binding name");
+  if (!nameToken) {
+    return recBinding("_error_", num(0));
+  }
+  const name = text(state, nameToken);
+  const nameSpan = tokenSpan(nameToken);
+  const params = [];
+  while (at(state, 3 /* Lower */) || at(state, 41 /* LParen */)) {
+    if (at(state, 41 /* LParen */)) {
+      advance2(state);
+      const paramToken = expect(state, 3 /* Lower */, "expected parameter name");
+      if (!paramToken)
+        break;
+      const paramName = text(state, paramToken);
+      let paramType;
+      if (at(state, 40 /* Colon */)) {
+        advance2(state);
+        paramType = parseType(state) ?? undefined;
+      }
+      expect(state, 42 /* RParen */, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      const paramToken = advance2(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
+  }
+  let returnType;
+  if (at(state, 40 /* Colon */)) {
+    advance2(state);
+    returnType = parseType(state) ?? undefined;
+  }
+  expect(state, 31 /* Eq */, "expected '=' after name");
+  let value = parseExpr(state);
+  for (let i = params.length - 1;i >= 0; i--) {
+    const p = params[i];
+    value = abs(p.name, value, undefined, p.span, p.type);
+  }
+  return recBinding(name, value, nameSpan, returnType);
 };
 var parseLetExpr = (state) => {
   const start = state.current[1];
@@ -2016,6 +2695,20 @@ var parseLetExpr = (state) => {
   const recursive = at(state, 6 /* Rec */);
   if (recursive)
     advance2(state);
+  if (!recursive && atAny(state, 41 /* LParen */, 43 /* LBrace */, 35 /* Underscore */, 4 /* Upper */)) {
+    return parseLetDestructuring(state, start);
+  }
+  if (recursive) {
+    const bindings = [parseRecBinding(state)];
+    while (at(state, 18 /* AndKw */)) {
+      advance2(state);
+      bindings.push(parseRecBinding(state));
+    }
+    expect(state, 7 /* In */, "expected 'in' after let rec bindings");
+    const body2 = parseExpr(state);
+    const end2 = body2.span?.end ?? state.current[1];
+    return letRec(bindings, body2, span(start, end2));
+  }
   const nameToken = expect(state, 3 /* Lower */, "expected binding name");
   if (!nameToken) {
     return num(0);
@@ -2023,27 +2716,82 @@ var parseLetExpr = (state) => {
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
   const params = [];
-  while (at(state, 3 /* Lower */)) {
-    const paramToken = advance2(state);
-    params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+  while (at(state, 3 /* Lower */) || at(state, 41 /* LParen */)) {
+    if (at(state, 41 /* LParen */)) {
+      advance2(state);
+      const paramToken = expect(state, 3 /* Lower */, "expected parameter name");
+      if (!paramToken)
+        break;
+      const paramName = text(state, paramToken);
+      let paramType;
+      if (at(state, 40 /* Colon */)) {
+        advance2(state);
+        paramType = parseType(state) ?? undefined;
+      }
+      expect(state, 42 /* RParen */, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      const paramToken = advance2(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
   }
-  expect(state, 29 /* Eq */, "expected '=' after name");
+  let returnType;
+  if (at(state, 40 /* Colon */)) {
+    advance2(state);
+    returnType = parseType(state) ?? undefined;
+  }
+  expect(state, 31 /* Eq */, "expected '=' after name");
   let value = parseExpr(state);
   for (let i = params.length - 1;i >= 0; i--) {
     const p = params[i];
-    value = abs(p.name, value, undefined, p.span);
+    value = abs(p.name, value, undefined, p.span, p.type);
   }
   expect(state, 7 /* In */, "expected 'in' after let value");
   const body = parseExpr(state);
   const end = body.span?.end ?? state.current[1];
-  return recursive ? letRec(name, value, body, span(start, end), nameSpan) : let_(name, value, body, span(start, end), nameSpan);
+  return let_(name, value, body, span(start, end), nameSpan, returnType);
 };
-var parsePattern = (state) => {
+var parseLetDestructuring = (state, start) => {
+  const pattern = parsePattern(state);
+  expect(state, 31 /* Eq */, "expected '=' after pattern");
+  const value = parseExpr(state);
+  expect(state, 7 /* In */, "expected 'in' after let value");
+  const body = parseExpr(state);
+  const end = body.span?.end ?? state.current[1];
+  return match(value, [case_(pattern, body)], span(start, end));
+};
+var PATTERN_STARTS = new Set([
+  35 /* Underscore */,
+  3 /* Lower */,
+  4 /* Upper */,
+  1 /* Number */,
+  2 /* String */,
+  15 /* True */,
+  16 /* False */,
+  41 /* LParen */,
+  43 /* LBrace */
+]);
+var parsePattern = (state, allowArgs = true) => {
+  const pattern = parsePatternCore(state, allowArgs);
+  if (at(state, 17 /* As */)) {
+    advance2(state);
+    const nameToken = expect(state, 3 /* Lower */, "expected name after 'as'");
+    if (!nameToken)
+      return pattern;
+    const name = text(state, nameToken);
+    const nameSpan = tokenSpan(nameToken);
+    const start = pattern.span?.start ?? nameToken[1];
+    const end = nameToken[2];
+    return pas(pattern, name, span(start, end), nameSpan);
+  }
+  return pattern;
+};
+var parsePatternCore = (state, allowArgs = true) => {
   const token = state.current;
   const kind = token[0];
   const start = token[1];
   switch (kind) {
-    case 33 /* Underscore */:
+    case 35 /* Underscore */:
       advance2(state);
       return pwildcard(tokenSpan(token));
     case 3 /* Lower */:
@@ -2052,125 +2800,97 @@ var parsePattern = (state) => {
     case 4 /* Upper */: {
       advance2(state);
       const name = text(state, token);
+      const nameSpan = tokenSpan(token);
+      if (!allowArgs)
+        return pcon(name, [], nameSpan, nameSpan);
       const args = [];
-      while (isPatternStart(state)) {
-        args.push(parsePatternAtom(state));
+      while (PATTERN_STARTS.has(state.current[0])) {
+        args.push(parsePatternCore(state, false));
       }
-      const end = args.length > 0 ? args[args.length - 1].span?.end ?? state.current[1] : token[2];
-      return pcon(name, args, span(start, end));
+      const end = args[args.length - 1]?.span?.end ?? token[2];
+      return pcon(name, args, span(start, end), nameSpan);
     }
-    case 1 /* Number */: {
+    case 1 /* Number */:
       advance2(state);
       return plit(parseFloat(text(state, token)), tokenSpan(token));
-    }
-    case 2 /* String */: {
+    case 2 /* String */:
       advance2(state);
-      return plit(parseStringContent(text(state, token)), tokenSpan(token));
-    }
+      return plit(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
     case 15 /* True */:
       advance2(state);
       return plit(true, tokenSpan(token));
     case 16 /* False */:
       advance2(state);
       return plit(false, tokenSpan(token));
-    case 35 /* LParen */:
+    case 41 /* LParen */:
       return parseTuplePattern(state);
-    case 37 /* LBrace */:
+    case 43 /* LBrace */:
       return parseRecordPattern(state);
     default:
       error2(state, `unexpected token in pattern: ${TokenKind[kind]}`);
-      advance2(state);
+      if (allowArgs)
+        advance2(state);
       return pwildcard();
   }
 };
-var parsePatternAtom = (state) => {
-  const token = state.current;
-  const kind = token[0];
-  switch (kind) {
-    case 33 /* Underscore */:
-      advance2(state);
-      return pwildcard(tokenSpan(token));
-    case 3 /* Lower */:
-      advance2(state);
-      return pvar(text(state, token), tokenSpan(token));
-    case 4 /* Upper */:
-      advance2(state);
-      return pcon(text(state, token), [], tokenSpan(token));
-    case 1 /* Number */: {
-      advance2(state);
-      return plit(parseFloat(text(state, token)), tokenSpan(token));
-    }
-    case 2 /* String */: {
-      advance2(state);
-      return plit(parseStringContent(text(state, token)), tokenSpan(token));
-    }
-    case 15 /* True */:
-      advance2(state);
-      return plit(true, tokenSpan(token));
-    case 16 /* False */:
-      advance2(state);
-      return plit(false, tokenSpan(token));
-    case 35 /* LParen */:
-      return parseTuplePattern(state);
-    case 37 /* LBrace */:
-      return parseRecordPattern(state);
-    default:
-      error2(state, `unexpected token in pattern: ${TokenKind[kind]}`);
-      return pwildcard();
-  }
-};
-var isPatternStart = (state) => atAny(state, 33 /* Underscore */, 3 /* Lower */, 4 /* Upper */, 1 /* Number */, 2 /* String */, 15 /* True */, 16 /* False */, 35 /* LParen */, 37 /* LBrace */);
 var parseTuplePattern = (state) => {
   const start = state.current[1];
   advance2(state);
-  if (at(state, 36 /* RParen */)) {
+  if (at(state, 42 /* RParen */)) {
     advance2(state);
     error2(state, "empty pattern");
     return pwildcard();
   }
   const first = parsePattern(state);
-  if (at(state, 31 /* Comma */)) {
+  if (at(state, 33 /* Comma */)) {
     const elements = [first];
-    while (at(state, 31 /* Comma */)) {
+    while (at(state, 33 /* Comma */)) {
       advance2(state);
       elements.push(parsePattern(state));
     }
-    const endToken = expect(state, 36 /* RParen */, "expected ')' after tuple pattern");
+    const endToken = expect(state, 42 /* RParen */, "expected ')' after tuple pattern");
     const end = endToken ? endToken[2] : state.current[1];
     return ptuple(elements, span(start, end));
   }
-  expect(state, 36 /* RParen */, "expected ')' after pattern");
+  expect(state, 42 /* RParen */, "expected ')' after pattern");
   return first;
 };
 var parseRecordPattern = (state) => {
   const start = state.current[1];
   advance2(state);
   const fields = [];
-  if (!at(state, 38 /* RBrace */)) {
+  if (!at(state, 44 /* RBrace */)) {
     do {
-      if (at(state, 31 /* Comma */))
+      if (at(state, 33 /* Comma */))
         advance2(state);
       const nameToken = expect(state, 3 /* Lower */, "expected field name");
       if (!nameToken)
         break;
       const name = text(state, nameToken);
       const fieldStart = nameToken[1];
-      expect(state, 29 /* Eq */, "expected '=' after field name");
-      const pattern = parsePattern(state);
-      const fieldEnd = pattern.span?.end ?? state.current[1];
-      fields.push(pfield(name, pattern, span(fieldStart, fieldEnd)));
-    } while (at(state, 31 /* Comma */));
+      const fieldEnd = nameToken[2];
+      if (at(state, 31 /* Eq */)) {
+        advance2(state);
+        const pattern = parsePattern(state);
+        const patternEnd = pattern.span?.end ?? state.current[1];
+        fields.push(pfield(name, pattern, span(fieldStart, patternEnd)));
+      } else {
+        const pattern = pvar(name, span(fieldStart, fieldEnd));
+        fields.push(pfield(name, pattern, span(fieldStart, fieldEnd)));
+      }
+    } while (at(state, 33 /* Comma */));
   }
-  const endToken = expect(state, 38 /* RBrace */, "expected '}' after record pattern");
+  const endToken = expect(state, 44 /* RBrace */, "expected '}' after record pattern");
   const end = endToken ? endToken[2] : state.current[1];
   return precord(fields, span(start, end));
 };
-var parseStringContent = (quoted) => {
+var parseStringContent = (state, quoted, tokenStart) => {
   const inner = quoted.slice(1, -1);
   let result = "";
   let i = 0;
   while (i < inner.length) {
     if (inner[i] === "\\") {
+      const escapeStart = tokenStart + 1 + i;
       i++;
       if (i >= inner.length)
         break;
@@ -2192,6 +2912,12 @@ var parseStringContent = (quoted) => {
           result += '"';
           break;
         default:
+          state.diagnostics.push({
+            message: `Unknown escape sequence: \\${inner[i]}`,
+            start: escapeStart,
+            end: escapeStart + 2,
+            severity: "error"
+          });
           result += inner[i];
       }
     } else {
@@ -2211,12 +2937,12 @@ var programToExpr = (program) => {
     let value = binding.body;
     for (let j = binding.params.length - 1;j >= 0; j--) {
       const p = binding.params[j];
-      value = abs(p.name, value, undefined, p.span);
+      value = abs(p.name, value, undefined, p.span, p.type);
     }
     if (binding.recursive) {
-      expr = letRec(binding.name, value, expr, undefined, binding.nameSpan);
+      expr = letRec([recBinding(binding.name, value, binding.nameSpan, binding.returnType)], expr);
     } else {
-      expr = let_(binding.name, value, expr, undefined, binding.nameSpan);
+      expr = let_(binding.name, value, expr, undefined, binding.nameSpan, binding.returnType);
     }
   }
   return expr;
@@ -2230,14 +2956,18 @@ var list = dataDecl("List", ["a"], [
   conDecl("Cons", [tyvar("a"), tyapp(tycon("List"), tyvar("a"))])
 ]);
 var declarations = [maybe, either, list];
-var map = letRec("map", abs("f", abs("xs", match(var_("xs"), [
-  case_(pcon("Nil", []), var_("Nil")),
-  case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("Cons"), app(var_("f"), var_("x"))), app(app(var_("map"), var_("f")), var_("rest"))))
-]))), var_("map"));
-var filter = letRec("filter", abs("p", abs("xs", match(var_("xs"), [
-  case_(pcon("Nil", []), var_("Nil")),
-  case_(pcon("Cons", [pvar("x"), pvar("rest")]), if_(app(var_("p"), var_("x")), app(app(var_("Cons"), var_("x")), app(app(var_("filter"), var_("p")), var_("rest"))), app(app(var_("filter"), var_("p")), var_("rest"))))
-]))), var_("filter"));
+var map = letRec([
+  recBinding("map", abs("f", abs("xs", match(var_("xs"), [
+    case_(pcon("Nil", []), var_("Nil")),
+    case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("Cons"), app(var_("f"), var_("x"))), app(app(var_("map"), var_("f")), var_("rest"))))
+  ]))))
+], var_("map"));
+var filter = letRec([
+  recBinding("filter", abs("p", abs("xs", match(var_("xs"), [
+    case_(pcon("Nil", []), var_("Nil")),
+    case_(pcon("Cons", [pvar("x"), pvar("rest")]), if_(app(var_("p"), var_("x")), app(app(var_("Cons"), var_("x")), app(app(var_("filter"), var_("p")), var_("rest"))), app(app(var_("filter"), var_("p")), var_("rest"))))
+  ]))))
+], var_("filter"));
 var head = abs("xs", match(var_("xs"), [
   case_(pcon("Nil", []), var_("Nothing")),
   case_(pcon("Cons", [pvar("x"), pwildcard()]), app(var_("Just"), var_("x")))
@@ -2250,18 +2980,24 @@ var isEmpty = abs("xs", match(var_("xs"), [
   case_(pcon("Nil", []), bool(true)),
   case_(pcon("Cons", [pwildcard(), pwildcard()]), bool(false))
 ]));
-var length = letRec("length", abs("xs", match(var_("xs"), [
-  case_(pcon("Nil", []), num(0)),
-  case_(pcon("Cons", [pwildcard(), pvar("rest")]), binOp("+", num(1), app(var_("length"), var_("rest"))))
-])), var_("length"));
-var foldr = letRec("foldr", abs("f", abs("z", abs("xs", match(var_("xs"), [
-  case_(pcon("Nil", []), var_("z")),
-  case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("f"), var_("x")), app(app(app(var_("foldr"), var_("f")), var_("z")), var_("rest"))))
-])))), var_("foldr"));
-var foldl = letRec("foldl", abs("f", abs("z", abs("xs", match(var_("xs"), [
-  case_(pcon("Nil", []), var_("z")),
-  case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(app(var_("foldl"), var_("f")), app(app(var_("f"), var_("z")), var_("x"))), var_("rest")))
-])))), var_("foldl"));
+var length = letRec([
+  recBinding("length", abs("xs", match(var_("xs"), [
+    case_(pcon("Nil", []), num(0)),
+    case_(pcon("Cons", [pwildcard(), pvar("rest")]), binOp("+", num(1), app(var_("length"), var_("rest"))))
+  ])))
+], var_("length"));
+var foldr = letRec([
+  recBinding("foldr", abs("f", abs("z", abs("xs", match(var_("xs"), [
+    case_(pcon("Nil", []), var_("z")),
+    case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("f"), var_("x")), app(app(app(var_("foldr"), var_("f")), var_("z")), var_("rest"))))
+  ])))))
+], var_("foldr"));
+var foldl = letRec([
+  recBinding("foldl", abs("f", abs("z", abs("xs", match(var_("xs"), [
+    case_(pcon("Nil", []), var_("z")),
+    case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(app(var_("foldl"), var_("f")), app(app(var_("f"), var_("z")), var_("x"))), var_("rest")))
+  ])))))
+], var_("foldl"));
 var reverse = abs("xs", app(app(app(foldl, abs("acc", abs("x", app(app(var_("Cons"), var_("x")), var_("acc"))))), var_("Nil")), var_("xs")));
 var concat = abs("xs", abs("ys", app(app(app(foldr, var_("Cons")), var_("ys")), var_("xs"))));
 var id = abs("x", var_("x"));
@@ -2321,6 +3057,8 @@ var notification = (method, params) => ({
 });
 
 // src/lsp/server.ts
+var SYNC_FULL = 1;
+var SEVERITY_ERROR = 1;
 var createServer = (transport) => {
   const documents = new Map;
   transport.onMessage((message) => {
@@ -2353,6 +3091,9 @@ var createServer = (transport) => {
         case "textDocument/rename":
           transport.send(successResponse(id2, handleRename(params)));
           break;
+        case "textDocument/completion":
+          transport.send(successResponse(id2, handleCompletion(params)));
+          break;
         case "algow/evaluate":
           transport.send(successResponse(id2, handleEvaluate(params)));
           break;
@@ -2384,11 +3125,14 @@ var createServer = (transport) => {
   };
   const handleInitialize = (_params) => ({
     capabilities: {
-      textDocumentSync: 1,
+      textDocumentSync: SYNC_FULL,
       hoverProvider: true,
       definitionProvider: true,
       renameProvider: {
         prepareProvider: true
+      },
+      completionProvider: {
+        triggerCharacters: ["."]
       }
     }
   });
@@ -2412,42 +3156,48 @@ var createServer = (transport) => {
   };
   const handleHover = (params) => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult)
+    if (!doc?.symbols || !doc.types)
       return null;
     const offset = positionToOffset(doc.text, params.position);
-    const { symbols } = doc.inferResult;
-    const def = findDefinitionAt(symbols, offset);
-    if (def && def.type) {
-      return {
-        contents: {
-          kind: "markdown",
-          value: `\`\`\`algow
-${def.name}: ${typeToString(def.type)}
-\`\`\``
-        },
-        range: spanToRange(doc.text, def.span)
-      };
-    }
+    const { symbols, types } = doc;
     const ref = findReferenceAt(symbols, offset);
-    if (ref && ref.definition && ref.definition.type) {
-      return {
-        contents: {
-          kind: "markdown",
-          value: `\`\`\`algow
-${ref.name}: ${typeToString(ref.definition.type)}
+    if (ref?.definition) {
+      const type = types.get(ref.definition);
+      if (type) {
+        return {
+          contents: {
+            kind: "markdown",
+            value: `\`\`\`algow
+${ref.name}: ${typeToString(type)}
 \`\`\``
-        },
-        range: spanToRange(doc.text, ref.span)
-      };
+          },
+          range: spanToRange(doc.text, ref.span)
+        };
+      }
+    }
+    const def = findDefinitionAt(symbols, offset);
+    if (def) {
+      const type = types.get(def);
+      if (type) {
+        return {
+          contents: {
+            kind: "markdown",
+            value: `\`\`\`algow
+${def.name}: ${typeToString(type)}
+\`\`\``
+          },
+          range: spanToRange(doc.text, def.span)
+        };
+      }
     }
     return null;
   };
   const handleDefinition = (params) => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult)
+    if (!doc || !doc.symbols)
       return null;
     const offset = positionToOffset(doc.text, params.position);
-    const def = goToDefinition(doc.inferResult.symbols, offset);
+    const def = goToDefinition(doc.symbols, offset);
     if (!def)
       return null;
     return {
@@ -2457,28 +3207,23 @@ ${ref.name}: ${typeToString(ref.definition.type)}
   };
   const handlePrepareRename = (params) => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult)
+    if (!doc?.symbols)
       return null;
     const offset = positionToOffset(doc.text, params.position);
-    const { definition } = findAllOccurrences(doc.inferResult.symbols, offset);
-    if (!definition)
-      return null;
-    const ref = findReferenceAt(doc.inferResult.symbols, offset);
-    if (ref) {
+    const ref = findReferenceAt(doc.symbols, offset);
+    if (ref?.definition)
       return spanToRange(doc.text, ref.span);
-    }
-    const def = findDefinitionAt(doc.inferResult.symbols, offset);
-    if (def) {
+    const def = findDefinitionAt(doc.symbols, offset);
+    if (def)
       return spanToRange(doc.text, def.span);
-    }
     return null;
   };
   const handleRename = (params) => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult)
+    if (!doc || !doc.symbols)
       return null;
     const offset = positionToOffset(doc.text, params.position);
-    const { definition, references } = findAllOccurrences(doc.inferResult.symbols, offset);
+    const { definition, references } = findAllOccurrences(doc.symbols, offset);
     if (!definition)
       return null;
     const edits = [];
@@ -2498,12 +3243,128 @@ ${ref.name}: ${typeToString(ref.definition.type)}
       }
     };
   };
+  const COMPLETION_KIND_FUNCTION = 3;
+  const COMPLETION_KIND_CONSTRUCTOR = 4;
+  const COMPLETION_KIND_FIELD = 5;
+  const COMPLETION_KIND_VARIABLE = 6;
+  const COMPLETION_KIND_KEYWORD = 14;
+  const handleCompletion = (params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc)
+      return null;
+    const offset = positionToOffset(doc.text, params.position);
+    const items = [];
+    const beforeCursor = doc.text.slice(0, offset);
+    const dotMatch = beforeCursor.match(/(\w+)\s*\.\s*$/);
+    if (dotMatch) {
+      const varName = dotMatch[1];
+      const fieldItems = getRecordFieldCompletions(doc, varName);
+      items.push(...fieldItems);
+    } else {
+      items.push(...getVariableCompletions(doc, offset));
+      items.push(...getConstructorCompletions(doc));
+      items.push(...getKeywordCompletions());
+    }
+    return { isIncomplete: false, items };
+  };
+  const getRecordFieldCompletions = (doc, varName) => {
+    if (!doc.symbols || !doc.types)
+      return [];
+    for (const def of doc.symbols.definitions) {
+      if (def.name === varName) {
+        const type = doc.types.get(def);
+        if (type) {
+          return extractRecordFields(type);
+        }
+      }
+    }
+    return [];
+  };
+  const extractRecordFields = (type) => {
+    const items = [];
+    const resolved = resolveType(type);
+    if (resolved.kind === "TRecord") {
+      for (const [fieldName, fieldType] of resolved.fields) {
+        items.push({
+          label: fieldName,
+          kind: COMPLETION_KIND_FIELD,
+          detail: typeToString(fieldType)
+        });
+      }
+    } else if (resolved.kind === "TTuple") {
+      for (let i = 0;i < resolved.elements.length; i++) {
+        items.push({
+          label: String(i),
+          kind: COMPLETION_KIND_FIELD,
+          detail: typeToString(resolved.elements[i])
+        });
+      }
+    }
+    return items;
+  };
+  const resolveType = (type) => {
+    return type;
+  };
+  const getVariableCompletions = (doc, _offset) => {
+    if (!doc.symbols || !doc.types)
+      return [];
+    const items = [];
+    const seen = new Set;
+    for (const def of doc.symbols.definitions) {
+      if (seen.has(def.name))
+        continue;
+      seen.add(def.name);
+      if (def.kind === "constructor")
+        continue;
+      const type = doc.types.get(def);
+      const detail = type ? typeToString(type) : undefined;
+      items.push({
+        label: def.name,
+        kind: def.kind === "parameter" ? COMPLETION_KIND_VARIABLE : COMPLETION_KIND_FUNCTION,
+        detail
+      });
+    }
+    return items;
+  };
+  const getConstructorCompletions = (doc) => {
+    const items = [];
+    for (const [typeName, constructors] of doc.registry) {
+      for (const conName of constructors) {
+        items.push({
+          label: conName,
+          kind: COMPLETION_KIND_CONSTRUCTOR,
+          detail: typeName
+        });
+      }
+    }
+    return items;
+  };
+  const getKeywordCompletions = () => {
+    const keywords2 = [
+      "let",
+      "rec",
+      "in",
+      "if",
+      "then",
+      "else",
+      "match",
+      "with",
+      "end",
+      "data",
+      "true",
+      "false"
+    ];
+    return keywords2.map((kw) => ({
+      label: kw,
+      kind: COMPLETION_KIND_KEYWORD
+    }));
+  };
   const handleEvaluate = (params) => {
     const doc = documents.get(params.textDocument.uri);
     if (!doc || !doc.program) {
       return { success: false, error: "No document found" };
     }
-    if (doc.diagnostics.some((d) => d.severity === 1)) {
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
       return { success: false, error: "Cannot evaluate: document has errors" };
     }
     const expr = programToExpr(doc.program);
@@ -2511,17 +3372,8 @@ ${ref.name}: ${typeToString(ref.definition.type)}
       return { success: false, error: "No expression to evaluate" };
     }
     try {
-      const constructorNames = [];
-      for (const decl of declarations) {
-        for (const con of decl.constructors) {
-          constructorNames.push(con.name);
-        }
-      }
-      for (const decl of doc.program.declarations) {
-        for (const con of decl.constructors) {
-          constructorNames.push(con.name);
-        }
-      }
+      const prelude = processDeclarations(declarations);
+      const { constructorNames } = processDeclarations(doc.program.declarations, prelude);
       const constructorEnv = createConstructorEnv(constructorNames);
       const result = evaluate(constructorEnv, expr);
       return { success: true, value: valueToString(result) };
@@ -2538,23 +3390,20 @@ ${ref.name}: ${typeToString(ref.definition.type)}
     for (const diag of parseResult.diagnostics) {
       lspDiagnostics.push(convertDiagnostic(text2, diag));
     }
+    const prelude = processDeclarations(declarations);
+    const { typeEnv, registry, constructorNames } = processDeclarations(parseResult.program.declarations, prelude);
     const expr = programToExpr(parseResult.program);
-    let inferResult = null;
-    let typeEnv = new Map;
-    let registry = new Map;
-    for (const decl of declarations) {
-      const [newEnv, newReg] = processDataDecl(decl);
-      typeEnv = mergeEnvs(typeEnv, newEnv);
-      registry = mergeRegistries(registry, newReg);
-    }
-    for (const decl of parseResult.program.declarations) {
-      const [newEnv, newReg] = processDataDecl(decl);
-      typeEnv = mergeEnvs(typeEnv, newEnv);
-      registry = mergeRegistries(registry, newReg);
-    }
+    let symbols = null;
+    let types = null;
     if (expr) {
-      inferResult = infer(typeEnv, registry, expr);
-      for (const diag of inferResult.diagnostics) {
+      const bindResult = bindWithConstructors(constructorNames, expr);
+      symbols = bindResult.symbols;
+      for (const diag of bindResult.diagnostics) {
+        lspDiagnostics.push(convertDiagnostic(text2, diag));
+      }
+      const checkResult = check(typeEnv, registry, expr, symbols);
+      types = checkResult.types;
+      for (const diag of checkResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
       }
     }
@@ -2563,7 +3412,8 @@ ${ref.name}: ${typeToString(ref.definition.type)}
       version,
       text: text2,
       diagnostics: lspDiagnostics,
-      inferResult,
+      symbols,
+      types,
       program: parseResult.program,
       registry
     };
@@ -2585,7 +3435,6 @@ ${ref.name}: ${typeToString(ref.definition.type)}
 // src/lsp/worker.ts
 var createWorkerTransport = () => {
   let messageHandler = null;
-  let _closeHandler = null;
   self.onmessage = (event) => {
     messageHandler?.(event.data);
   };
@@ -2596,9 +3445,7 @@ var createWorkerTransport = () => {
     onMessage(handler) {
       messageHandler = handler;
     },
-    onClose(handler) {
-      _closeHandler = handler;
-    }
+    onClose() {}
   };
 };
 

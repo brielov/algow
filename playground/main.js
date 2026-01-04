@@ -92,6 +92,22 @@ __require(["vs/editor/editor.main"], () => {
   const bridge = createLspBridge(worker, editor, statusEl, outputEl);
   bridge.start();
 });
+function mapCompletionKind(lspKind) {
+  switch (lspKind) {
+    case 3:
+      return monaco.languages.CompletionItemKind.Function;
+    case 4:
+      return monaco.languages.CompletionItemKind.Constructor;
+    case 5:
+      return monaco.languages.CompletionItemKind.Field;
+    case 6:
+      return monaco.languages.CompletionItemKind.Variable;
+    case 14:
+      return monaco.languages.CompletionItemKind.Keyword;
+    default:
+      return monaco.languages.CompletionItemKind.Text;
+  }
+}
 function createLspBridge(worker, editor, statusEl, outputEl) {
   const model = editor.getModel();
   const uri = model.uri.toString();
@@ -224,6 +240,33 @@ function createLspBridge(worker, editor, statusEl, outputEl) {
               };
             } catch {
               return null;
+            }
+          }
+        });
+        monaco.languages.registerCompletionItemProvider("algow", {
+          triggerCharacters: ["."],
+          provideCompletionItems: async (_model, position) => {
+            try {
+              const result = await sendRequest("textDocument/completion", {
+                textDocument: { uri },
+                position: {
+                  line: position.lineNumber - 1,
+                  character: position.column - 1
+                }
+              });
+              if (!result)
+                return { suggestions: [] };
+              const completionList = result;
+              const suggestions = completionList.items.map((item) => ({
+                label: item.label,
+                kind: mapCompletionKind(item.kind),
+                detail: item.detail,
+                insertText: item.label,
+                range: undefined
+              }));
+              return { suggestions };
+            } catch {
+              return { suggestions: [] };
             }
           }
         });

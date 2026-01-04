@@ -124,6 +124,28 @@ require(["vs/editor/editor.main"], () => {
   void bridge.start();
 });
 
+/**
+ * Map LSP CompletionItemKind to Monaco CompletionItemKind.
+ */
+function mapCompletionKind(lspKind?: number): monaco.languages.CompletionItemKind {
+  // LSP kinds: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#completionItemKind
+  // Monaco kinds: https://microsoft.github.io/monaco-editor/typedoc/enums/languages.CompletionItemKind.html
+  switch (lspKind) {
+    case 3: // Function
+      return monaco.languages.CompletionItemKind.Function;
+    case 4: // Constructor
+      return monaco.languages.CompletionItemKind.Constructor;
+    case 5: // Field
+      return monaco.languages.CompletionItemKind.Field;
+    case 6: // Variable
+      return monaco.languages.CompletionItemKind.Variable;
+    case 14: // Keyword
+      return monaco.languages.CompletionItemKind.Keyword;
+    default:
+      return monaco.languages.CompletionItemKind.Text;
+  }
+}
+
 function createLspBridge(
   worker: Worker,
   editor: ReturnType<typeof monaco.editor.create>,
@@ -334,6 +356,45 @@ function createLspBridge(
               };
             } catch {
               return null;
+            }
+          },
+        });
+
+        // Register completion provider
+        monaco.languages.registerCompletionItemProvider("algow", {
+          triggerCharacters: ["."],
+          provideCompletionItems: async (_model, position) => {
+            try {
+              const result = await sendRequest("textDocument/completion", {
+                textDocument: { uri },
+                position: {
+                  line: position.lineNumber - 1,
+                  character: position.column - 1,
+                },
+              });
+
+              if (!result) return { suggestions: [] };
+
+              const completionList = result as {
+                isIncomplete: boolean;
+                items: Array<{
+                  label: string;
+                  kind?: number;
+                  detail?: string;
+                }>;
+              };
+
+              const suggestions = completionList.items.map((item) => ({
+                label: item.label,
+                kind: mapCompletionKind(item.kind),
+                detail: item.detail,
+                insertText: item.label,
+                range: undefined as unknown as monaco.IRange,
+              }));
+
+              return { suggestions };
+            } catch {
+              return { suggestions: [] };
             }
           },
         });

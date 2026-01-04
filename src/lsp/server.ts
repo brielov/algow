@@ -6,6 +6,9 @@
  */
 
 import type {
+  CompletionItem,
+  CompletionItemKind,
+  CompletionList,
   Diagnostic as LspDiagnostic,
   DiagnosticSeverity,
   Hover,
@@ -24,6 +27,10 @@ type InitializeResult = {
     hoverProvider?: boolean;
     definitionProvider?: boolean;
     renameProvider?: boolean | { prepareProvider?: boolean };
+    completionProvider?: {
+      triggerCharacters?: string[];
+      resolveProvider?: boolean;
+    };
   };
 };
 
@@ -43,6 +50,7 @@ import {
   check,
   type ConstructorRegistry,
   processDeclarations,
+  type Type,
   type TypeMap,
   typeToString,
 } from "../checker";
@@ -188,6 +196,11 @@ export const createServer = (transport: Transport): void => {
         case "textDocument/rename":
           transport.send(successResponse(id, handleRename(params as RenameParams)));
           break;
+        case "textDocument/completion":
+          transport.send(
+            successResponse(id, handleCompletion(params as TextDocumentPositionParams)),
+          );
+          break;
         case "algow/evaluate":
           transport.send(successResponse(id, handleEvaluate(params as EvaluateParams)));
           break;
@@ -229,6 +242,9 @@ export const createServer = (transport: Transport): void => {
       definitionProvider: true,
       renameProvider: {
         prepareProvider: true,
+      },
+      completionProvider: {
+        triggerCharacters: ["."],
       },
     },
   });
@@ -357,6 +373,171 @@ export const createServer = (transport: Transport): void => {
         [params.textDocument.uri]: edits,
       },
     };
+  };
+
+  // LSP CompletionItemKind constants
+  const COMPLETION_KIND_FUNCTION = 3 as CompletionItemKind;
+  const COMPLETION_KIND_CONSTRUCTOR = 4 as CompletionItemKind;
+  const COMPLETION_KIND_FIELD = 5 as CompletionItemKind;
+  const COMPLETION_KIND_VARIABLE = 6 as CompletionItemKind;
+  const COMPLETION_KIND_KEYWORD = 14 as CompletionItemKind;
+
+  const handleCompletion = (params: TextDocumentPositionParams): CompletionList | null => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc) return null;
+
+    const offset = positionToOffset(doc.text, params.position);
+    const items: CompletionItem[] = [];
+
+    // Check if we're after a dot (record field access)
+    const beforeCursor = doc.text.slice(0, offset);
+    const dotMatch = beforeCursor.match(/(\w+)\s*\.\s*$/);
+
+    if (dotMatch) {
+      // Record field completion
+      const varName = dotMatch[1]!;
+      const fieldItems = getRecordFieldCompletions(doc, varName);
+      items.push(...fieldItems);
+    } else {
+      // General completions: variables, constructors, keywords
+      items.push(...getVariableCompletions(doc, offset));
+      items.push(...getConstructorCompletions(doc));
+      items.push(...getKeywordCompletions());
+    }
+
+    return { isIncomplete: false, items };
+  };
+
+  /**
+   * Get completions for record fields when cursor is after "varName."
+   */
+  const getRecordFieldCompletions = (doc: DocumentState, varName: string): CompletionItem[] => {
+    if (!doc.symbols || !doc.types) return [];
+
+    // Find the definition of this variable
+    for (const def of doc.symbols.definitions) {
+      if (def.name === varName) {
+        const type = doc.types.get(def);
+        if (type) {
+          return extractRecordFields(type);
+        }
+      }
+    }
+
+    return [];
+  };
+
+  /**
+   * Extract field names from a record type, resolving through type variables.
+   */
+  const extractRecordFields = (type: Type): CompletionItem[] => {
+    const items: CompletionItem[] = [];
+
+    // Resolve the type to find TRecord
+    const resolved = resolveType(type);
+    if (resolved.kind === "TRecord") {
+      for (const [fieldName, fieldType] of resolved.fields) {
+        items.push({
+          label: fieldName,
+          kind: COMPLETION_KIND_FIELD,
+          detail: typeToString(fieldType),
+        });
+      }
+    } else if (resolved.kind === "TTuple") {
+      // For tuples, suggest .0, .1, etc.
+      for (let i = 0; i < resolved.elements.length; i++) {
+        items.push({
+          label: String(i),
+          kind: COMPLETION_KIND_FIELD,
+          detail: typeToString(resolved.elements[i]!),
+        });
+      }
+    }
+
+    return items;
+  };
+
+  /**
+   * Resolve type through TVar references if needed.
+   * For now, just return the type as-is since we don't have substitution here.
+   */
+  const resolveType = (type: Type): Type => {
+    // In the future, we could apply the final substitution here
+    return type;
+  };
+
+  /**
+   * Get completions for in-scope variables.
+   */
+  const getVariableCompletions = (doc: DocumentState, _offset: number): CompletionItem[] => {
+    if (!doc.symbols || !doc.types) return [];
+
+    const items: CompletionItem[] = [];
+    const seen = new Set<string>();
+
+    for (const def of doc.symbols.definitions) {
+      if (seen.has(def.name)) continue;
+      seen.add(def.name);
+
+      // Skip constructors (handled separately)
+      if (def.kind === "constructor") continue;
+
+      const type = doc.types.get(def);
+      const detail = type ? typeToString(type) : undefined;
+
+      items.push({
+        label: def.name,
+        kind: def.kind === "parameter" ? COMPLETION_KIND_VARIABLE : COMPLETION_KIND_FUNCTION,
+        detail,
+      });
+    }
+
+    return items;
+  };
+
+  /**
+   * Get completions for constructors.
+   */
+  const getConstructorCompletions = (doc: DocumentState): CompletionItem[] => {
+    const items: CompletionItem[] = [];
+
+    // From registry
+    for (const [typeName, constructors] of doc.registry) {
+      for (const conName of constructors) {
+        items.push({
+          label: conName,
+          kind: COMPLETION_KIND_CONSTRUCTOR,
+          detail: typeName,
+        });
+      }
+    }
+
+    return items;
+  };
+
+  /**
+   * Get keyword completions.
+   */
+  const getKeywordCompletions = (): CompletionItem[] => {
+    const keywords = [
+      "let",
+      "rec",
+      "in",
+      "if",
+      "then",
+      "else",
+      "match",
+      "with",
+      "end",
+      "data",
+      "true",
+      "false",
+    ];
+
+    return keywords.map((kw) => ({
+      label: kw,
+      kind: COMPLETION_KIND_KEYWORD,
+    }));
   };
 
   const handleEvaluate = (params: EvaluateParams): EvaluateResult => {
