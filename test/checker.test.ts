@@ -1149,7 +1149,7 @@ describe("Type Inference", () => {
         ]);
         const { diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics.length).toBeGreaterThan(0);
-        expect(diagnostics[0]!.message).toContain("Cannot unify");
+        expect(diagnostics[0]!.message).toContain("Type mismatch");
       });
 
       it("guard can access pattern bindings", () => {

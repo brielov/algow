@@ -48,7 +48,7 @@
 
 import * as ast from "./ast";
 import type { Definition, SymbolTable } from "./binder";
-import { type Diagnostic, error as diagError } from "./diagnostics";
+import { type Diagnostic, error as diagError, typeMismatch } from "./diagnostics";
 
 // =============================================================================
 // INFERENCE CONTEXT
@@ -608,7 +608,9 @@ const unify = (ctx: CheckContext, t1: Type, t2: Type, span?: ast.Span): Subst =>
   }
 
   // Types are incompatible
-  addError(ctx, `Cannot unify ${typeToString(t1)} with ${typeToString(t2)}`, span);
+  const start = span?.start ?? 0;
+  const end = span?.end ?? start;
+  ctx.diagnostics.push(typeMismatch(start, end, typeToString(t1), typeToString(t2)));
   return new Map();
 };
 

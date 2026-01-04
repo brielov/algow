@@ -4,6 +4,7 @@ import { createConstructorEnv, evaluate, type Env } from "./eval";
 import { generateJS } from "./backend/js";
 import { lowerToIR } from "./lower";
 import { offsetToLineCol } from "./lsp/positions";
+import { optimize } from "./optimize";
 import { type Diagnostic, parse, programToExpr } from "./parser";
 import { declarations as preludeDeclarations } from "./prelude";
 
@@ -31,19 +32,20 @@ const printDiagnostics = (
     const endPos = offsetToLineCol(source, diag.end);
     const lineContent = getLine(source, line);
     const lineNumWidth = String(line).length;
+    const padding = " ".repeat(lineNumWidth + 1);
 
-    // Error/warning prefix
-    const prefix =
-      diag.severity === "error"
-        ? `${RED}error${RESET}`
-        : diag.severity === "warning"
-          ? `${YELLOW}warning${RESET}`
-          : `${CYAN}note${RESET}`;
+    // Error/warning prefix with optional kind
+    const severityColor =
+      diag.severity === "error" ? RED : diag.severity === "warning" ? YELLOW : CYAN;
+    const severityLabel =
+      diag.severity === "error" ? "error" : diag.severity === "warning" ? "warning" : "note";
+    const kindLabel = diag.kind ? `[${diag.kind}]` : "";
+    const prefix = `${severityColor}${severityLabel}${kindLabel}${RESET}`;
 
     // Header
     console.error(`${prefix}: ${diag.message}`);
     console.error(`${GRAY}  --> ${filename}:${line}:${col}${RESET}`);
-    console.error(`${GRAY}${" ".repeat(lineNumWidth + 1)}|${RESET}`);
+    console.error(`${GRAY}${padding}|${RESET}`);
 
     // Source line
     console.error(`${GRAY}${line} |${RESET} ${lineContent}`);
@@ -53,7 +55,37 @@ const printDiagnostics = (
     const underlineLen =
       line === endPos.line ? Math.max(1, endPos.col - col) : lineContent.length - underlineStart;
     const underline = " ".repeat(underlineStart) + "^".repeat(Math.max(1, underlineLen));
-    console.error(`${GRAY}${" ".repeat(lineNumWidth + 1)}|${RESET} ${RED}${underline}${RESET}`);
+    console.error(`${GRAY}${padding}|${RESET} ${RED}${underline}${RESET}`);
+
+    // Expected/actual for type mismatches
+    if (diag.expected || diag.actual) {
+      console.error(`${GRAY}${padding}|${RESET}`);
+      if (diag.expected) {
+        console.error(`${GRAY}${padding}=${RESET} expected: ${CYAN}${diag.expected}${RESET}`);
+      }
+      if (diag.actual) {
+        console.error(`${GRAY}${padding}=${RESET}   actual: ${RED}${diag.actual}${RESET}`);
+      }
+    }
+
+    // Suggestions for unbound variables
+    if (diag.suggestions && diag.suggestions.length > 0) {
+      console.error(`${GRAY}${padding}|${RESET}`);
+      const suggestionText =
+        diag.suggestions.length === 1
+          ? `did you mean: ${CYAN}${diag.suggestions[0]}${RESET}?`
+          : `did you mean one of: ${diag.suggestions.map((s) => `${CYAN}${s}${RESET}`).join(", ")}?`;
+      console.error(`${GRAY}${padding}=${RESET} ${suggestionText}`);
+    }
+
+    // Additional notes
+    if (diag.notes && diag.notes.length > 0) {
+      console.error(`${GRAY}${padding}|${RESET}`);
+      for (const note of diag.notes) {
+        console.error(`${GRAY}${padding}=${RESET} note: ${note}`);
+      }
+    }
+
     console.error();
   }
 };
@@ -194,8 +226,9 @@ const compile = (source: string, filename: string): void => {
     process.exit(1);
   }
 
-  // Lower to IR and generate JS
-  const ir = lowerToIR(expr, typeEnv, checkResult);
+  // Lower to IR, optimize, and generate JS
+  let ir = lowerToIR(expr, typeEnv, checkResult);
+  ir = optimize(ir);
   const output = generateJS(ir, constructorNames);
 
   // Print any warnings

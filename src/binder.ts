@@ -10,7 +10,7 @@
  */
 
 import type * as ast from "./ast";
-import type { Diagnostic } from "./diagnostics";
+import { findSimilarNames, unboundVariable, type Diagnostic } from "./diagnostics";
 
 // =============================================================================
 // SYMBOL TYPES
@@ -104,14 +104,12 @@ const addReference = (ctx: BindContext, name: string, span: ast.Span): Reference
   const ref: Reference = { name, span, definition };
   ctx.references.push(ref);
 
-  // Report unbound variable error
+  // Report unbound variable error with suggestions
   if (!definition) {
-    ctx.diagnostics.push({
-      message: `Unknown variable: ${name}`,
-      start: span.start,
-      end: span.end,
-      severity: "error",
-    });
+    const suggestions = findSimilarNames(name, ctx.scope.keys());
+    ctx.diagnostics.push(
+      unboundVariable(span.start, span.end, name, suggestions.length > 0 ? suggestions : undefined),
+    );
   }
 
   return ref;
