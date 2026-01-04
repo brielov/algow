@@ -1,3 +1,4 @@
 {
-  "pre-commit": "bun run format && bun run lint"
+  "pre-commit": "bun run format && bun run lint",
+  "pre-push": "bun test --coverage"
 }

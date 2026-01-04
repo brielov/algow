@@ -1273,15 +1273,27 @@ const inferAbs = (
   registry: ConstructorRegistry,
   expr: ast.Abs,
 ): InferResult => {
-  // Fresh type variable for the parameter (we don't know its type yet)
-  const paramType = freshTypeVar();
+  // If there's a type annotation, use it; otherwise create a fresh type variable
+  let paramType: Type;
+  let subst: Subst = new Map();
+
+  if (expr.paramType) {
+    // Convert annotation to type, replacing type variables with fresh ones
+    const [annotatedType, tvSubst] = instantiateTypeExpr(expr.paramType);
+    paramType = annotatedType;
+    subst = tvSubst;
+  } else {
+    // No annotation - use fresh type variable
+    paramType = freshTypeVar();
+  }
 
   // Add parameter to environment (monomorphic - empty quantifier list)
   const newEnv = new Map(env);
   newEnv.set(expr.param, scheme([], paramType));
 
   // Infer body type with parameter in scope
-  const [subst, bodyType, constraints] = inferExpr(ctx, newEnv, registry, expr.body);
+  const [bodySubst, bodyType, constraints] = inferExpr(ctx, newEnv, registry, expr.body);
+  subst = composeSubst(subst, bodySubst);
 
   // Record the parameter's final type
   const paramSpan = expr.paramSpan ?? expr.span;
@@ -1463,7 +1475,21 @@ const inferLet = (
   expr: ast.Let,
 ): InferResult => {
   // Infer the value's type
-  const [s1, valueType, c1] = inferExpr(ctx, env, registry, expr.value);
+  let [s1, valueType, c1] = inferExpr(ctx, env, registry, expr.value);
+
+  // If there's a return type annotation, unify with the innermost return type
+  // (after peeling off all function parameter types)
+  if (expr.returnType) {
+    const [annotatedType] = instantiateTypeExpr(expr.returnType);
+    // Peel off function types to get to the return type
+    let currentType = applySubst(s1, valueType);
+    while (currentType.kind === "TFun") {
+      currentType = currentType.ret;
+    }
+    const s3 = unify(ctx, currentType, annotatedType, expr.nameSpan ?? expr.span);
+    s1 = composeSubst(s1, s3);
+    valueType = applySubst(s3, valueType);
+  }
 
   // Apply substitution to environment before generalizing
   const env1 = applySubstEnv(s1, env);
@@ -1523,13 +1549,27 @@ const inferLetRec = (
   let constraints: Constraint[] = [];
 
   for (const binding of expr.bindings) {
-    const [s, valueType, c] = inferExpr(
+    let [s, valueType, c] = inferExpr(
       ctx,
       applySubstEnv(subst, envWithPlaceholders),
       registry,
       binding.value,
     );
     subst = composeSubst(subst, s);
+
+    // If there's a return type annotation, unify with the innermost return type
+    if (binding.returnType) {
+      const [annotatedType] = instantiateTypeExpr(binding.returnType);
+      // Peel off function types to get to the return type
+      let currentType = applySubst(subst, valueType);
+      while (currentType.kind === "TFun") {
+        currentType = currentType.ret;
+      }
+      const s3 = unify(ctx, currentType, annotatedType, binding.nameSpan);
+      subst = composeSubst(subst, s3);
+      valueType = applySubst(s3, valueType);
+    }
+
     valueTypes.set(binding.name, valueType);
     constraints = [...applySubstConstraints(subst, constraints), ...c];
 
@@ -2023,6 +2063,55 @@ const typeExprToType = (texpr: ast.TypeExpr): Type => {
     case "TyVar":
       return tvar(texpr.name);
   }
+};
+
+/**
+ * Known primitive type names that should be treated as type constructors
+ * even though they're parsed as TyVar (lowercase identifiers).
+ */
+const PRIMITIVE_TYPES = new Set(["number", "string", "boolean"]);
+
+/**
+ * Convert a type expression to a Type, replacing type variables with fresh ones.
+ * This is used for type annotations where user-written type variables like 'a'
+ * should become fresh inference variables.
+ *
+ * Known primitive types (number, string, boolean) are treated as type constructors.
+ *
+ * Returns the instantiated type and a substitution mapping the fresh variables.
+ */
+const instantiateTypeExpr = (texpr: ast.TypeExpr): [Type, Subst] => {
+  const varMapping = new Map<string, Type>();
+
+  const convert = (t: ast.TypeExpr): Type => {
+    switch (t.kind) {
+      case "TyApp":
+        return tapp(convert(t.con), convert(t.arg));
+      case "TyCon":
+        return tcon(t.name);
+      case "TyFun":
+        return tfun(convert(t.param), convert(t.ret));
+      case "TyVar": {
+        // Primitive types are type constructors, not variables
+        if (PRIMITIVE_TYPES.has(t.name)) {
+          return tcon(t.name);
+        }
+        // Replace type variable with a fresh one (cached for consistency)
+        let fresh = varMapping.get(t.name);
+        if (!fresh) {
+          fresh = freshTypeVar();
+          varMapping.set(t.name, fresh);
+        }
+        return fresh;
+      }
+    }
+  };
+
+  const result = convert(texpr);
+
+  // Build a substitution from the mapping (not really needed but useful for tracking)
+  const subst: Subst = new Map();
+  return [result, subst];
 };
 
 /**

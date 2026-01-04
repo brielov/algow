@@ -1784,4 +1784,113 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
     });
   });
+
+  describe("type annotations", () => {
+    it("parses annotated parameter", () => {
+      const result = parse("let f (x : number) = x in f");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Let");
+      if (expr?.kind === "Let") {
+        expect(expr.value.kind).toBe("Abs");
+        if (expr.value.kind === "Abs") {
+          expect(expr.value.paramType).toBeDefined();
+          expect(expr.value.paramType?.kind).toBe("TyVar");
+          if (expr.value.paramType?.kind === "TyVar") {
+            expect(expr.value.paramType.name).toBe("number");
+          }
+        }
+      }
+    });
+
+    it("parses multiple annotated parameters", () => {
+      const result = parse("let add (x : number) (y : number) = x + y in add");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Let");
+      if (expr?.kind === "Let") {
+        expect(expr.value.kind).toBe("Abs");
+        if (expr.value.kind === "Abs") {
+          expect(expr.value.paramType?.kind).toBe("TyVar");
+          expect(expr.value.body.kind).toBe("Abs");
+        }
+      }
+    });
+
+    it("parses return type annotation", () => {
+      const result = parse("let f x : number = x in f");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Let");
+      if (expr?.kind === "Let") {
+        expect(expr.returnType).toBeDefined();
+        expect(expr.returnType?.kind).toBe("TyVar");
+        if (expr.returnType?.kind === "TyVar") {
+          expect(expr.returnType.name).toBe("number");
+        }
+      }
+    });
+
+    it("parses annotated lambda", () => {
+      const result = parse("(x : number) => x + 1");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Abs");
+      if (expr?.kind === "Abs") {
+        expect(expr.paramType).toBeDefined();
+        expect(expr.paramType?.kind).toBe("TyVar");
+        if (expr.paramType?.kind === "TyVar") {
+          expect(expr.paramType.name).toBe("number");
+        }
+      }
+    });
+
+    it("parses function type in annotation", () => {
+      const result = parse("let apply (f : number -> number) (x : number) = f x in apply");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Let");
+      if (expr?.kind === "Let" && expr.value.kind === "Abs") {
+        expect(expr.value.paramType?.kind).toBe("TyFun");
+      }
+    });
+
+    it("parses polymorphic type annotation", () => {
+      const result = parse("let id (x : a) : a = x in id");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Let");
+      if (expr?.kind === "Let") {
+        expect(expr.returnType?.kind).toBe("TyVar");
+        if (expr.returnType?.kind === "TyVar") {
+          expect(expr.returnType.name).toBe("a");
+        }
+      }
+    });
+
+    it("parses annotated recursive binding", () => {
+      const result = parse("let rec fact (n : number) : number = if n <= 1 then 1 else n * fact (n - 1) in fact");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("LetRec");
+      if (expr?.kind === "LetRec") {
+        const binding = expr.bindings[0];
+        expect(binding?.returnType).toBeDefined();
+        expect(binding?.value.kind).toBe("Abs");
+      }
+    });
+
+    it("parses mixed annotated and unannotated parameters", () => {
+      const result = parse("let f (x : number) y = x + y in f");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Let");
+      if (expr?.kind === "Let" && expr.value.kind === "Abs") {
+        expect(expr.value.paramType).toBeDefined();
+        if (expr.value.body.kind === "Abs") {
+          expect(expr.value.body.paramType).toBeUndefined();
+        }
+      }
+    });
+  });
 });

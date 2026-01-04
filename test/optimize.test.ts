@@ -382,7 +382,13 @@ describe("Optimizations", () => {
           ir.irAppBinding(ir.irVar("f", funcType), ir.irVar("_t1", numType), numType),
           ir.irLet(
             "_t3",
-            ir.irBinOpBinding("+", ir.irVar("x", numType), ir.irVar("_t2", numType), numType, numType),
+            ir.irBinOpBinding(
+              "+",
+              ir.irVar("x", numType),
+              ir.irVar("_t2", numType),
+              numType,
+              numType,
+            ),
             ir.irAtomExpr(ir.irVar("_t3", numType)),
           ),
         ),

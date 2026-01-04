@@ -407,11 +407,7 @@ const genExprTCO = (
  * Emit all non-application bindings from a tail call expression.
  * These are the computations needed for the tail call arguments.
  */
-const emitNonAppBindings = (
-  ctx: CodeGenContext,
-  expr: ir.IRExpr,
-  selfName: string,
-): void => {
+const emitNonAppBindings = (ctx: CodeGenContext, expr: ir.IRExpr, selfName: string): void => {
   let current: ir.IRExpr = expr;
 
   while (current.kind === "IRLet") {
@@ -421,10 +417,7 @@ const emitNonAppBindings = (
     if (binding.kind !== "IRAppBinding") {
       const bindingCode = genBinding(ctx, binding);
       emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
-    } else if (
-      binding.func.kind === "IRVar" &&
-      binding.func.name !== selfName
-    ) {
+    } else if (binding.func.kind === "IRVar" && binding.func.name !== selfName) {
       // Also skip partial applications to the function being called
       // (intermediate results like _t7 = fact _t5)
       // But emit applications to other functions
@@ -442,11 +435,7 @@ const emitNonAppBindings = (
 /**
  * Check if a binding is part of the tail call application chain.
  */
-const isPartOfTailCallChain = (
-  expr: ir.IRExpr,
-  bindingName: string,
-  selfName: string,
-): boolean => {
+const isPartOfTailCallChain = (expr: ir.IRExpr, bindingName: string, selfName: string): boolean => {
   // Collect all bindings
   const bindings: Array<{ name: string; binding: ir.IRBinding }> = [];
   let current: ir.IRExpr = expr;

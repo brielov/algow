@@ -472,11 +472,7 @@ const getInnermostBody = (binding: ir.IRLambdaBinding): ir.IRExpr => {
  * Returns false if there are non-tail recursive calls.
  * Returns null if there are no recursive calls.
  */
-const checkTailCalls = (
-  expr: ir.IRExpr,
-  funcName: string,
-  paramCount: number,
-): boolean | null => {
+const checkTailCalls = (expr: ir.IRExpr, funcName: string, paramCount: number): boolean | null => {
   switch (expr.kind) {
     case "IRAtomExpr":
       // No recursive call in atoms
@@ -570,8 +566,7 @@ const extractTailCall = (
  * Check if a binding contains any call to funcName (non-tail position).
  */
 const hasRecursiveCall = (binding: ir.IRBinding, funcName: string): boolean => {
-  const checkAtom = (atom: ir.IRAtom): boolean =>
-    atom.kind === "IRVar" && atom.name === funcName;
+  const checkAtom = (atom: ir.IRAtom): boolean => atom.kind === "IRVar" && atom.name === funcName;
 
   switch (binding.kind) {
     case "IRAtomBinding":
@@ -633,10 +628,7 @@ const hasRecursiveCallExpr = (expr: ir.IRExpr, funcName: string): boolean => {
       return expr.atom.kind === "IRVar" && expr.atom.name === funcName;
 
     case "IRLet":
-      return (
-        hasRecursiveCall(expr.binding, funcName) ||
-        hasRecursiveCallExpr(expr.body, funcName)
-      );
+      return hasRecursiveCall(expr.binding, funcName) || hasRecursiveCallExpr(expr.body, funcName);
 
     case "IRLetRec":
       return (
@@ -649,10 +641,7 @@ const hasRecursiveCallExpr = (expr: ir.IRExpr, funcName: string): boolean => {
 /**
  * Check if a binding in a letrec is tail-recursive.
  */
-const isTailRecursive = (
-  name: string,
-  binding: ir.IRBinding,
-): { params: string[] } | null => {
+const isTailRecursive = (name: string, binding: ir.IRBinding): { params: string[] } | null => {
   if (binding.kind !== "IRLambdaBinding") {
     return null;
   }
@@ -674,11 +663,7 @@ const isTailRecursive = (
  * Check the body of a function for tail-recursive calls.
  * Handles if/match expressions where branches are in tail position.
  */
-const checkTailCallsInBody = (
-  expr: ir.IRExpr,
-  funcName: string,
-  paramCount: number,
-): boolean => {
+const checkTailCallsInBody = (expr: ir.IRExpr, funcName: string, paramCount: number): boolean => {
   switch (expr.kind) {
     case "IRAtomExpr":
       // Base case - no recursive call, that's fine

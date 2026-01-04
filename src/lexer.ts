@@ -64,6 +64,7 @@ export enum TokenKind {
   And, // &&
   Or, // ||
   PlusPlus, // ++
+  Colon, // :
 
   // Delimiters
   LParen, // (
@@ -436,7 +437,7 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
         advance(state);
         return [TokenKind.ColonColon, start, state.pos];
       }
-      return [TokenKind.Error, start, state.pos];
+      return [TokenKind.Colon, start, state.pos];
 
     default:
       return [TokenKind.Error, start, state.pos];

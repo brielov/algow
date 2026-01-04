@@ -127,6 +127,7 @@ export interface Let extends Node {
   readonly kind: "Let";
   readonly name: string;
   readonly nameSpan?: Span;
+  readonly returnType?: TypeExpr;
   readonly value: Expr;
   readonly body: Expr;
 }
@@ -137,6 +138,7 @@ export interface Let extends Node {
 export interface RecBinding {
   readonly name: string;
   readonly nameSpan?: Span;
+  readonly returnType?: TypeExpr;
   readonly value: Expr;
 }
 
@@ -193,6 +195,7 @@ export interface Abs extends Node {
   readonly kind: "Abs";
   readonly param: string;
   readonly paramSpan?: Span;
+  readonly paramType?: TypeExpr;
   readonly body: Expr;
 }
 
@@ -645,18 +648,32 @@ export const if_ = (cond: Expr, then: Expr, else_: Expr, span?: Span): If => ({
 
 // --- Bindings ---
 
-export const let_ = (name: string, value: Expr, body: Expr, span?: Span, nameSpan?: Span): Let => ({
+export const let_ = (
+  name: string,
+  value: Expr,
+  body: Expr,
+  span?: Span,
+  nameSpan?: Span,
+  returnType?: TypeExpr,
+): Let => ({
   kind: "Let",
   name,
   nameSpan,
+  returnType,
   value,
   body,
   span,
 });
 
-export const recBinding = (name: string, value: Expr, nameSpan?: Span): RecBinding => ({
+export const recBinding = (
+  name: string,
+  value: Expr,
+  nameSpan?: Span,
+  returnType?: TypeExpr,
+): RecBinding => ({
   name,
   nameSpan,
+  returnType,
   value,
 });
 
@@ -671,10 +688,17 @@ export const letRec = (bindings: readonly RecBinding[], body: Expr, span?: Span)
 
 export const var_ = (name: string, span?: Span): Var => ({ kind: "Var", name, span });
 
-export const abs = (param: string, body: Expr, span?: Span, paramSpan?: Span): Abs => ({
+export const abs = (
+  param: string,
+  body: Expr,
+  span?: Span,
+  paramSpan?: Span,
+  paramType?: TypeExpr,
+): Abs => ({
   kind: "Abs",
   param,
   paramSpan,
+  paramType,
   body,
   span,
 });

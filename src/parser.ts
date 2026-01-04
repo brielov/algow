@@ -35,7 +35,8 @@ export type Program = {
 export type TopLevelBinding = {
   readonly name: string;
   readonly nameSpan: ast.Span;
-  readonly params: readonly { name: string; span: ast.Span }[];
+  readonly params: readonly { name: string; span: ast.Span; type?: ast.TypeExpr }[];
+  readonly returnType?: ast.TypeExpr;
   readonly body: ast.Expr;
   readonly recursive: boolean;
 };
@@ -206,10 +207,35 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
 
-  const params: { name: string; span: ast.Span }[] = [];
-  while (at(state, TokenKind.Lower)) {
-    const paramToken = advance(state);
-    params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
+  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
+    if (at(state, TokenKind.LParen)) {
+      // Parse (name : type)
+      advance(state); // (
+      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
+      if (!paramToken) break;
+      const paramName = text(state, paramToken);
+      let paramType: ast.TypeExpr | undefined;
+
+      if (at(state, TokenKind.Colon)) {
+        advance(state); // :
+        paramType = parseType(state) ?? undefined;
+      }
+
+      expect(state, TokenKind.RParen, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      // Plain identifier (no annotation)
+      const paramToken = advance(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
+  }
+
+  // Check for return type: let f x y : number = ...
+  let returnType: ast.TypeExpr | undefined;
+  if (at(state, TokenKind.Colon)) {
+    advance(state); // :
+    returnType = parseType(state) ?? undefined;
   }
 
   if (!expect(state, TokenKind.Eq, "expected '=' after parameters")) {
@@ -223,12 +249,12 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
     let value = body;
     for (let i = params.length - 1; i >= 0; i--) {
       const p = params[i]!;
-      value = ast.abs(p.name, value, undefined, p.span);
+      value = ast.abs(p.name, value, undefined, p.span, p.type);
     }
 
     if (recursive) {
       // Parse additional bindings with 'and'
-      const bindings: ast.RecBinding[] = [ast.recBinding(name, value, nameSpan)];
+      const bindings: ast.RecBinding[] = [ast.recBinding(name, value, nameSpan, returnType)];
       while (at(state, TokenKind.AndKw)) {
         advance(state); // 'and'
         bindings.push(parseRecBinding(state));
@@ -241,10 +267,10 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
 
     advance(state); // 'in'
     const continuation = parseExpr(state);
-    return { kind: "expr", expr: ast.let_(name, value, continuation, undefined, nameSpan) };
+    return { kind: "expr", expr: ast.let_(name, value, continuation, undefined, nameSpan, returnType) };
   }
 
-  return { kind: "binding", binding: { name, nameSpan, params, body, recursive } };
+  return { kind: "binding", binding: { name, nameSpan, params, returnType, body, recursive } };
 };
 
 // =============================================================================
@@ -300,6 +326,27 @@ const parseConstructor = (state: ParserState): ast.ConDecl | null => {
   }
 
   return ast.conDecl(name, fields);
+};
+
+/**
+ * Parse a type expression including function types.
+ * Type := TypeAtom | TypeAtom '->' Type
+ */
+const parseType = (state: ParserState): ast.TypeExpr | null => {
+  const left = parseTypeAtom(state);
+  if (!left) return null;
+
+  // Check for function type: a -> b
+  if (at(state, TokenKind.Minus) && state.lexer.source.charCodeAt(state.current[2]) === 0x3e) {
+    // This is '->' (minus followed by >)
+    advance(state); // -
+    advance(state); // >
+    const right = parseType(state); // Right-associative
+    if (!right) return left;
+    return ast.tyfun(left, right);
+  }
+
+  return left;
 };
 
 const parseTypeAtom = (state: ParserState): ast.TypeExpr | null => {
@@ -623,6 +670,42 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
     return ast.num(0);
   }
 
+  // Check if this is an annotated lambda: (name : type) => body
+  // We look for: Lower Colon
+  if (at(state, TokenKind.Lower)) {
+    const savedPos = state.lexer.pos;
+    const savedCurrent = state.current;
+    const nameToken = advance(state);
+
+    if (at(state, TokenKind.Colon)) {
+      // This is (name : type) => body
+      advance(state); // :
+      const paramType = parseType(state);
+      expect(state, TokenKind.RParen, "expected ')' after type");
+
+      if (at(state, TokenKind.Arrow)) {
+        advance(state); // =>
+        const body = parseExpr(state);
+        const end = body.span?.end ?? state.current[1];
+        return ast.abs(
+          text(state, nameToken),
+          body,
+          span(start, end),
+          tokenSpan(nameToken),
+          paramType ?? undefined,
+        );
+      }
+
+      // Not followed by =>, this is an error
+      error(state, "expected '=>' after annotated parameter");
+      return ast.num(0);
+    }
+
+    // Not an annotated lambda, restore and continue
+    state.lexer.pos = savedPos;
+    state.current = savedCurrent;
+  }
+
   const first = parseExpr(state);
 
   if (at(state, TokenKind.Comma)) {
@@ -777,10 +860,35 @@ const parseRecBinding = (state: ParserState): ast.RecBinding => {
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
 
-  const params: { name: string; span: ast.Span }[] = [];
-  while (at(state, TokenKind.Lower)) {
-    const paramToken = advance(state);
-    params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
+  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
+    if (at(state, TokenKind.LParen)) {
+      // Parse (name : type)
+      advance(state); // (
+      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
+      if (!paramToken) break;
+      const paramName = text(state, paramToken);
+      let paramType: ast.TypeExpr | undefined;
+
+      if (at(state, TokenKind.Colon)) {
+        advance(state); // :
+        paramType = parseType(state) ?? undefined;
+      }
+
+      expect(state, TokenKind.RParen, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      // Plain identifier (no annotation)
+      const paramToken = advance(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
+  }
+
+  // Check for return type: and f x y : number = ...
+  let returnType: ast.TypeExpr | undefined;
+  if (at(state, TokenKind.Colon)) {
+    advance(state); // :
+    returnType = parseType(state) ?? undefined;
   }
 
   expect(state, TokenKind.Eq, "expected '=' after name");
@@ -789,10 +897,10 @@ const parseRecBinding = (state: ParserState): ast.RecBinding => {
 
   for (let i = params.length - 1; i >= 0; i--) {
     const p = params[i]!;
-    value = ast.abs(p.name, value, undefined, p.span);
+    value = ast.abs(p.name, value, undefined, p.span, p.type);
   }
 
-  return ast.recBinding(name, value, nameSpan);
+  return ast.recBinding(name, value, nameSpan, returnType);
 };
 
 const parseLetExpr = (state: ParserState): ast.Expr => {
@@ -837,10 +945,35 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
 
-  const params: { name: string; span: ast.Span }[] = [];
-  while (at(state, TokenKind.Lower)) {
-    const paramToken = advance(state);
-    params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
+  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
+    if (at(state, TokenKind.LParen)) {
+      // Parse (name : type)
+      advance(state); // (
+      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
+      if (!paramToken) break;
+      const paramName = text(state, paramToken);
+      let paramType: ast.TypeExpr | undefined;
+
+      if (at(state, TokenKind.Colon)) {
+        advance(state); // :
+        paramType = parseType(state) ?? undefined;
+      }
+
+      expect(state, TokenKind.RParen, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      // Plain identifier (no annotation)
+      const paramToken = advance(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
+  }
+
+  // Check for return type: let f x y : number = ...
+  let returnType: ast.TypeExpr | undefined;
+  if (at(state, TokenKind.Colon)) {
+    advance(state); // :
+    returnType = parseType(state) ?? undefined;
   }
 
   expect(state, TokenKind.Eq, "expected '=' after name");
@@ -849,7 +982,7 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
 
   for (let i = params.length - 1; i >= 0; i--) {
     const p = params[i]!;
-    value = ast.abs(p.name, value, undefined, p.span);
+    value = ast.abs(p.name, value, undefined, p.span, p.type);
   }
 
   expect(state, TokenKind.In, "expected 'in' after let value");
@@ -857,7 +990,7 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   const body = parseExpr(state);
   const end = body.span?.end ?? state.current[1];
 
-  return ast.let_(name, value, body, span(start, end), nameSpan);
+  return ast.let_(name, value, body, span(start, end), nameSpan, returnType);
 };
 
 /**
@@ -1102,13 +1235,16 @@ export const programToExpr = (program: Program): ast.Expr | null => {
     let value = binding.body;
     for (let j = binding.params.length - 1; j >= 0; j--) {
       const p = binding.params[j]!;
-      value = ast.abs(p.name, value, undefined, p.span);
+      value = ast.abs(p.name, value, undefined, p.span, p.type);
     }
 
     if (binding.recursive) {
-      expr = ast.letRec([ast.recBinding(binding.name, value, binding.nameSpan)], expr);
+      expr = ast.letRec(
+        [ast.recBinding(binding.name, value, binding.nameSpan, binding.returnType)],
+        expr,
+      );
     } else {
-      expr = ast.let_(binding.name, value, expr, undefined, binding.nameSpan);
+      expr = ast.let_(binding.name, value, expr, undefined, binding.nameSpan, binding.returnType);
     }
   }
 

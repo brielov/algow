@@ -1943,4 +1943,115 @@ describe("Type Inference", () => {
       expect(result.constructorNames).toContain("Right");
     });
   });
+
+  describe("type annotations", () => {
+    it("accepts correct parameter annotation", () => {
+      // let f (x : number) = x + 1 in f
+      const expr = ast.let_(
+        "f",
+        ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1)), undefined, undefined, ast.tyvar("number")),
+        ast.var_("f"),
+      );
+      const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("number -> number");
+    });
+
+    it("accepts correct return type annotation", () => {
+      // let f x : number = x in f
+      const expr: ast.Let = {
+        kind: "Let",
+        name: "f",
+        returnType: ast.tyvar("number"),
+        value: ast.abs("x", ast.var_("x")),
+        body: ast.var_("f"),
+      };
+      const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("number -> number");
+    });
+
+    it("rejects mismatched return type annotation", () => {
+      // let f (x : number) : string = x in f
+      const expr: ast.Let = {
+        kind: "Let",
+        name: "f",
+        returnType: ast.tyvar("string"),
+        value: ast.abs("x", ast.var_("x"), undefined, undefined, ast.tyvar("number")),
+        body: ast.var_("f"),
+      };
+      const { diagnostics } = infer(baseEnv, new Map(), expr);
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(diagnostics[0]!.message).toContain("mismatch");
+    });
+
+    it("accepts polymorphic annotation", () => {
+      // let id (x : a) : a = x in id
+      const expr: ast.Let = {
+        kind: "Let",
+        name: "id",
+        returnType: ast.tyvar("a"),
+        value: ast.abs("x", ast.var_("x"), undefined, undefined, ast.tyvar("a")),
+        body: ast.var_("id"),
+      };
+      const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+      expect(diagnostics).toHaveLength(0);
+      // The type should be polymorphic (t -> t)
+      expect(typeToString(type)).toMatch(/^t\d+ -> t\d+$/);
+    });
+
+    it("accepts function type annotation", () => {
+      // let apply (f : number -> number) (x : number) = f x in apply
+      const fType = ast.tyfun(ast.tyvar("number"), ast.tyvar("number"));
+      const expr = ast.let_(
+        "apply",
+        ast.abs(
+          "f",
+          ast.abs(
+            "x",
+            ast.app(ast.var_("f"), ast.var_("x")),
+            undefined,
+            undefined,
+            ast.tyvar("number"),
+          ),
+          undefined,
+          undefined,
+          fType,
+        ),
+        ast.var_("apply"),
+      );
+      const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("(number -> number) -> number -> number");
+    });
+
+    it("accepts annotated recursive binding", () => {
+      // let rec fact (n : number) : number = if n <= 1 then 1 else n * fact (n - 1) in fact
+      const factBody = ast.if_(
+        ast.binOp("<=", ast.var_("n"), ast.num(1)),
+        ast.num(1),
+        ast.binOp("*", ast.var_("n"), ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1)))),
+      );
+      const recBinding: ast.RecBinding = {
+        name: "fact",
+        returnType: ast.tyvar("number"),
+        value: ast.abs("n", factBody, undefined, undefined, ast.tyvar("number")),
+      };
+      const expr = ast.letRec([recBinding], ast.var_("fact"));
+      const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("number -> number");
+    });
+
+    it("uses annotation to constrain inferred type", () => {
+      // let f (x : number) = x in f "hello" -- should fail
+      const expr = ast.let_(
+        "f",
+        ast.abs("x", ast.var_("x"), undefined, undefined, ast.tyvar("number")),
+        ast.app(ast.var_("f"), ast.str("hello")),
+      );
+      const { diagnostics } = infer(baseEnv, new Map(), expr);
+      expect(diagnostics.length).toBeGreaterThan(0);
+    });
+  });
 });
