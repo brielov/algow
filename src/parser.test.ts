@@ -77,6 +77,14 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(ast.str("a\rb"));
     });
 
+    it("reports error for unknown escape sequences", () => {
+      const result = parse('"hello\\xworld"');
+      expect(result.diagnostics).toHaveLength(1);
+      expect(result.diagnostics[0]!.message).toBe("Unknown escape sequence: \\x");
+      // Still produces a value (with the unknown escape passed through)
+      expect(stripSpans(result.program.expr)).toEqual(ast.str("helloxworld"));
+    });
+
     it("parses true boolean", () => {
       const result = parse("true");
       expect(result.diagnostics).toHaveLength(0);

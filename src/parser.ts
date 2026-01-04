@@ -356,7 +356,7 @@ const parsePrefix = (state: ParserState): ast.Expr => {
 
     case TokenKind.String: {
       advance(state);
-      return ast.str(parseStringContent(text(state, token)), tokenSpan(token));
+      return ast.str(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
     }
 
     case TokenKind.True:
@@ -710,7 +710,7 @@ const parsePattern = (state: ParserState, allowArgs = true): ast.Pattern => {
 
     case TokenKind.String:
       advance(state);
-      return ast.plit(parseStringContent(text(state, token)), tokenSpan(token));
+      return ast.plit(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
 
     case TokenKind.True:
       advance(state);
@@ -792,13 +792,14 @@ const parseRecordPattern = (state: ParserState): ast.Pattern => {
 // HELPERS
 // =============================================================================
 
-const parseStringContent = (quoted: string): string => {
+const parseStringContent = (state: ParserState, quoted: string, tokenStart: number): string => {
   const inner = quoted.slice(1, -1);
   let result = "";
   let i = 0;
 
   while (i < inner.length) {
     if (inner[i] === "\\") {
+      const escapeStart = tokenStart + 1 + i; // +1 for opening quote
       i++;
       if (i >= inner.length) break;
       switch (inner[i]) {
@@ -818,6 +819,12 @@ const parseStringContent = (quoted: string): string => {
           result += '"';
           break;
         default:
+          state.diagnostics.push({
+            message: `Unknown escape sequence: \\${inner[i]}`,
+            start: escapeStart,
+            end: escapeStart + 2,
+            severity: "error",
+          });
           result += inner[i];
       }
     } else {
