@@ -707,6 +707,63 @@ describe("Parser", () => {
     });
   });
 
+  describe("list literals", () => {
+    it("parses empty list", () => {
+      const result = parse("[]");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.var_("Nil"));
+    });
+
+    it("parses single element list", () => {
+      const result = parse("[1]");
+      expect(result.diagnostics).toHaveLength(0);
+      // [1] desugars to Cons 1 Nil
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("Nil")),
+      );
+    });
+
+    it("parses multi-element list", () => {
+      const result = parse("[1, 2, 3]");
+      expect(result.diagnostics).toHaveLength(0);
+      // [1, 2, 3] desugars to Cons 1 (Cons 2 (Cons 3 Nil))
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.app(
+          ast.app(ast.var_("Cons"), ast.num(1)),
+          ast.app(
+            ast.app(ast.var_("Cons"), ast.num(2)),
+            ast.app(ast.app(ast.var_("Cons"), ast.num(3)), ast.var_("Nil")),
+          ),
+        ),
+      );
+    });
+
+    it("parses list with expressions", () => {
+      const result = parse("[1 + 2, x]");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.app(
+          ast.app(ast.var_("Cons"), ast.binOp("+", ast.num(1), ast.num(2))),
+          ast.app(ast.app(ast.var_("Cons"), ast.var_("x")), ast.var_("Nil")),
+        ),
+      );
+    });
+
+    it("parses nested lists", () => {
+      const result = parse("[[1], [2]]");
+      expect(result.diagnostics).toHaveLength(0);
+      // [[1], [2]] desugars to Cons (Cons 1 Nil) (Cons (Cons 2 Nil) Nil)
+      const list1 = ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("Nil"));
+      const list2 = ast.app(ast.app(ast.var_("Cons"), ast.num(2)), ast.var_("Nil"));
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.app(
+          ast.app(ast.var_("Cons"), list1),
+          ast.app(ast.app(ast.var_("Cons"), list2), ast.var_("Nil")),
+        ),
+      );
+    });
+  });
+
   describe("if expressions", () => {
     it("parses simple if", () => {
       const result = parse("if true then 1 else 2");

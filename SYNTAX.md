@@ -33,6 +33,7 @@ _                    -- wildcard pattern
 ```
 (  )                 -- grouping, tuples
 {  }                 -- records
+[  ]                 -- list literals
 ```
 
 ### Identifiers
@@ -175,6 +176,7 @@ primary_expr = LOWER                           -- variable
              | "(" expression ")"              -- grouping
              | tuple_expr
              | record_expr
+             | list_expr
              | field_access
              | tuple_index
 
@@ -183,6 +185,12 @@ tuple_expr   = "(" expression "," expression ("," expression)* ")"
 record_expr  = "{" field ("," field)* "}"
 field        = LOWER "=" expression
 
+list_expr    = "[" (expression ("," expression)*)? "]"
+```
+
+Note: `[1, 2, 3]` desugars to `Cons 1 (Cons 2 (Cons 3 Nil))`.
+
+```
 field_access = primary_expr "." LOWER
 tuple_index  = primary_expr "." NUMBER         -- tuple.0, tuple.1
 ```
@@ -375,8 +383,8 @@ let rec map f xs = match xs with
   | Cons x rest => Cons (f x) (map f rest)
 end
 
--- Main expression (using pipe for clarity)
-Cons 1 (Cons 2 (Cons 3 (Cons 4 (Cons 5 Nil))))
+-- Main expression using list literal (desugars to Cons chains)
+[1, 2, 3, 4, 5]
   |> map (x => x * 2)
   |> sum
 ```

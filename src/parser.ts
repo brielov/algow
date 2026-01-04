@@ -423,6 +423,9 @@ const parsePrefix = (state: ParserState): ast.Expr => {
     case TokenKind.LBrace:
       return parseRecord(state);
 
+    case TokenKind.LBracket:
+      return parseListLiteral(state);
+
     case TokenKind.If:
       return parseIf(state);
 
@@ -655,6 +658,38 @@ const parseRecord = (state: ParserState): ast.Expr => {
   const endToken = expect(state, TokenKind.RBrace, "expected '}' after record");
   const end = endToken ? endToken[2] : state.current[1];
   return ast.record(fields, span(start, end));
+};
+
+/**
+ * Parse a list literal: [1, 2, 3]
+ * Desugars to: Cons 1 (Cons 2 (Cons 3 Nil))
+ */
+const parseListLiteral = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
+  advance(state); // [
+
+  const elements: ast.Expr[] = [];
+
+  if (!at(state, TokenKind.RBracket)) {
+    do {
+      if (at(state, TokenKind.Comma)) advance(state);
+      elements.push(parseExpr(state));
+    } while (at(state, TokenKind.Comma));
+  }
+
+  const endToken = expect(state, TokenKind.RBracket, "expected ']' after list");
+  const end = endToken ? endToken[2] : state.current[1];
+
+  // Desugar [x1, x2, x3] to Cons x1 (Cons x2 (Cons x3 Nil))
+  // Build from right to left
+  let result: ast.Expr = ast.var_("Nil", span(end - 1, end));
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const elem = elements[i]!;
+    const elemStart = elem.span?.start ?? start;
+    result = ast.app(ast.app(ast.var_("Cons"), elem), result, span(elemStart, end));
+  }
+
+  return result;
 };
 
 const parseIf = (state: ParserState): ast.Expr => {

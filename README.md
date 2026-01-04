@@ -30,7 +30,7 @@ A small, experimental type checker written in TypeScript. This is a learning pro
 - [x] **Unary negation (`-x`)** — Negate numbers with prefix `-`
 - [x] **Let destructuring** — `let (x, y) = (10, 20) in x * y`
 - [x] **Tuple indexing** — `tuple.0`, `tuple.1` for positional access
-- [ ] **List literals** — `[1, 2, 3]` desugaring to `Cons` chains
+- [x] **List literals** — `[1, 2, 3]` desugaring to `Cons` chains
 
 #### Medium Priority
 

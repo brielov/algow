@@ -68,6 +68,8 @@ export enum TokenKind {
   RParen, // )
   LBrace, // {
   RBrace, // }
+  LBracket, // [
+  RBracket, // ]
 
   // Error
   Error,
@@ -129,6 +131,8 @@ const LPAREN = 0x28; // (
 const RPAREN = 0x29; // )
 const LBRACE = 0x7b; // {
 const RBRACE = 0x7d; // }
+const LBRACKET = 0x5b; // [
+const RBRACKET = 0x5d; // ]
 const COLON = 0x3a; // :
 const AMPERSAND = 0x26; // &
 
@@ -416,6 +420,12 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
 
     case RBRACE:
       return [TokenKind.RBrace, start, state.pos];
+
+    case LBRACKET:
+      return [TokenKind.LBracket, start, state.pos];
+
+    case RBRACKET:
+      return [TokenKind.RBracket, start, state.pos];
 
     case COLON:
       if (peek(state) === COLON) {

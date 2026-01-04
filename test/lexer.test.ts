@@ -381,6 +381,12 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.LBrace);
       expect(nextToken(state)[0]).toBe(TokenKind.RBrace);
     });
+
+    it("lexes brackets", () => {
+      const state = createLexer("[]");
+      expect(nextToken(state)[0]).toBe(TokenKind.LBracket);
+      expect(nextToken(state)[0]).toBe(TokenKind.RBracket);
+    });
   });
 
   describe("whitespace handling", () => {
