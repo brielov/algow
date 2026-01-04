@@ -57,6 +57,8 @@ type ParserState = {
 const enum Bp {
   None = 0,
   Pipe = 10, // |>
+  Or = 12, // ||
+  And = 14, // &&
   Cons = 15, // :: (right-associative)
   Equality = 20, // == !=
   Comparison = 30, // < <= > >=
@@ -172,10 +174,29 @@ export const parse = (source: string): ParseResult => {
 type LetResult = { kind: "binding"; binding: TopLevelBinding } | { kind: "expr"; expr: ast.Expr };
 
 const parseLetBindingOrExpr = (state: ParserState): LetResult => {
+  const start = state.current[1];
   advance(state); // 'let'
 
   const recursive = at(state, TokenKind.Rec);
   if (recursive) advance(state);
+
+  // Check for destructuring pattern (tuple, record, wildcard, or constructor)
+  // Only allowed for non-recursive let, and always produces an expression (not a binding)
+  if (
+    !recursive &&
+    atAny(state, TokenKind.LParen, TokenKind.LBrace, TokenKind.Underscore, TokenKind.Upper)
+  ) {
+    const pattern = parsePattern(state);
+
+    expect(state, TokenKind.Eq, "expected '=' after pattern");
+    const value = parseExpr(state);
+    expect(state, TokenKind.In, "expected 'in' after let value");
+    const body = parseExpr(state);
+    const end = body.span?.end ?? state.current[1];
+
+    // Desugar to: match value with | pattern => body end
+    return { kind: "expr", expr: ast.match(value, [ast.case_(pattern, body)], span(start, end)) };
+  }
 
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
@@ -390,6 +411,15 @@ const parsePrefix = (state: ParserState): ast.Expr => {
     case TokenKind.LParen:
       return parseParenOrTuple(state);
 
+    // Unary negation: -x desugars to 0 - x
+    case TokenKind.Minus: {
+      advance(state);
+      // Parse with high precedence to bind tightly (higher than multiplicative)
+      const operand = parsePrecedence(state, Bp.Multiplicative + 1);
+      const end = operand.span?.end ?? state.current[1];
+      return ast.binOp("-", ast.num(0, span(start, start)), operand, span(start, end));
+    }
+
     case TokenKind.LBrace:
       return parseRecord(state);
 
@@ -442,6 +472,25 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
       return binOp("==");
     case TokenKind.Ne:
       return binOp("!=");
+    case TokenKind.PlusPlus:
+      return binOp("++");
+
+    // Logical operators desugar to if expressions for short-circuit evaluation:
+    // a && b  →  if a then b else false
+    // a || b  →  if a then true else b
+    case TokenKind.And: {
+      advance(state);
+      const right = parsePrecedence(state, bp);
+      const end = right.span?.end ?? state.current[1];
+      return ast.if_(left, right, ast.bool(false), span(start, end));
+    }
+
+    case TokenKind.Or: {
+      advance(state);
+      const right = parsePrecedence(state, bp);
+      const end = right.span?.end ?? state.current[1];
+      return ast.if_(left, ast.bool(true), right, span(start, end));
+    }
 
     case TokenKind.Pipe: {
       advance(state);
@@ -482,6 +531,12 @@ const infixBindingPower = (state: ParserState): number => {
     case TokenKind.Pipe:
       return Bp.Pipe;
 
+    case TokenKind.Or:
+      return Bp.Or;
+
+    case TokenKind.And:
+      return Bp.And;
+
     case TokenKind.ColonColon:
       return Bp.Cons;
 
@@ -497,6 +552,7 @@ const infixBindingPower = (state: ParserState): number => {
 
     case TokenKind.Plus:
     case TokenKind.Minus:
+    case TokenKind.PlusPlus:
       return Bp.Additive;
 
     case TokenKind.Star:
@@ -628,6 +684,15 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   const recursive = at(state, TokenKind.Rec);
   if (recursive) advance(state);
 
+  // Check for destructuring pattern (tuple, record, wildcard, or constructor)
+  // Only allowed for non-recursive let
+  if (
+    !recursive &&
+    atAny(state, TokenKind.LParen, TokenKind.LBrace, TokenKind.Underscore, TokenKind.Upper)
+  ) {
+    return parseLetDestructuring(state, start);
+  }
+
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
     return ast.num(0);
@@ -658,6 +723,26 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   return recursive
     ? ast.letRec(name, value, body, span(start, end), nameSpan)
     : ast.let_(name, value, body, span(start, end), nameSpan);
+};
+
+/**
+ * Parse let destructuring: let pattern = expr in body
+ * Desugars to: match expr with | pattern => body end
+ */
+const parseLetDestructuring = (state: ParserState, start: number): ast.Expr => {
+  const pattern = parsePattern(state);
+
+  expect(state, TokenKind.Eq, "expected '=' after pattern");
+
+  const value = parseExpr(state);
+
+  expect(state, TokenKind.In, "expected 'in' after let value");
+
+  const body = parseExpr(state);
+  const end = body.span?.end ?? state.current[1];
+
+  // Desugar to: match value with | pattern => body end
+  return ast.match(value, [ast.case_(pattern, body)], span(start, end));
 };
 
 // =============================================================================

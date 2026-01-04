@@ -149,6 +149,28 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(ast.binOp("/", ast.num(10), ast.num(2)));
     });
 
+    it("parses string concatenation", () => {
+      const result = parse('"hello" ++ " world"');
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.binOp("++", ast.str("hello"), ast.str(" world")),
+      );
+    });
+
+    it("parses chained string concatenation (left-associative)", () => {
+      const result = parse('"a" ++ "b" ++ "c"');
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.binOp("++", ast.binOp("++", ast.str("a"), ast.str("b")), ast.str("c")),
+      );
+    });
+
+    it("++ has same precedence as +", () => {
+      // "a" ++ "b" + 1 should fail type check but parse as (("a" ++ "b") + 1)
+      const result = parse('"x" ++ "y"');
+      expect(result.diagnostics).toHaveLength(0);
+    });
+
     it("parses less than", () => {
       const result = parse("1 < 2");
       expect(result.diagnostics).toHaveLength(0);
@@ -183,6 +205,47 @@ describe("Parser", () => {
       const result = parse("1 != 2");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(ast.binOp("!=", ast.num(1), ast.num(2)));
+    });
+
+    it("parses unary negation", () => {
+      // -5 desugars to 0 - 5
+      const result = parse("-5");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.num(0), ast.num(5)));
+    });
+
+    it("parses unary negation of variable", () => {
+      // -x desugars to 0 - x
+      const result = parse("-x");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.num(0), ast.var_("x")));
+    });
+
+    it("unary negation binds tighter than multiplication", () => {
+      // -2 * 3 should parse as (0 - 2) * 3
+      const result = parse("-2 * 3");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.binOp("*", ast.binOp("-", ast.num(0), ast.num(2)), ast.num(3)),
+      );
+    });
+
+    it("parses double negation with space", () => {
+      // - -5 desugars to 0 - (0 - 5)
+      const result = parse("- -5");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.binOp("-", ast.num(0), ast.binOp("-", ast.num(0), ast.num(5))),
+      );
+    });
+
+    it("parses negation in expression", () => {
+      // 10 + -5 should parse as 10 + (0 - 5)
+      const result = parse("10 + -5");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.binOp("+", ast.num(10), ast.binOp("-", ast.num(0), ast.num(5))),
+      );
     });
 
     describe("precedence", () => {
@@ -308,6 +371,87 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.app(ast.var_("Cons"), ast.binOp("+", ast.num(1), ast.num(2))), ast.var_("xs")),
+      );
+    });
+  });
+
+  describe("logical operators", () => {
+    it("parses && and desugars to if", () => {
+      // a && b should desugar to if a then b else false
+      const result = parse("a && b");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.if_(ast.var_("a"), ast.var_("b"), ast.bool(false)),
+      );
+    });
+
+    it("parses || and desugars to if", () => {
+      // a || b should desugar to if a then true else b
+      const result = parse("a || b");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.if_(ast.var_("a"), ast.bool(true), ast.var_("b")),
+      );
+    });
+
+    it("&& has higher precedence than ||", () => {
+      // a || b && c should parse as a || (b && c)
+      const result = parse("a || b && c");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.if_(
+          ast.var_("a"),
+          ast.bool(true),
+          ast.if_(ast.var_("b"), ast.var_("c"), ast.bool(false)),
+        ),
+      );
+    });
+
+    it("chains && correctly (left-associative)", () => {
+      // a && b && c should parse as (a && b) && c
+      const result = parse("a && b && c");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.if_(
+          ast.if_(ast.var_("a"), ast.var_("b"), ast.bool(false)),
+          ast.var_("c"),
+          ast.bool(false),
+        ),
+      );
+    });
+
+    it("chains || correctly (left-associative)", () => {
+      // a || b || c should parse as (a || b) || c
+      const result = parse("a || b || c");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.if_(
+          ast.if_(ast.var_("a"), ast.bool(true), ast.var_("b")),
+          ast.bool(true),
+          ast.var_("c"),
+        ),
+      );
+    });
+
+    it("logical operators have lower precedence than comparison", () => {
+      // x > 0 && y < 10 should parse correctly
+      const result = parse("x > 0 && y < 10");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.if_(
+          ast.binOp(">", ast.var_("x"), ast.num(0)),
+          ast.binOp("<", ast.var_("y"), ast.num(10)),
+          ast.bool(false),
+        ),
+      );
+    });
+
+    it("logical operators have higher precedence than pipe", () => {
+      // a && b |> f should parse as f (a && b)
+      const result = parse("a && b |> f");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.app(ast.var_("f"), ast.if_(ast.var_("a"), ast.var_("b"), ast.bool(false))),
       );
     });
   });
@@ -607,6 +751,49 @@ describe("Parser", () => {
       const expr = result.program.expr as ast.LetRec;
       expect(expr.kind).toBe("LetRec");
       expect(expr.name).toBe("sum");
+    });
+
+    it("parses let with tuple destructuring", () => {
+      // let (x, y) = (1, 2) in x + y desugars to match (1, 2) with | (x, y) => x + y end
+      const result = parse("let (x, y) = (1, 2) in x + y");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+          ast.case_(
+            ast.ptuple([ast.pvar("x"), ast.pvar("y")]),
+            ast.binOp("+", ast.var_("x"), ast.var_("y")),
+          ),
+        ]),
+      );
+    });
+
+    it("parses let with nested tuple destructuring", () => {
+      const result = parse("let ((a, b), c) = ((1, 2), 3) in a");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Match");
+    });
+
+    it("parses let with record destructuring", () => {
+      const result = parse("let {x = a} = {x = 5} in a");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Match");
+    });
+
+    it("parses let with wildcard pattern", () => {
+      const result = parse("let _ = 123 in 456");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(
+        ast.match(ast.num(123), [ast.case_(ast.pwildcard(), ast.num(456))]),
+      );
+    });
+
+    it("parses let with constructor pattern", () => {
+      const result = parse("let Just x = expr in x");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr;
+      expect(expr?.kind).toBe("Match");
     });
   });
 

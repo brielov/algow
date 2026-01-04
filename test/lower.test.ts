@@ -240,8 +240,8 @@ describe("lowerToIR", () => {
     });
 
     it("handles string concatenation", () => {
-      // "a" + "b"
-      const expr = ast.binOp("+", ast.str("a"), ast.str("b"));
+      // "a" ++ "b"
+      const expr = ast.binOp("++", ast.str("a"), ast.str("b"));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");

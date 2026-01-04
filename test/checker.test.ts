@@ -276,6 +276,30 @@ describe("Type Inference", () => {
         expect(typeToString(type)).toBe("number");
       });
 
+      it("infers ++ string concatenation", () => {
+        const { type, diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.binOp("++", ast.str("hello"), ast.str("world")),
+        );
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("string");
+      });
+
+      it("reports error for ++ with numbers", () => {
+        const { diagnostics } = infer(baseEnv, new Map(), ast.binOp("++", ast.num(1), ast.num(2)));
+        expect(diagnostics.length).toBeGreaterThan(0);
+      });
+
+      it("reports error for ++ with mixed types", () => {
+        const { diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.binOp("++", ast.str("hello"), ast.num(1)),
+        );
+        expect(diagnostics.length).toBeGreaterThan(0);
+      });
+
       it("reports error for subtraction with strings", () => {
         const { diagnostics } = infer(
           baseEnv,

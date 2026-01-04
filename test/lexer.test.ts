@@ -322,6 +322,40 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.Bar);
     });
 
+    it("lexes logical and operator", () => {
+      const state = createLexer("&&");
+      expect(nextToken(state)[0]).toBe(TokenKind.And);
+    });
+
+    it("lexes string concatenation operator", () => {
+      const state = createLexer("++");
+      expect(nextToken(state)[0]).toBe(TokenKind.PlusPlus);
+    });
+
+    it("distinguishes + from ++", () => {
+      const state = createLexer("+ ++ +");
+      expect(nextToken(state)[0]).toBe(TokenKind.Plus);
+      expect(nextToken(state)[0]).toBe(TokenKind.PlusPlus);
+      expect(nextToken(state)[0]).toBe(TokenKind.Plus);
+    });
+
+    it("lexes logical or operator", () => {
+      const state = createLexer("||");
+      expect(nextToken(state)[0]).toBe(TokenKind.Or);
+    });
+
+    it("lexes standalone ampersand as error", () => {
+      const state = createLexer("&");
+      expect(nextToken(state)[0]).toBe(TokenKind.Error);
+    });
+
+    it("distinguishes | from ||", () => {
+      const state = createLexer("| || |");
+      expect(nextToken(state)[0]).toBe(TokenKind.Bar);
+      expect(nextToken(state)[0]).toBe(TokenKind.Or);
+      expect(nextToken(state)[0]).toBe(TokenKind.Bar);
+    });
+
     it("lexes punctuation", () => {
       const state = createLexer(", . _");
       expect(nextToken(state)[0]).toBe(TokenKind.Comma);

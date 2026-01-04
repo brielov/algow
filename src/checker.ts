@@ -1343,6 +1343,12 @@ const inferBinOp = (
       constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }
+
+    // String concatenation: both operands must be string, returns string
+    case "++": {
+      const s4 = unify(ctx, operandType, tStr, expr.span);
+      return [composeSubst(subst, s4), tStr, constraints];
+    }
   }
 };
 

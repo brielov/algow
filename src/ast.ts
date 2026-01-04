@@ -308,8 +308,9 @@ export interface BinOp extends Node {
  * Arithmetic: +, -, *, /
  * Comparison: <, <=, >, >=
  * Equality: ==, !=
+ * String: ++ (concatenation)
  */
-export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=";
+export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=" | "++";
 
 // =============================================================================
 // PATTERNS

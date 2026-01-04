@@ -13,9 +13,12 @@ let, rec, in, if, then, else, match, with, end, data, true, false
 ### Operators
 
 ```
-+  -  *  /           -- arithmetic
++  -  *  /           -- arithmetic (binary)
+-                    -- negation (unary, desugars to 0 - x)
+++                   -- string concatenation
 <  <=  >  >=         -- comparison
 ==  !=               -- equality
+&&  ||               -- logical (short-circuit)
 |>                   -- pipe (flip application)
 =>                   -- lambda arrow
 =                    -- binding
@@ -95,6 +98,7 @@ data Either a b = Left a | Right b
 
 ```
 let_decl     = "let" "rec"? LOWER pattern* "=" expression
+             | "let" pattern "=" expression    -- destructuring (non-recursive only)
 
 pattern      = LOWER                           -- variable
              | "_"                             -- wildcard
@@ -112,6 +116,11 @@ Examples:
 let x = 42
 let add x y = x + y
 let rec fact n = if n == 0 then 1 else n * fact (n - 1)
+
+-- Destructuring (desugars to match expressions)
+let (x, y) = (10, 20)
+let {name = n, age = a} = person
+let ((a, b), c) = nested
 ```
 
 ### Expressions
@@ -124,6 +133,7 @@ expression   = let_expr
              | binary_expr
 
 let_expr     = "let" "rec"? LOWER pattern* "=" expression "in" expression
+             | "let" pattern "=" expression "in" expression  -- destructuring
 
 if_expr      = "if" expression "then" expression "else" expression
 
@@ -139,17 +149,22 @@ lambda_expr  = LOWER "=>" expression
 ```
 binary_expr  = pipe_expr
 
-pipe_expr        = equality_expr ("|>" equality_expr)*
+pipe_expr        = or_expr ("|>" or_expr)*
+or_expr          = and_expr ("||" and_expr)*
+and_expr         = equality_expr ("&&" equality_expr)*
 equality_expr    = comparison_expr (("==" | "!=") comparison_expr)*
 comparison_expr  = additive_expr (("<" | "<=" | ">" | ">=") additive_expr)*
 additive_expr    = multiplicative_expr (("+" | "-") multiplicative_expr)*
 multiplicative_expr = unary_expr (("*" | "/") unary_expr)*
-unary_expr       = app_expr
+unary_expr       = "-" unary_expr | app_expr   -- negation or application
 
 app_expr     = primary_expr+                   -- function application
 ```
 
 Note: `x |> f` desugars to `f x` (flip application).
+Note: `a && b` desugars to `if a then b else false` (short-circuit).
+Note: `a || b` desugars to `if a then true else b` (short-circuit).
+Note: `-x` desugars to `0 - x` (unary negation).
 
 ### Primary Expressions
 
@@ -190,14 +205,16 @@ All expression types are inferred by Algorithm W.
 ## Operator Precedence (low to high)
 
 | Precedence | Operators            | Associativity |
-| ---------- | -------------------- | ------------- | ---- |
-| 1          | `                    | >` (pipe)     | left |
-| 2          | `==` `!=`            | left          |
-| 3          | `<` `<=` `>` `>=`    | left          |
-| 4          | `+` `-`              | left          |
-| 5          | `*` `/`              | left          |
-| 6          | function application | left          |
-| 7          | `.` (field access)   | left          |
+| ---------- | -------------------- | ------------- |
+| 1          | `\|>` (pipe)         | left          |
+| 2          | `\|\|`               | left          |
+| 3          | `&&`                 | left          |
+| 4          | `==` `!=`            | left          |
+| 5          | `<` `<=` `>` `>=`    | left          |
+| 6          | `+` `-` `++`         | left          |
+| 7          | `*` `/`              | left          |
+| 8          | function application | left          |
+| 9          | `.` (field access)   | left          |
 
 ---
 

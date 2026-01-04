@@ -59,6 +59,9 @@ export enum TokenKind {
   Dot, // .
   Underscore, // _
   ColonColon, // ::
+  And, // &&
+  Or, // ||
+  PlusPlus, // ++
 
   // Delimiters
   LParen, // (
@@ -127,6 +130,7 @@ const RPAREN = 0x29; // )
 const LBRACE = 0x7b; // {
 const RBRACE = 0x7d; // }
 const COLON = 0x3a; // :
+const AMPERSAND = 0x26; // &
 
 // =============================================================================
 // KEYWORD MAP
@@ -330,6 +334,10 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
 
   switch (ch) {
     case PLUS:
+      if (peek(state) === PLUS) {
+        advance(state);
+        return [TokenKind.PlusPlus, start, state.pos];
+      }
       return [TokenKind.Plus, start, state.pos];
 
     case MINUS:
@@ -378,7 +386,18 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
         advance(state);
         return [TokenKind.Pipe, start, state.pos];
       }
+      if (peek(state) === PIPE) {
+        advance(state);
+        return [TokenKind.Or, start, state.pos];
+      }
       return [TokenKind.Bar, start, state.pos];
+
+    case AMPERSAND:
+      if (peek(state) === AMPERSAND) {
+        advance(state);
+        return [TokenKind.And, start, state.pos];
+      }
+      return [TokenKind.Error, start, state.pos];
 
     case COMMA:
       return [TokenKind.Comma, start, state.pos];

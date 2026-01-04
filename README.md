@@ -21,8 +21,55 @@ A small, experimental type checker written in TypeScript. This is a learning pro
 
 ## What's next
 
-- Lexer and parser
-- Runtime/interpreter for code execution
+### Language Features
+
+#### High Priority
+
+- [x] **Logical operators (`&&`, `||`)** — Short-circuit boolean operators
+- [x] **String concatenation (`++`)** — Concatenate strings with the `++` operator
+- [x] **Unary negation (`-x`)** — Negate numbers with prefix `-`
+- [x] **Let destructuring** — `let (x, y) = (10, 20) in x * y`
+- [ ] **Tuple indexing** — `tuple.0`, `tuple.1` for positional access
+- [ ] **List literals** — `[1, 2, 3]` desugaring to `Cons` chains
+
+#### Medium Priority
+
+- [ ] **Mutual recursion** — `let rec f = ... and g = ...` for co-recursive definitions
+- [ ] **Pattern guards** — `| n if n > 0 => ...` in match expressions
+- [ ] **As-patterns** — `| (Cons x rest) as whole => ...`
+- [ ] **Or-patterns** — `| Nothing | Just Nothing => ...`
+- [ ] **Optional type annotations** — `let add (x: number) y: number = x + y`
+- [ ] **Wildcard in expressions** — `let _ = expr in ...` to ignore values
+- [ ] **Record field punning** — `{ x, y }` as shorthand for `{ x = x, y = y }`
+
+#### Lower Priority
+
+- [ ] **Type aliases** — `type Point = { x: number, y: number }`
+- [ ] **Char type and literals** — `'a'`, `'b'`, with `string` as `List Char`
+- [ ] **Numeric tower** — Distinguish `Int` vs `Float` types
+
+### Compiler Improvements
+
+#### Error Messages
+
+- [ ] **Contextual errors** — Show the expression that caused the type error
+- [ ] **Expected vs actual** — "Expected `number`, got `string` in argument to `add`"
+- [ ] **Occurs check clarity** — "Infinite type: cannot unify `t0` with `t0 -> t1`"
+- [ ] **Suggestions** — "Did you mean `foo` instead of `fop`?"
+
+#### Optimizations
+
+- [ ] **Tail-call optimization** — Essential for idiomatic recursive code
+- [ ] **Constant folding** — Evaluate `1 + 2` at compile time
+- [ ] **Dead code elimination** — Remove unused bindings
+- [ ] **Lambda lifting** — Optimize closure allocation
+- [ ] **Inlining** — Inline small functions
+
+#### Tooling
+
+- [ ] **Source maps** — Map generated JS back to Algow source
+- [ ] **Better IR dump** — Pretty-print IR with type annotations
+- [ ] **Benchmark suite** — Track compilation and runtime performance
 
 ## Running
 

@@ -429,11 +429,9 @@ const lowerBinOp = (ctx: LowerContext, expr: ast.BinOp): ir.IRExpr => {
     case "!=":
       resultType = tBool;
       break;
-  }
-
-  // Handle string concatenation
-  if (expr.op === "+" && operandType.kind === "TCon" && operandType.name === "string") {
-    resultType = tStr;
+    case "++":
+      resultType = tStr;
+      break;
   }
 
   // Create the binary operation binding

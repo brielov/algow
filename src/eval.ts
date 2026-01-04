@@ -253,6 +253,10 @@ const evalBinOp = (env: Env, expr: ast.BinOp): Value => {
       return vbool(valuesEqual(left, right));
     case "!=":
       return vbool(!valuesEqual(left, right));
+
+    // String concatenation
+    case "++":
+      return vstr((left as VStr).value + (right as VStr).value);
   }
 };
 
