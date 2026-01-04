@@ -1,6 +1,18 @@
 {
   "name": "algow",
+  "private": true,
+  "type": "module",
   "module": "src/index.ts",
+  "scripts": {
+    "lint": "oxlint --type-aware --type-check --ignore-pattern 'playground/*'",
+    "format": "oxfmt --write",
+    "lsp": "bun run src/lsp/index.ts",
+    "playground:build": "bun build playground/worker.ts --outdir=playground --target=browser && bun build playground/main.ts --outdir=playground --target=browser",
+    "playground:serve": "bun run playground/server.ts"
+  },
+  "dependencies": {
+    "vscode-languageserver-types": "^3.17.5"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "oxfmt": "^0.21.0",
@@ -10,11 +22,5 @@
   },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "private": true,
-  "scripts": {
-    "lint": "oxlint --type-aware --type-check",
-    "format": "oxfmt --write"
-  },
-  "type": "module"
+  }
 }

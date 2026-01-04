@@ -8,7 +8,7 @@ const stripSpans = <T>(obj: T): T => {
   if (Array.isArray(obj)) return obj.map(stripSpans) as T;
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (key !== "span") {
+    if (key !== "span" && key !== "nameSpan" && key !== "paramSpan") {
       result[key] = stripSpans(value);
     }
   }
@@ -804,7 +804,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.bindings).toHaveLength(1);
       expect(result.program.bindings[0]!.name).toBe("add");
-      expect(result.program.bindings[0]!.params).toEqual(["x", "y"]);
+      expect(result.program.bindings[0]!.params.map((p) => p.name)).toEqual(["x", "y"]);
       expect(result.program.bindings[0]!.recursive).toBe(false);
     });
 
@@ -838,7 +838,7 @@ describe("Parser", () => {
       `);
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.bindings).toHaveLength(1);
-      expect(result.program.bindings[0]!.params).toEqual([]);
+      expect(result.program.bindings[0]!.params.map((p) => p.name)).toEqual([]);
     });
   });
 

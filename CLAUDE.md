@@ -4,58 +4,127 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Algow is an experimental Hindley-Milner type inference implementation (Algorithm W) in TypeScript. A learning project exploring how compilers and type systems work.
+Algow is a complete implementation of Hindley-Milner type inference (Algorithm W) in TypeScript. It includes a lexer, parser, type checker, and interpreter for an ML-like language.
 
 ## Commands
 
 ```bash
 bun install          # Install dependencies
-bun run src/index.ts # Run the type checker
-bun test             # Run tests (uses bun:test)
+bun run src/index.ts # Run with a file: bun run src/index.ts examples/demo.alg
+bun run src/index.ts -e "1 + 2"  # Run inline expression
+bun run src/index.ts -t file.alg # Type check only (show inferred type)
+bun test             # Run all tests
+bun test src/infer.test.ts       # Run single test file
 bunx oxlint          # Run linter
+
+# LSP Server
+bun run lsp          # Start LSP server (stdio transport)
+
+# Playground
+bun run playground:build  # Bundle for browser
+bun run playground:serve  # Start dev server at http://localhost:3000
 ```
 
 ## Architecture
 
-### `src/ast.ts` - Abstract Syntax Tree
+The compiler pipeline flows: **Source** → Lexer → Parser → Type Checker → Interpreter → **Value**
 
-**Expressions:**
+### `src/lexer.ts` — Tokenization
 
-- Literals: `Num`, `Bool`, `Str`
-- Bindings: `Let` (polymorphic), `LetRec` (recursive)
-- Functions: `Abs` (lambda), `App` (application)
-- Control: `If`, `BinOp`, `Match`
-- Data: `Tuple`
+Cursor-based lexer returning `[kind, start, end]` tuples. No string allocation during lexing—text extracted via `slice()` when needed.
 
-**Patterns** (for pattern matching):
+### `src/parser.ts` — Pratt Parser
 
-- `PVar`, `PWildcard`, `PCon`, `PLit`
+Top-down operator precedence parser producing AST and collecting diagnostics (no exceptions). Key exports:
 
-**Type expressions** (for ADT declarations):
+- `parse(source)` → `ParseResult` with program and diagnostics
+- `programToExpr(program)` → Converts top-level bindings to nested let expressions
 
-- `TyVar`, `TyCon`, `TyApp`, `TyFun`
+### `src/ast.ts` — AST Definitions
 
-**Data declarations:**
+All nodes use discriminated unions with `kind` field. Smart constructors (`num()`, `abs()`, `let_()`, etc.) for concise AST construction. Spans are optional to support programmatic AST (prelude).
 
-- `DataDecl`, `ConDecl` — define ADTs like `data List a = Nil | Cons a (List a)`
+### `src/infer.ts` — Type Inference (Algorithm W)
 
-### `src/infer.ts` - Type Inference Engine
+The core type checker. Key concepts:
 
-**Internal types:**
+- **Types**: `TVar`, `TCon`, `TFun`, `TApp`, `TRecord`, `TTuple`
+- **Substitution**: Maps type variables to resolved types, composed via `composeSubst()`
+- **Unification**: `unify(ctx, t1, t2)` finds substitution making types equal
+- **Generalization**: `generalize(env, type)` creates polymorphic schemes for let-bindings
+- **Row polymorphism**: `{ x: t | ρ }` for extensible records
+- **Type classes**: `Eq`, `Ord`, `Add` for operator overloading
 
-- `TVar` (type variable), `TCon` (type constant), `TFun` (function type), `TApp` (type application)
+Key functions:
 
-**Key functions:**
+- `infer(env, registry, expr)` → Main entry point returning `InferOutput`
+- `processDataDecl(decl)` → Converts ADT to constructor schemes + registry
+- `checkExhaustiveness(registry, type, patterns)` → Pattern match coverage
 
-- `infer(env, registry, expr)` — Main entry point
-- `processDataDecl(decl)` — Converts ADT declarations to constructor schemes
-- `checkExhaustiveness(registry, type, patterns)` — Validates pattern match coverage
+### `src/eval.ts` — Tree-walking Interpreter
 
-**Type classes:** `Eq`, `Ord`, `Add` for operator overloading
+Evaluates type-checked AST to runtime values (`VNum`, `VStr`, `VBool`, `VClosure`, `VCon`, `VTuple`, `VRecord`). Trusts the type checker—minimal runtime checks.
 
-### `src/index.ts` - Entry Point
+### `src/prelude.ts` — Standard Library
 
-Test harness demonstrating type inference with ADT declarations for `List`, `Maybe`, `Either`.
+Built-in data types (`Maybe`, `Either`, `List`) and functions (`map`, `filter`, `foldr`, `foldl`) defined as AST nodes.
+
+### `src/symbols.ts` — LSP Support
+
+Symbol table builder for go-to-definition, find references, and rename. Tracks definitions and references with source spans.
+
+### `src/diagnostics.ts` — Error Reporting
+
+Structured diagnostics with severity levels and source positions.
+
+### `src/lsp/` — Language Server Protocol
+
+Transport-agnostic LSP implementation with diagnostics, hover, and go-to-definition:
+
+- `transport.ts` — Transport interface + JSON-RPC message types
+- `server.ts` — Core LSP logic (document sync, diagnostics, hover, definition)
+- `stdio.ts` — stdio transport for editors (VS Code, Neovim)
+- `worker.ts` — Web worker transport for browser (Monaco playground)
+- `positions.ts` — Byte offset ↔ LSP Position conversion
+
+### `playground/` — Monaco Editor Playground
+
+Web-based playground with Monaco editor and LSP integration:
+
+- `index.html` — Editor page
+- `main.ts` — Monaco setup + LSP client bridge
+- `worker.ts` — Bundles LSP server for browser
+- `server.ts` — Bun dev server
+
+## Language Syntax
+
+```
+-- Line comment
+{- Block comment -}
+
+-- Data types
+data Maybe a = Nothing | Just a
+data List a = Nil | Cons a (List a)
+
+-- Functions (curried, single parameter)
+let add x y = x + y
+let rec fact n = if n == 0 then 1 else n * fact (n - 1)
+
+-- Pattern matching
+match xs with
+| Nil => 0
+| Cons x rest => 1 + length rest
+end
+
+-- Operators: +, -, *, /, <, <=, >, >=, ==, !=
+-- Pipe operator: x |> f  (desugars to f x)
+-- Cons operator: x :: xs (desugars to Cons x xs)
+
+-- Records and tuples
+let point = { x = 1, y = 2 }
+let pair = (1, "hello")
+point.x  -- field access
+```
 
 ## Runtime
 

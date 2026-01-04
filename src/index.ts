@@ -195,4 +195,4 @@ const main = async (): Promise<void> => {
   }
 };
 
-main();
+void main();

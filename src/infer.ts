@@ -1201,10 +1201,9 @@ const inferAbs = (
   const paramType = freshTypeVar();
 
   // Record parameter definition if we have a span
-  // Note: Currently Abs doesn't have a separate span for the parameter name,
-  // so we use the expression span as an approximation
-  if (expr.span) {
-    symbols.addDefinition(ctx.symbols, expr.param, expr.span, "parameter", paramType);
+  const paramSpan = expr.paramSpan ?? expr.span;
+  if (paramSpan) {
+    symbols.addDefinition(ctx.symbols, expr.param, paramSpan, "parameter", paramType);
   }
 
   // Add parameter to environment (monomorphic - empty quantifier list)
@@ -1394,8 +1393,9 @@ const inferLet = (
   const generalizedScheme = generalize(env1, applySubst(s1, valueType));
 
   // Record the binding definition with inferred type
-  if (expr.span) {
-    symbols.addDefinition(ctx.symbols, expr.name, expr.span, "variable", applySubst(s1, valueType));
+  const nameSpan = expr.nameSpan ?? expr.span;
+  if (nameSpan) {
+    symbols.addDefinition(ctx.symbols, expr.name, nameSpan, "variable", applySubst(s1, valueType));
   }
 
   // Add binding to environment
@@ -1419,8 +1419,10 @@ const inferLet = (
  *
  * For recursion, the bound name must be in scope while inferring the value.
  * We do this by:
- * 1. Add a fresh type variable for the binding
- * 2. Infer as a regular let (which will unify the variable with the actual type)
+ * 1. Add a fresh type variable for the binding (both type env and symbol table)
+ * 2. Infer the value's type
+ * 3. Generalize and add to environment for body
+ * 4. Infer body
  *
  * This is a simplified approach. A more sophisticated implementation would
  * handle mutual recursion and better polymorphism.
@@ -1431,13 +1433,52 @@ const inferLetRec = (
   registry: ConstructorRegistry,
   expr: ast.LetRec,
 ): InferResult => {
-  // Add a placeholder type for the recursive binding
-  const newEnv = new Map(env);
-  newEnv.set(expr.name, scheme([], freshTypeVar()));
+  // Create a fresh type variable for the recursive binding
+  const placeholderType = freshTypeVar();
 
-  // Now infer as a regular let (pass the span for symbol tracking)
-  const newExpr = ast.let_(expr.name, expr.value, expr.body, expr.span);
-  return inferLet(ctx, newEnv, registry, newExpr);
+  // Add placeholder to type environment
+  const envWithPlaceholder = new Map(env);
+  envWithPlaceholder.set(expr.name, scheme([], placeholderType));
+
+  // Add definition to symbol table BEFORE inferring value (so recursive refs resolve)
+  const nameSpan = expr.nameSpan ?? expr.span;
+  if (nameSpan) {
+    symbols.addDefinition(ctx.symbols, expr.name, nameSpan, "variable", null);
+  }
+
+  // Infer the value's type (recursive references will now resolve)
+  const [s1, valueType, c1] = inferExpr(ctx, envWithPlaceholder, registry, expr.value);
+
+  // Apply substitution to environment before generalizing
+  const env1 = applySubstEnv(s1, env);
+
+  // Generalize: quantify over variables not free in the environment
+  const generalizedScheme = generalize(env1, applySubst(s1, valueType));
+
+  // Update the definition's type now that we know it
+  if (nameSpan) {
+    const defStack = ctx.symbols.scope.get(expr.name);
+    if (defStack && defStack.length > 0) {
+      const def = defStack[defStack.length - 1]!;
+      // Mutate to update type (definitions array has same reference)
+      (def as { type: Type | null }).type = applySubst(s1, valueType);
+    }
+  }
+
+  // Add binding to environment for body
+  const env2 = new Map(env1);
+  env2.set(expr.name, generalizedScheme);
+
+  // Infer body with new binding
+  const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
+
+  // Pop binding from scope after body inference
+  symbols.popScope(ctx.symbols, expr.name);
+
+  const subst = composeSubst(s1, s2);
+  const constraints = applySubstConstraints(subst, [...c1, ...c2]);
+
+  return [subst, bodyType, constraints];
 };
 
 // =============================================================================
