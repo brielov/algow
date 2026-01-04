@@ -63,7 +63,7 @@ describe("JavaScript Backend", () => {
       const fnType = funType(numType, numType);
       const binding = ir.irLambdaBinding("n", numType, lambdaBody, fnType);
       const body = ir.irAtomExpr(ir.irVar("f", fnType));
-      const expr = ir.irLetRec("f", binding, body);
+      const expr = ir.irLetRec([ir.irRecBinding("f", binding)], body);
       const result = generateJS(expr, []);
       // Recursive bindings use let + assignment
       expect(result.code).toContain("let f;");
@@ -74,7 +74,7 @@ describe("JavaScript Backend", () => {
       // A recursive binding that's not a lambda (e.g., a simple value)
       const binding = ir.irAtomBinding(ir.irLit(42, numType));
       const body = ir.irAtomExpr(ir.irVar("x", numType));
-      const expr = ir.irLetRec("x", binding, body);
+      const expr = ir.irLetRec([ir.irRecBinding("x", binding)], body);
       const result = generateJS(expr, []);
       // Non-lambda recursive bindings use const
       expect(result.code).toContain("const x = 42;");

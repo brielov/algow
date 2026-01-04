@@ -84,11 +84,9 @@ describe("Binder", () => {
       );
       const fn = ast.abs("x", body, undefined, { start: 10, end: 11 });
       const expr = ast.letRec(
-        "f",
-        fn,
+        [ast.recBinding("f", fn, { start: 8, end: 9 })],
         ast.app(ast.var_("f", { start: 21, end: 22 }), ast.num(1)),
         { start: 0, end: 25 },
-        { start: 8, end: 9 },
       );
       const result = bind(expr);
 

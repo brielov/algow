@@ -201,7 +201,14 @@ const extractBindings = (
 
   // Collect all let bindings
   while (current.kind === "IRLet" || current.kind === "IRLetRec") {
-    bindings.push({ name: current.name, binding: current.binding });
+    if (current.kind === "IRLet") {
+      bindings.push({ name: current.name, binding: current.binding });
+    } else {
+      // IRLetRec has multiple bindings
+      for (const b of current.bindings) {
+        bindings.push({ name: b.name, binding: b.binding });
+      }
+    }
     current = current.body;
   }
 
@@ -332,28 +339,41 @@ const lowerLet = (ctx: LowerContext, expr: ast.Let): ir.IRExpr => {
 };
 
 const lowerLetRec = (ctx: LowerContext, expr: ast.LetRec): ir.IRExpr => {
-  // For letrec, we need to add the binding to env BEFORE lowering the value
-  // so recursive references can find it
+  // For letrec, we need to add ALL bindings to env BEFORE lowering any values
+  // so mutual recursive references can find each other
 
-  // Add a placeholder type to the environment for the recursive reference
-  // We'll use a type variable that will be unified with the actual type
-  const placeholderType: Type = { kind: "TVar", name: `_rec_${expr.name}` };
-  extendEnv(ctx, expr.name, placeholderType);
+  // Step 1: Add placeholder types for ALL bindings
+  for (const binding of expr.bindings) {
+    const placeholderType: Type = { kind: "TVar", name: `_rec_${binding.name}` };
+    extendEnv(ctx, binding.name, placeholderType);
+  }
 
-  // Now lower the value (the recursive function can reference itself)
-  const valueIR = lowerExpr(ctx, expr.value);
-  const { bindings, finalBinding } = extractBindings(valueIR);
+  // Step 2: Lower all values (all names are in scope for mutual recursion)
+  const irBindings: ir.IRRecBinding[] = [];
+  const allPreBindings: Array<{ name: string; binding: ir.IRBinding }> = [];
 
-  // Update the environment with the actual type
-  extendEnv(ctx, expr.name, finalBinding.type);
+  for (const binding of expr.bindings) {
+    const valueIR = lowerExpr(ctx, binding.value);
+    const { bindings: preBindings, finalBinding } = extractBindings(valueIR);
 
-  // Lower the body
+    // Collect any pre-bindings
+    for (const b of preBindings) {
+      allPreBindings.push(b);
+    }
+
+    irBindings.push(ir.irRecBinding(binding.name, finalBinding));
+
+    // Update the environment with the actual type
+    extendEnv(ctx, binding.name, finalBinding.type);
+  }
+
+  // Step 3: Lower the body
   const bodyIR = lowerExpr(ctx, expr.body);
 
-  // Create the letrec
-  const letRecExpr = ir.irLetRec(expr.name, finalBinding, bodyIR);
+  // Step 4: Create the letrec
+  const letRecExpr = ir.irLetRec(irBindings, bodyIR);
 
-  return wrapWithBindings(bindings, letRecExpr);
+  return wrapWithBindings(allPreBindings, letRecExpr);
 };
 
 const lowerAbs = (ctx: LowerContext, expr: ast.Abs): ir.IRExpr => {

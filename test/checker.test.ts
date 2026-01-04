@@ -580,19 +580,23 @@ describe("Type Inference", () => {
         baseEnv,
         new Map(),
         ast.letRec(
-          "fact",
-          ast.abs(
-            "n",
-            ast.if_(
-              ast.binOp("==", ast.var_("n"), ast.num(0)),
-              ast.num(1),
-              ast.binOp(
-                "*",
-                ast.var_("n"),
-                ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+          [
+            ast.recBinding(
+              "fact",
+              ast.abs(
+                "n",
+                ast.if_(
+                  ast.binOp("==", ast.var_("n"), ast.num(0)),
+                  ast.num(1),
+                  ast.binOp(
+                    "*",
+                    ast.var_("n"),
+                    ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
           ast.app(ast.var_("fact"), ast.num(5)),
         ),
       );
@@ -609,17 +613,21 @@ describe("Type Inference", () => {
         env,
         listReg,
         ast.letRec(
-          "length",
-          ast.abs(
-            "xs",
-            ast.match(ast.var_("xs"), [
-              ast.case_(ast.pcon("Nil", []), ast.num(0)),
-              ast.case_(
-                ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
-                ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
+          [
+            ast.recBinding(
+              "length",
+              ast.abs(
+                "xs",
+                ast.match(ast.var_("xs"), [
+                  ast.case_(ast.pcon("Nil", []), ast.num(0)),
+                  ast.case_(
+                    ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
+                    ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
+                  ),
+                ]),
               ),
-            ]),
-          ),
+            ),
+          ],
           ast.var_("length"),
         ),
       );
@@ -632,8 +640,7 @@ describe("Type Inference", () => {
         baseEnv,
         new Map(),
         ast.letRec(
-          "forever",
-          ast.abs("x", ast.app(ast.var_("forever"), ast.var_("x"))),
+          [ast.recBinding("forever", ast.abs("x", ast.app(ast.var_("forever"), ast.var_("x"))))],
           ast.var_("forever"),
         ),
       );
@@ -1335,19 +1342,23 @@ describe("Type Inference", () => {
         baseEnv,
         new Map(),
         ast.letRec(
-          "fib",
-          ast.abs(
-            "n",
-            ast.if_(
-              ast.binOp("<=", ast.var_("n"), ast.num(1)),
-              ast.var_("n"),
-              ast.binOp(
-                "+",
-                ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.num(1))),
-                ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.num(2))),
+          [
+            ast.recBinding(
+              "fib",
+              ast.abs(
+                "n",
+                ast.if_(
+                  ast.binOp("<=", ast.var_("n"), ast.num(1)),
+                  ast.var_("n"),
+                  ast.binOp(
+                    "+",
+                    ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                    ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.num(2))),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
           ast.app(ast.var_("fib"), ast.num(10)),
         ),
       );
@@ -1748,7 +1759,7 @@ describe("Type Inference", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.letRec("f", ast.app(ast.var_("f"), ast.var_("f")), ast.var_("f")),
+        ast.letRec([ast.recBinding("f", ast.app(ast.var_("f"), ast.var_("f")))], ast.var_("f")),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(diagnostics[0]!.message).toContain("Infinite type");

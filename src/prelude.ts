@@ -40,49 +40,57 @@ export const declarations = [maybe, either, list] as const;
 
 /** map = fn f => fn xs => match xs with Nil => Nil | Cons x rest => Cons (f x) (map f rest) */
 export const map = ast.letRec(
-  "map",
-  ast.abs(
-    "f",
-    ast.abs(
-      "xs",
-      ast.match(ast.var_("xs"), [
-        ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
-        ast.case_(
-          ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
-          ast.app(
-            ast.app(ast.var_("Cons"), ast.app(ast.var_("f"), ast.var_("x"))),
-            ast.app(ast.app(ast.var_("map"), ast.var_("f")), ast.var_("rest")),
-          ),
+  [
+    ast.recBinding(
+      "map",
+      ast.abs(
+        "f",
+        ast.abs(
+          "xs",
+          ast.match(ast.var_("xs"), [
+            ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
+            ast.case_(
+              ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+              ast.app(
+                ast.app(ast.var_("Cons"), ast.app(ast.var_("f"), ast.var_("x"))),
+                ast.app(ast.app(ast.var_("map"), ast.var_("f")), ast.var_("rest")),
+              ),
+            ),
+          ]),
         ),
-      ]),
+      ),
     ),
-  ),
+  ],
   ast.var_("map"),
 );
 
 /** filter = fn p => fn xs => match xs with Nil => Nil | Cons x rest => if p x then Cons x (filter p rest) else filter p rest */
 export const filter = ast.letRec(
-  "filter",
-  ast.abs(
-    "p",
-    ast.abs(
-      "xs",
-      ast.match(ast.var_("xs"), [
-        ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
-        ast.case_(
-          ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
-          ast.if_(
-            ast.app(ast.var_("p"), ast.var_("x")),
-            ast.app(
-              ast.app(ast.var_("Cons"), ast.var_("x")),
-              ast.app(ast.app(ast.var_("filter"), ast.var_("p")), ast.var_("rest")),
+  [
+    ast.recBinding(
+      "filter",
+      ast.abs(
+        "p",
+        ast.abs(
+          "xs",
+          ast.match(ast.var_("xs"), [
+            ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
+            ast.case_(
+              ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+              ast.if_(
+                ast.app(ast.var_("p"), ast.var_("x")),
+                ast.app(
+                  ast.app(ast.var_("Cons"), ast.var_("x")),
+                  ast.app(ast.app(ast.var_("filter"), ast.var_("p")), ast.var_("rest")),
+                ),
+                ast.app(ast.app(ast.var_("filter"), ast.var_("p")), ast.var_("rest")),
+              ),
             ),
-            ast.app(ast.app(ast.var_("filter"), ast.var_("p")), ast.var_("rest")),
-          ),
+          ]),
         ),
-      ]),
+      ),
     ),
-  ),
+  ],
   ast.var_("filter"),
 );
 
@@ -121,73 +129,85 @@ export const isEmpty = ast.abs(
 
 /** length = fn xs => match xs with Nil => 0 | Cons _ rest => 1 + length rest */
 export const length = ast.letRec(
-  "length",
-  ast.abs(
-    "xs",
-    ast.match(ast.var_("xs"), [
-      ast.case_(ast.pcon("Nil", []), ast.num(0)),
-      ast.case_(
-        ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
-        ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
+  [
+    ast.recBinding(
+      "length",
+      ast.abs(
+        "xs",
+        ast.match(ast.var_("xs"), [
+          ast.case_(ast.pcon("Nil", []), ast.num(0)),
+          ast.case_(
+            ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
+            ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
+          ),
+        ]),
       ),
-    ]),
-  ),
+    ),
+  ],
   ast.var_("length"),
 );
 
 /** foldr = fn f => fn z => fn xs => match xs with Nil => z | Cons x rest => f x (foldr f z rest) */
 export const foldr = ast.letRec(
-  "foldr",
-  ast.abs(
-    "f",
-    ast.abs(
-      "z",
+  [
+    ast.recBinding(
+      "foldr",
       ast.abs(
-        "xs",
-        ast.match(ast.var_("xs"), [
-          ast.case_(ast.pcon("Nil", []), ast.var_("z")),
-          ast.case_(
-            ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
-            ast.app(
-              ast.app(ast.var_("f"), ast.var_("x")),
-              ast.app(
-                ast.app(ast.app(ast.var_("foldr"), ast.var_("f")), ast.var_("z")),
-                ast.var_("rest"),
+        "f",
+        ast.abs(
+          "z",
+          ast.abs(
+            "xs",
+            ast.match(ast.var_("xs"), [
+              ast.case_(ast.pcon("Nil", []), ast.var_("z")),
+              ast.case_(
+                ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+                ast.app(
+                  ast.app(ast.var_("f"), ast.var_("x")),
+                  ast.app(
+                    ast.app(ast.app(ast.var_("foldr"), ast.var_("f")), ast.var_("z")),
+                    ast.var_("rest"),
+                  ),
+                ),
               ),
-            ),
+            ]),
           ),
-        ]),
+        ),
       ),
     ),
-  ),
+  ],
   ast.var_("foldr"),
 );
 
 /** foldl = fn f => fn z => fn xs => match xs with Nil => z | Cons x rest => foldl f (f z x) rest */
 export const foldl = ast.letRec(
-  "foldl",
-  ast.abs(
-    "f",
-    ast.abs(
-      "z",
+  [
+    ast.recBinding(
+      "foldl",
       ast.abs(
-        "xs",
-        ast.match(ast.var_("xs"), [
-          ast.case_(ast.pcon("Nil", []), ast.var_("z")),
-          ast.case_(
-            ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
-            ast.app(
-              ast.app(
-                ast.app(ast.var_("foldl"), ast.var_("f")),
-                ast.app(ast.app(ast.var_("f"), ast.var_("z")), ast.var_("x")),
+        "f",
+        ast.abs(
+          "z",
+          ast.abs(
+            "xs",
+            ast.match(ast.var_("xs"), [
+              ast.case_(ast.pcon("Nil", []), ast.var_("z")),
+              ast.case_(
+                ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+                ast.app(
+                  ast.app(
+                    ast.app(ast.var_("foldl"), ast.var_("f")),
+                    ast.app(ast.app(ast.var_("f"), ast.var_("z")), ast.var_("x")),
+                  ),
+                  ast.var_("rest"),
+                ),
               ),
-              ast.var_("rest"),
-            ),
+            ]),
           ),
-        ]),
+        ),
       ),
     ),
-  ),
+  ],
   ast.var_("foldl"),
 );
 

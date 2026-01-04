@@ -95,11 +95,10 @@ describe("AST Helper Functions", () => {
     });
 
     it("creates letrec expression", () => {
-      const node = ast.letRec("f", ast.var_("f"), ast.var_("f"));
+      const node = ast.letRec([ast.recBinding("f", ast.var_("f"))], ast.var_("f"));
       expect(node).toEqual({
         kind: "LetRec",
-        name: "f",
-        value: { kind: "Var", name: "f" },
+        bindings: [{ name: "f", value: { kind: "Var", name: "f" } }],
         body: { kind: "Var", name: "f" },
       });
     });
@@ -450,23 +449,27 @@ describe("AST Helper Functions", () => {
 
     it("builds factorial using letrec", () => {
       const node = ast.letRec(
-        "fact",
-        ast.abs(
-          "n",
-          ast.if_(
-            ast.binOp("==", ast.var_("n"), ast.num(0)),
-            ast.num(1),
-            ast.binOp(
-              "*",
-              ast.var_("n"),
-              ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+        [
+          ast.recBinding(
+            "fact",
+            ast.abs(
+              "n",
+              ast.if_(
+                ast.binOp("==", ast.var_("n"), ast.num(0)),
+                ast.num(1),
+                ast.binOp(
+                  "*",
+                  ast.var_("n"),
+                  ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                ),
+              ),
             ),
           ),
-        ),
+        ],
         ast.app(ast.var_("fact"), ast.num(5)),
       );
       expect(node.kind).toBe("LetRec");
-      expect(node.name).toBe("fact");
+      expect(node.bindings[0]?.name).toBe("fact");
     });
   });
 

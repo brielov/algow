@@ -7,6 +7,7 @@ import {
   vnum,
   vstr,
   vbool,
+  vtuple,
   emptyEnv,
   evalPreludeFunction,
   RuntimeError,
@@ -190,22 +191,62 @@ describe("Interpreter", () => {
     it("supports recursive functions", () => {
       // factorial = fn n => if n == 0 then 1 else n * factorial (n - 1)
       const factorial = ast.letRec(
-        "fact",
-        ast.abs(
-          "n",
-          ast.if_(
-            ast.binOp("==", ast.var_("n"), ast.num(0)),
-            ast.num(1),
-            ast.binOp(
-              "*",
-              ast.var_("n"),
-              ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+        [
+          ast.recBinding(
+            "fact",
+            ast.abs(
+              "n",
+              ast.if_(
+                ast.binOp("==", ast.var_("n"), ast.num(0)),
+                ast.num(1),
+                ast.binOp(
+                  "*",
+                  ast.var_("n"),
+                  ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                ),
+              ),
             ),
           ),
-        ),
+        ],
         ast.app(ast.var_("fact"), ast.num(5)),
       );
       expect(evaluate(emptyEnv, factorial)).toEqual(vnum(120));
+    });
+
+    it("supports mutual recursion", () => {
+      // isEven n = if n == 0 then true else isOdd (n - 1)
+      // isOdd n = if n == 0 then false else isEven (n - 1)
+      const mutualRec = ast.letRec(
+        [
+          ast.recBinding(
+            "isEven",
+            ast.abs(
+              "n",
+              ast.if_(
+                ast.binOp("==", ast.var_("n"), ast.num(0)),
+                ast.bool(true),
+                ast.app(ast.var_("isOdd"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+              ),
+            ),
+          ),
+          ast.recBinding(
+            "isOdd",
+            ast.abs(
+              "n",
+              ast.if_(
+                ast.binOp("==", ast.var_("n"), ast.num(0)),
+                ast.bool(false),
+                ast.app(ast.var_("isEven"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+              ),
+            ),
+          ),
+        ],
+        ast.tuple([
+          ast.app(ast.var_("isEven"), ast.num(10)),
+          ast.app(ast.var_("isOdd"), ast.num(10)),
+        ]),
+      );
+      expect(evaluate(emptyEnv, mutualRec)).toEqual(vtuple([vbool(true), vbool(false)]));
     });
   });
 

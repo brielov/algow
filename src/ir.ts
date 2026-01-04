@@ -78,12 +78,19 @@ export type IRLet = {
 };
 
 /**
- * Recursive let binding for recursive functions.
+ * A single binding in a recursive let expression.
+ */
+export type IRRecBinding = {
+  readonly name: string;
+  readonly binding: IRBinding;
+};
+
+/**
+ * Recursive let binding for recursive/mutually recursive functions.
  */
 export type IRLetRec = {
   readonly kind: "IRLetRec";
-  readonly name: string;
-  readonly binding: IRBinding;
+  readonly bindings: readonly IRRecBinding[];
   readonly body: IRExpr;
   readonly type: Type;
 };
@@ -376,10 +383,14 @@ export const irLet = (name: string, binding: IRBinding, body: IRExpr): IRLet => 
   type: body.type,
 });
 
-export const irLetRec = (name: string, binding: IRBinding, body: IRExpr): IRLetRec => ({
-  kind: "IRLetRec",
+export const irRecBinding = (name: string, binding: IRBinding): IRRecBinding => ({
   name,
   binding,
+});
+
+export const irLetRec = (bindings: readonly IRRecBinding[], body: IRExpr): IRLetRec => ({
+  kind: "IRLetRec",
+  bindings,
   body,
   type: body.type,
 });

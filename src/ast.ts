@@ -132,20 +132,28 @@ export interface Let extends Node {
 }
 
 /**
- * Recursive let binding - allows the bound value to reference itself.
- *
- * Syntax: letrec name = value in body
- * Example: letrec fact = fn n => if n == 0 then 1 else n * fact (n - 1) in fact 5
- *
- * Unlike regular let, the variable `name` is in scope within `value`,
- * enabling recursive function definitions. The implementation adds a
- * placeholder type variable for the binding before inferring the value.
+ * A single binding in a recursive let expression.
  */
-export interface LetRec extends Node {
-  readonly kind: "LetRec";
+export interface RecBinding {
   readonly name: string;
   readonly nameSpan?: Span;
   readonly value: Expr;
+}
+
+/**
+ * Recursive let binding - allows bound values to reference themselves and each other.
+ *
+ * Single binding syntax: let rec f = ... in body
+ * Mutual recursion syntax: let rec f = ... and g = ... in body
+ *
+ * Example: let rec fact = fn n => if n == 0 then 1 else n * fact (n - 1) in fact 5
+ *
+ * Unlike regular let, all binding names are in scope within all values,
+ * enabling recursive and mutually recursive function definitions.
+ */
+export interface LetRec extends Node {
+  readonly kind: "LetRec";
+  readonly bindings: readonly RecBinding[];
   readonly body: Expr;
 }
 
@@ -646,17 +654,15 @@ export const let_ = (name: string, value: Expr, body: Expr, span?: Span, nameSpa
   span,
 });
 
-export const letRec = (
-  name: string,
-  value: Expr,
-  body: Expr,
-  span?: Span,
-  nameSpan?: Span,
-): LetRec => ({
-  kind: "LetRec",
+export const recBinding = (name: string, value: Expr, nameSpan?: Span): RecBinding => ({
   name,
   nameSpan,
   value,
+});
+
+export const letRec = (bindings: readonly RecBinding[], body: Expr, span?: Span): LetRec => ({
+  kind: "LetRec",
+  bindings,
   body,
   span,
 });

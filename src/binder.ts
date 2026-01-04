@@ -255,18 +255,24 @@ const bindLet = (ctx: BindContext, expr: ast.Let): void => {
 };
 
 const bindLetRec = (ctx: BindContext, expr: ast.LetRec): void => {
-  // For recursive bindings, add definition BEFORE binding value (use dummy span if missing)
-  const nameSpan = expr.nameSpan ?? expr.span ?? { start: 0, end: 0 };
-  addDefinition(ctx, expr.name, nameSpan, "variable");
+  // For recursive/mutually recursive bindings, add ALL definitions BEFORE binding any values
+  for (const binding of expr.bindings) {
+    const nameSpan = binding.nameSpan ?? expr.span ?? { start: 0, end: 0 };
+    addDefinition(ctx, binding.name, nameSpan, "variable");
+  }
 
-  // Bind value (name is in scope for recursion)
-  bindExpr(ctx, expr.value);
+  // Bind all values (all names are in scope for mutual recursion)
+  for (const binding of expr.bindings) {
+    bindExpr(ctx, binding.value);
+  }
 
   // Bind body
   bindExpr(ctx, expr.body);
 
-  // Pop scope
-  popScope(ctx, expr.name);
+  // Pop all scopes (in reverse order)
+  for (let i = expr.bindings.length - 1; i >= 0; i--) {
+    popScope(ctx, expr.bindings[i]!.name);
+  }
 };
 
 const bindAbs = (ctx: BindContext, expr: ast.Abs): void => {

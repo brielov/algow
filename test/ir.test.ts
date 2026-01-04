@@ -66,11 +66,11 @@ describe("IR Smart Constructors", () => {
       const body = ir.irAtomExpr(ir.irVar("f", fnType));
       const lambdaBody = ir.irAtomExpr(ir.irVar("n", numType));
       const binding = ir.irLambdaBinding("n", numType, lambdaBody, fnType);
-      const letRec = ir.irLetRec("f", binding, body);
+      const letRec = ir.irLetRec([ir.irRecBinding("f", binding)], body);
 
       expect(letRec.kind).toBe("IRLetRec");
-      expect(letRec.name).toBe("f");
-      expect(letRec.binding).toBe(binding);
+      expect(letRec.bindings[0]?.name).toBe("f");
+      expect(letRec.bindings[0]?.binding).toBe(binding);
       expect(letRec.body).toBe(body);
     });
   });

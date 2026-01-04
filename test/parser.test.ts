@@ -873,7 +873,28 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       const expr = result.program.expr as ast.LetRec;
       expect(expr.kind).toBe("LetRec");
-      expect(expr.name).toBe("sum");
+      expect(expr.bindings[0]?.name).toBe("sum");
+    });
+
+    it("parses mutual recursion with 'and'", () => {
+      const result = parse("let rec f x = g x and g y = f y in f 1");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr as ast.LetRec;
+      expect(expr.kind).toBe("LetRec");
+      expect(expr.bindings).toHaveLength(2);
+      expect(expr.bindings[0]?.name).toBe("f");
+      expect(expr.bindings[1]?.name).toBe("g");
+    });
+
+    it("parses three-way mutual recursion", () => {
+      const result = parse("let rec a x = b x and b y = c y and c z = a z in a 1");
+      expect(result.diagnostics).toHaveLength(0);
+      const expr = result.program.expr as ast.LetRec;
+      expect(expr.kind).toBe("LetRec");
+      expect(expr.bindings).toHaveLength(3);
+      expect(expr.bindings[0]?.name).toBe("a");
+      expect(expr.bindings[1]?.name).toBe("b");
+      expect(expr.bindings[2]?.name).toBe("c");
     });
 
     it("parses let with tuple destructuring", () => {

@@ -155,11 +155,22 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
     }
 
     case "LetRec": {
-      // Textbook letrec: create ref cell, evaluate with ref in scope, fill ref
-      const ref = vref();
-      const newEnv = extendEnv(env, expr.name, ref);
-      const value = evaluate(newEnv, expr.value);
-      ref.value = value;
+      // Textbook letrec: create ref cells for ALL bindings first
+      const refs = new Map<string, VRef>();
+      let newEnv = env;
+
+      for (const binding of expr.bindings) {
+        const ref = vref();
+        refs.set(binding.name, ref);
+        newEnv = extendEnv(newEnv, binding.name, ref);
+      }
+
+      // Evaluate all values with all refs in scope
+      for (const binding of expr.bindings) {
+        const value = evaluate(newEnv, binding.value);
+        refs.get(binding.name)!.value = value;
+      }
+
       return evaluate(newEnv, expr.body);
     }
 

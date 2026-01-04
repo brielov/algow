@@ -150,6 +150,10 @@ data List a = Nil | Cons a (List a)
 let add x y = x + y
 let rec fact n = if n == 0 then 1 else n * fact (n - 1)
 
+-- Mutual recursion (use 'and' to chain recursive bindings)
+let rec isEven n = if n == 0 then true else isOdd (n - 1)
+and isOdd n = if n == 0 then false else isEven (n - 1)
+
 -- Pattern matching
 match xs with
 | Nil => 0

@@ -122,8 +122,7 @@ describe("lowerToIR", () => {
     it("lowers letrec with lambda", () => {
       // let rec f = \x => f x in f
       const expr = ast.letRec(
-        "f",
-        ast.abs("x", ast.app(ast.var_("f"), ast.var_("x"))),
+        [ast.recBinding("f", ast.abs("x", ast.app(ast.var_("f"), ast.var_("x"))))],
         ast.var_("f"),
       );
       const env = makeTypeEnv();
@@ -170,7 +169,7 @@ describe("lowerToIR", () => {
           let foundInnerLambda = false;
           let body = ir.binding.body;
           while (body.kind === "IRLet" || body.kind === "IRLetRec") {
-            if (body.binding.kind === "IRLambdaBinding") {
+            if (body.kind === "IRLet" && body.binding.kind === "IRLambdaBinding") {
               foundInnerLambda = true;
             }
             body = body.body;
@@ -445,7 +444,7 @@ describe("lowerToIR", () => {
       let foundMatch = false;
       let current = ir;
       while (current.kind === "IRLet" || current.kind === "IRLetRec") {
-        if (current.binding.kind === "IRMatchBinding") {
+        if (current.kind === "IRLet" && current.binding.kind === "IRMatchBinding") {
           foundMatch = true;
           expect(current.binding.cases[0]!.pattern.kind).toBe("IRPTuple");
           break;
@@ -467,7 +466,7 @@ describe("lowerToIR", () => {
       let foundMatch = false;
       let current = ir;
       while (current.kind === "IRLet" || current.kind === "IRLetRec") {
-        if (current.binding.kind === "IRMatchBinding") {
+        if (current.kind === "IRLet" && current.binding.kind === "IRMatchBinding") {
           foundMatch = true;
           expect(current.binding.cases[0]!.pattern.kind).toBe("IRPRecord");
           break;
@@ -495,7 +494,7 @@ describe("lowerToIR", () => {
       // Walk to find the binop and verify its operands are atoms
       let current = ir;
       while (current.kind === "IRLet" || current.kind === "IRLetRec") {
-        if (current.binding.kind === "IRBinOpBinding") {
+        if (current.kind === "IRLet" && current.binding.kind === "IRBinOpBinding") {
           expect(current.binding.left.kind).toMatch(/^IR(Lit|Var)$/);
           expect(current.binding.right.kind).toMatch(/^IR(Lit|Var)$/);
           break;
@@ -514,7 +513,7 @@ describe("lowerToIR", () => {
       // Walk to find the app and verify both operands are atoms
       let current = ir;
       while (current.kind === "IRLet" || current.kind === "IRLetRec") {
-        if (current.binding.kind === "IRAppBinding") {
+        if (current.kind === "IRLet" && current.binding.kind === "IRAppBinding") {
           expect(current.binding.func.kind).toMatch(/^IR(Lit|Var)$/);
           expect(current.binding.arg.kind).toMatch(/^IR(Lit|Var)$/);
           break;

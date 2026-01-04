@@ -219,21 +219,29 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
 
   const body = parseExpr(state);
 
-  if (at(state, TokenKind.In)) {
-    advance(state); // 'in'
-
+  if (at(state, TokenKind.In) || (recursive && at(state, TokenKind.AndKw))) {
     let value = body;
     for (let i = params.length - 1; i >= 0; i--) {
       const p = params[i]!;
       value = ast.abs(p.name, value, undefined, p.span);
     }
 
-    const continuation = parseExpr(state);
-    const expr = recursive
-      ? ast.letRec(name, value, continuation, undefined, nameSpan)
-      : ast.let_(name, value, continuation, undefined, nameSpan);
+    if (recursive) {
+      // Parse additional bindings with 'and'
+      const bindings: ast.RecBinding[] = [ast.recBinding(name, value, nameSpan)];
+      while (at(state, TokenKind.AndKw)) {
+        advance(state); // 'and'
+        bindings.push(parseRecBinding(state));
+      }
 
-    return { kind: "expr", expr };
+      expect(state, TokenKind.In, "expected 'in' after let rec bindings");
+      const continuation = parseExpr(state);
+      return { kind: "expr", expr: ast.letRec(bindings, continuation) };
+    }
+
+    advance(state); // 'in'
+    const continuation = parseExpr(state);
+    return { kind: "expr", expr: ast.let_(name, value, continuation, undefined, nameSpan) };
   }
 
   return { kind: "binding", binding: { name, nameSpan, params, body, recursive } };
@@ -757,6 +765,36 @@ const parseMatch = (state: ParserState): ast.Expr => {
   return ast.match(scrutinee, cases, span(start, end));
 };
 
+/**
+ * Parse a single recursive binding: name params = expr
+ * Returns { name, nameSpan, value } where value has params wrapped as lambdas
+ */
+const parseRecBinding = (state: ParserState): ast.RecBinding => {
+  const nameToken = expect(state, TokenKind.Lower, "expected binding name");
+  if (!nameToken) {
+    return ast.recBinding("_error_", ast.num(0));
+  }
+  const name = text(state, nameToken);
+  const nameSpan = tokenSpan(nameToken);
+
+  const params: { name: string; span: ast.Span }[] = [];
+  while (at(state, TokenKind.Lower)) {
+    const paramToken = advance(state);
+    params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+  }
+
+  expect(state, TokenKind.Eq, "expected '=' after name");
+
+  let value = parseExpr(state);
+
+  for (let i = params.length - 1; i >= 0; i--) {
+    const p = params[i]!;
+    value = ast.abs(p.name, value, undefined, p.span);
+  }
+
+  return ast.recBinding(name, value, nameSpan);
+};
+
 const parseLetExpr = (state: ParserState): ast.Expr => {
   const start = state.current[1];
   advance(state); // let
@@ -773,6 +811,25 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
     return parseLetDestructuring(state, start);
   }
 
+  if (recursive) {
+    // Parse first binding
+    const bindings: ast.RecBinding[] = [parseRecBinding(state)];
+
+    // Parse additional bindings with 'and'
+    while (at(state, TokenKind.AndKw)) {
+      advance(state); // 'and'
+      bindings.push(parseRecBinding(state));
+    }
+
+    expect(state, TokenKind.In, "expected 'in' after let rec bindings");
+
+    const body = parseExpr(state);
+    const end = body.span?.end ?? state.current[1];
+
+    return ast.letRec(bindings, body, span(start, end));
+  }
+
+  // Non-recursive let
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
     return ast.num(0);
@@ -800,9 +857,7 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   const body = parseExpr(state);
   const end = body.span?.end ?? state.current[1];
 
-  return recursive
-    ? ast.letRec(name, value, body, span(start, end), nameSpan)
-    : ast.let_(name, value, body, span(start, end), nameSpan);
+  return ast.let_(name, value, body, span(start, end), nameSpan);
 };
 
 /**
@@ -1051,7 +1106,7 @@ export const programToExpr = (program: Program): ast.Expr | null => {
     }
 
     if (binding.recursive) {
-      expr = ast.letRec(binding.name, value, expr, undefined, binding.nameSpan);
+      expr = ast.letRec([ast.recBinding(binding.name, value, binding.nameSpan)], expr);
     } else {
       expr = ast.let_(binding.name, value, expr, undefined, binding.nameSpan);
     }

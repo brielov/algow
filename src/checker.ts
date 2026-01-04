@@ -1489,17 +1489,15 @@ const inferLet = (
 };
 
 /**
- * Infer the type of a recursive let binding (letrec name = value in body).
+ * Infer the type of a recursive let binding (let rec f = ... and g = ... in body).
  *
- * For recursion, the bound name must be in scope while inferring the value.
- * We do this by:
- * 1. Add a fresh type variable for the binding to type env
- * 2. Infer the value's type
- * 3. Generalize and add to environment for body
- * 4. Infer body
+ * Supports mutual recursion: all binding names are in scope within all values.
  *
- * This is a simplified approach. A more sophisticated implementation would
- * handle mutual recursion and better polymorphism.
+ * Algorithm:
+ * 1. Create fresh type variables as placeholders for ALL bindings
+ * 2. Add ALL placeholders to the environment (monomorphic - no generalization yet)
+ * 3. Infer each value's type with all placeholders in scope
+ * 4. Generalize ALL results together and add to environment for body
  */
 const inferLetRec = (
   ctx: CheckContext,
@@ -1507,39 +1505,61 @@ const inferLetRec = (
   registry: ConstructorRegistry,
   expr: ast.LetRec,
 ): InferResult => {
-  // Create a fresh type variable for the recursive binding
-  const placeholderType = freshTypeVar();
+  // Step 1: Create placeholder type variables for ALL bindings
+  const placeholders = new Map<string, Type>();
+  const envWithPlaceholders = new Map(env);
 
-  // Add placeholder to type environment
-  const envWithPlaceholder = new Map(env);
-  envWithPlaceholder.set(expr.name, scheme([], placeholderType));
-
-  // Infer the value's type (recursive references will resolve via type env)
-  const [s1, valueType, c1] = inferExpr(ctx, envWithPlaceholder, registry, expr.value);
-
-  // Apply substitution to environment before generalizing
-  const env1 = applySubstEnv(s1, env);
-
-  // Generalize: quantify over variables not free in the environment
-  const generalizedScheme = generalize(env1, applySubst(s1, valueType));
-
-  // Record the binding's type
-  const nameSpan = expr.nameSpan ?? expr.span;
-  if (nameSpan) {
-    recordType(ctx, nameSpan, applySubst(s1, valueType));
+  for (const binding of expr.bindings) {
+    const placeholder = freshTypeVar();
+    placeholders.set(binding.name, placeholder);
+    envWithPlaceholders.set(binding.name, scheme([], placeholder));
   }
 
-  // Add binding to environment for body
-  const env2 = new Map(env1);
-  env2.set(expr.name, generalizedScheme);
+  // Step 2: Infer types for all values with placeholders in scope
+  let subst: Subst = new Map();
+  const valueTypes = new Map<string, Type>();
+  let constraints: Constraint[] = [];
 
-  // Infer body with new binding
+  for (const binding of expr.bindings) {
+    const [s, valueType, c] = inferExpr(
+      ctx,
+      applySubstEnv(subst, envWithPlaceholders),
+      registry,
+      binding.value,
+    );
+    subst = composeSubst(subst, s);
+    valueTypes.set(binding.name, valueType);
+    constraints = [...applySubstConstraints(subst, constraints), ...c];
+
+    // Unify with placeholder to propagate constraints
+    const placeholder = applySubst(subst, placeholders.get(binding.name)!);
+    const s2 = unify(ctx, placeholder, valueType, binding.value.span);
+    subst = composeSubst(subst, s2);
+  }
+
+  // Step 3: Generalize all bindings together
+  const env1 = applySubstEnv(subst, env);
+  const env2 = new Map(env1);
+
+  for (const binding of expr.bindings) {
+    const valueType = applySubst(subst, valueTypes.get(binding.name)!);
+    const generalizedScheme = generalize(env1, valueType);
+    env2.set(binding.name, generalizedScheme);
+
+    // Record type for LSP
+    const nameSpan = binding.nameSpan ?? expr.span;
+    if (nameSpan) {
+      recordType(ctx, nameSpan, valueType);
+    }
+  }
+
+  // Step 4: Infer body with generalized bindings
   const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
 
-  const subst = composeSubst(s1, s2);
-  const constraints = applySubstConstraints(subst, [...c1, ...c2]);
+  const finalSubst = composeSubst(subst, s2);
+  const finalConstraints = applySubstConstraints(finalSubst, [...constraints, ...c2]);
 
-  return [subst, bodyType, constraints];
+  return [finalSubst, bodyType, finalConstraints];
 };
 
 // =============================================================================

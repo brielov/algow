@@ -40,6 +40,7 @@ export enum TokenKind {
   True,
   False,
   As,
+  AndKw, // and (for mutual recursion)
 
   // Operators
   Plus, // +
@@ -155,6 +156,7 @@ const keywords: ReadonlyMap<string, TokenKind> = new Map([
   ["true", TokenKind.True],
   ["false", TokenKind.False],
   ["as", TokenKind.As],
+  ["and", TokenKind.AndKw],
 ]);
 
 // =============================================================================

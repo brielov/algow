@@ -68,16 +68,29 @@ const genExpr = (ctx: CodeGenContext, expr: ir.IRExpr): string => {
     }
 
     case "IRLetRec": {
-      const jsName = toJsId(expr.name);
-      // For recursive bindings, we need to declare first then assign
-      // This works for lambdas which capture the variable
-      if (expr.binding.kind === "IRLambdaBinding") {
-        emit(ctx, `let ${jsName};`);
-        const binding = genBinding(ctx, expr.binding);
-        emit(ctx, `${jsName} = ${binding};`);
+      // For mutually recursive bindings:
+      // 1. Declare ALL variables with let first
+      // 2. Assign ALL values (closures can reference all declared vars)
+
+      // Check if any binding is a lambda (needs two-phase init)
+      const hasLambda = expr.bindings.some((b) => b.binding.kind === "IRLambdaBinding");
+
+      if (hasLambda) {
+        // Declare all variables first
+        for (const { name } of expr.bindings) {
+          emit(ctx, `let ${toJsId(name)};`);
+        }
+        // Then assign all values
+        for (const { name, binding } of expr.bindings) {
+          const bindingCode = genBinding(ctx, binding);
+          emit(ctx, `${toJsId(name)} = ${bindingCode};`);
+        }
       } else {
-        const binding = genBinding(ctx, expr.binding);
-        emit(ctx, `const ${jsName} = ${binding};`);
+        // No lambdas, can use const directly
+        for (const { name, binding } of expr.bindings) {
+          const bindingCode = genBinding(ctx, binding);
+          emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
+        }
       }
       return genExpr(ctx, expr.body);
     }
