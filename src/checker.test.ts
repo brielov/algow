@@ -1,6 +1,36 @@
 import { describe, expect, it } from "bun:test";
 import * as ast from "./ast";
-import { baseEnv, infer, mergeEnvs, mergeRegistries, processDataDecl, typeToString } from "./infer";
+import { bindWithConstructors } from "./binder";
+import {
+  baseEnv,
+  check,
+  type CheckOutput,
+  mergeEnvs,
+  mergeRegistries,
+  processDataDecl,
+  type TypeEnv,
+  type ConstructorRegistry,
+  typeToString,
+} from "./checker";
+
+// Helper to run the full pipeline (bind + check)
+// Extracts constructor names from the registry (which maps type name -> constructor names)
+const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr): CheckOutput => {
+  // Extract all constructor names from registry
+  const constructors: string[] = [];
+  for (const [, conNames] of registry) {
+    for (const name of conNames) {
+      constructors.push(name);
+    }
+  }
+  const bindResult = bindWithConstructors(constructors, expr);
+  const checkResult = check(env, registry, expr, bindResult.symbols);
+  // Combine diagnostics from both phases
+  return {
+    ...checkResult,
+    diagnostics: [...bindResult.diagnostics, ...checkResult.diagnostics],
+  };
+};
 
 // Helper to create common ADT environments
 const createMaybeEnv = () => {
@@ -74,9 +104,9 @@ describe("Type Inference", () => {
     });
 
     it("infers type from environment", () => {
-      const [maybeEnv] = createMaybeEnv();
+      const [maybeEnv, maybeReg] = createMaybeEnv();
       const env = mergeEnvs(baseEnv, maybeEnv);
-      const { type, diagnostics } = infer(env, new Map(), ast.var_("Nothing"));
+      const { type, diagnostics } = infer(env, maybeReg, ast.var_("Nothing"));
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toMatch(/Maybe t\d+/);
     });

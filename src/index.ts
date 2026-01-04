@@ -1,13 +1,14 @@
-import { createConstructorEnv, evaluate, type Env } from "./eval";
+import { bindWithConstructors } from "./binder";
 import {
   type ConstructorRegistry,
-  infer,
+  check,
   mergeEnvs,
   mergeRegistries,
   processDataDecl,
   typeToString,
   type TypeEnv,
-} from "./infer";
+} from "./checker";
+import { createConstructorEnv, evaluate, type Env } from "./eval";
 import { type Diagnostic, parse, programToExpr } from "./parser";
 import { declarations as preludeDeclarations } from "./prelude";
 
@@ -114,9 +115,11 @@ const run = (source: string, filename: string): void => {
     }
   }
 
-  // Type check
-  const inferResult = infer(typeEnv, registry, expr);
-  diagnostics.push(...inferResult.diagnostics);
+  // Bind and type check
+  const bindResult = bindWithConstructors(allConstructors, expr);
+  diagnostics.push(...bindResult.diagnostics);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
+  diagnostics.push(...checkResult.diagnostics);
 
   if (diagnostics.length > 0) {
     printDiagnostics(diagnostics, source, filename);
@@ -152,20 +155,32 @@ const typeCheck = (source: string, filename: string): void => {
     registry = mergeRegistries(registry, newReg);
   }
 
+  const allConstructors: string[] = [];
+  for (const decl of preludeDeclarations) {
+    for (const con of decl.constructors) {
+      allConstructors.push(con.name);
+    }
+  }
   for (const decl of parseResult.program.declarations) {
     const [newEnv, newReg] = processDataDecl(decl);
     typeEnv = mergeEnvs(typeEnv, newEnv);
     registry = mergeRegistries(registry, newReg);
+    for (const con of decl.constructors) {
+      allConstructors.push(con.name);
+    }
   }
 
-  const inferResult = infer(typeEnv, registry, expr);
+  // Bind and type check
+  const bindResult = bindWithConstructors(allConstructors, expr);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
 
-  if (inferResult.diagnostics.length > 0) {
-    printDiagnostics(inferResult.diagnostics, source, filename);
+  const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
+  if (allDiagnostics.length > 0) {
+    printDiagnostics(allDiagnostics, source, filename);
     process.exit(1);
   }
 
-  console.log(typeToString(inferResult.type));
+  console.log(typeToString(checkResult.type));
 };
 
 const main = async (): Promise<void> => {

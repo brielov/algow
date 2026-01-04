@@ -27,21 +27,28 @@ type InitializeResult = {
   };
 };
 
-import type { Diagnostic } from "../diagnostics";
-import { createConstructorEnv, evaluate, RuntimeError, valueToString } from "../eval";
 import {
+  bindWithConstructors,
+  findAllOccurrences,
+  findDefinitionAt,
+  findReferenceAt,
+  goToDefinition,
+  type SymbolTable,
+} from "../binder";
+import {
+  check,
   type ConstructorRegistry,
-  infer,
-  type InferOutput,
   mergeEnvs,
   mergeRegistries,
   processDataDecl,
   type TypeEnv,
+  type TypeMap,
   typeToString,
-} from "../infer";
+} from "../checker";
+import type { Diagnostic } from "../diagnostics";
+import { createConstructorEnv, evaluate, RuntimeError, valueToString } from "../eval";
 import { parse, programToExpr, type Program } from "../parser";
 import { declarations as preludeDeclarations } from "../prelude";
-import { findAllOccurrences, findDefinitionAt, findReferenceAt, goToDefinition } from "../symbols";
 
 import { positionToOffset, spanToRange } from "./positions";
 import {
@@ -64,7 +71,8 @@ type DocumentState = {
   readonly version: number;
   readonly text: string;
   readonly diagnostics: readonly LspDiagnostic[];
-  readonly inferResult: InferOutput | null;
+  readonly symbols: SymbolTable | null;
+  readonly types: TypeMap | null;
   readonly program: Program | null;
   readonly registry: ConstructorRegistry;
 };
@@ -249,33 +257,39 @@ export const createServer = (transport: Transport): void => {
 
   const handleHover = (params: TextDocumentPositionParams): Hover | null => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult) return null;
+    if (!doc || !doc.symbols) return null;
 
     const offset = positionToOffset(doc.text, params.position);
-    const { symbols } = doc.inferResult;
+    const { symbols, types } = doc;
 
     // Check if hovering over a definition
     const def = findDefinitionAt(symbols, offset);
-    if (def && def.type) {
-      return {
-        contents: {
-          kind: "markdown" as MarkupKind,
-          value: `\`\`\`algow\n${def.name}: ${typeToString(def.type)}\n\`\`\``,
-        },
-        range: spanToRange(doc.text, def.span),
-      };
+    if (def) {
+      const type = types?.get(def);
+      if (type) {
+        return {
+          contents: {
+            kind: "markdown" as MarkupKind,
+            value: `\`\`\`algow\n${def.name}: ${typeToString(type)}\n\`\`\``,
+          },
+          range: spanToRange(doc.text, def.span),
+        };
+      }
     }
 
     // Check if hovering over a reference
     const ref = findReferenceAt(symbols, offset);
-    if (ref && ref.definition && ref.definition.type) {
-      return {
-        contents: {
-          kind: "markdown" as MarkupKind,
-          value: `\`\`\`algow\n${ref.name}: ${typeToString(ref.definition.type)}\n\`\`\``,
-        },
-        range: spanToRange(doc.text, ref.span),
-      };
+    if (ref && ref.definition) {
+      const type = types?.get(ref.definition);
+      if (type) {
+        return {
+          contents: {
+            kind: "markdown" as MarkupKind,
+            value: `\`\`\`algow\n${ref.name}: ${typeToString(type)}\n\`\`\``,
+          },
+          range: spanToRange(doc.text, ref.span),
+        };
+      }
     }
 
     return null;
@@ -283,10 +297,10 @@ export const createServer = (transport: Transport): void => {
 
   const handleDefinition = (params: TextDocumentPositionParams): Location | null => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult) return null;
+    if (!doc || !doc.symbols) return null;
 
     const offset = positionToOffset(doc.text, params.position);
-    const def = goToDefinition(doc.inferResult.symbols, offset);
+    const def = goToDefinition(doc.symbols, offset);
 
     if (!def) return null;
 
@@ -298,22 +312,22 @@ export const createServer = (transport: Transport): void => {
 
   const handlePrepareRename = (params: TextDocumentPositionParams): Range | null => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult) return null;
+    if (!doc || !doc.symbols) return null;
 
     const offset = positionToOffset(doc.text, params.position);
-    const { definition } = findAllOccurrences(doc.inferResult.symbols, offset);
+    const { definition } = findAllOccurrences(doc.symbols, offset);
 
     if (!definition) return null;
 
     // Return the range of the symbol at the cursor position
     // First check if we're on a reference
-    const ref = findReferenceAt(doc.inferResult.symbols, offset);
+    const ref = findReferenceAt(doc.symbols, offset);
     if (ref) {
       return spanToRange(doc.text, ref.span);
     }
 
     // Otherwise check if we're on a definition
-    const def = findDefinitionAt(doc.inferResult.symbols, offset);
+    const def = findDefinitionAt(doc.symbols, offset);
     if (def) {
       return spanToRange(doc.text, def.span);
     }
@@ -323,10 +337,10 @@ export const createServer = (transport: Transport): void => {
 
   const handleRename = (params: RenameParams): WorkspaceEdit | null => {
     const doc = documents.get(params.textDocument.uri);
-    if (!doc || !doc.inferResult) return null;
+    if (!doc || !doc.symbols) return null;
 
     const offset = positionToOffset(doc.text, params.position);
-    const { definition, references } = findAllOccurrences(doc.inferResult.symbols, offset);
+    const { definition, references } = findAllOccurrences(doc.symbols, offset);
 
     if (!definition) return null;
 
@@ -405,30 +419,48 @@ export const createServer = (transport: Transport): void => {
       lspDiagnostics.push(convertDiagnostic(text, diag));
     }
 
-    // Type check if we have an expression
-    const expr = programToExpr(parseResult.program);
-    let inferResult: InferOutput | null = null;
-
     // Build type environment from prelude + user declarations
     let typeEnv: TypeEnv = new Map();
     let registry: ConstructorRegistry = new Map();
+    const constructorNames: string[] = [];
 
     for (const decl of preludeDeclarations) {
       const [newEnv, newReg] = processDataDecl(decl);
       typeEnv = mergeEnvs(typeEnv, newEnv);
       registry = mergeRegistries(registry, newReg);
+      for (const con of decl.constructors) {
+        constructorNames.push(con.name);
+      }
     }
 
     for (const decl of parseResult.program.declarations) {
       const [newEnv, newReg] = processDataDecl(decl);
       typeEnv = mergeEnvs(typeEnv, newEnv);
       registry = mergeRegistries(registry, newReg);
+      for (const con of decl.constructors) {
+        constructorNames.push(con.name);
+      }
     }
 
-    if (expr) {
-      inferResult = infer(typeEnv, registry, expr);
+    // Bind and type check if we have an expression
+    const expr = programToExpr(parseResult.program);
+    let symbols: SymbolTable | null = null;
+    let types: TypeMap | null = null;
 
-      for (const diag of inferResult.diagnostics) {
+    if (expr) {
+      // Binding phase: resolve names and build symbol table
+      const bindResult = bindWithConstructors(constructorNames, expr);
+      symbols = bindResult.symbols;
+
+      for (const diag of bindResult.diagnostics) {
+        lspDiagnostics.push(convertDiagnostic(text, diag));
+      }
+
+      // Type checking phase: infer types
+      const checkResult = check(typeEnv, registry, expr, symbols);
+      types = checkResult.types;
+
+      for (const diag of checkResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text, diag));
       }
     }
@@ -438,7 +470,8 @@ export const createServer = (transport: Transport): void => {
       version,
       text,
       diagnostics: lspDiagnostics,
-      inferResult,
+      symbols,
+      types,
       program: parseResult.program,
       registry,
     };

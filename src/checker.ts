@@ -47,38 +47,60 @@
  */
 
 import * as ast from "./ast";
+import type { Definition, SymbolTable } from "./binder";
 import { type Diagnostic, error as diagError } from "./diagnostics";
-import * as symbols from "./symbols";
 
 // =============================================================================
 // INFERENCE CONTEXT
 // =============================================================================
 
 /**
- * Mutable context for type inference.
- * Collects diagnostics and symbol table instead of throwing errors.
+ * Map from definitions to their inferred types.
+ * Produced by the checker, used by LSP for hover information.
  */
-type InferContext = {
+export type TypeMap = ReadonlyMap<Definition, Type>;
+
+/**
+ * Mutable context for type inference.
+ * Collects diagnostics and type assignments.
+ */
+type CheckContext = {
   readonly diagnostics: Diagnostic[];
-  readonly symbols: symbols.SymbolTableBuilder;
+  readonly types: Map<Definition, Type>;
+  readonly symbols: SymbolTable;
 };
 
 /**
- * Create a fresh inference context.
+ * Create a fresh check context.
  */
-const createContext = (): InferContext => ({
+const createContext = (symbols: SymbolTable): CheckContext => ({
   diagnostics: [],
-  symbols: symbols.createSymbolTableBuilder(),
+  types: new Map(),
+  symbols,
 });
 
 /**
  * Add an error diagnostic to the context.
  * Uses span position if available, otherwise 0,0.
  */
-const addError = (ctx: InferContext, message: string, span?: ast.Span): void => {
+const addError = (ctx: CheckContext, message: string, span?: ast.Span): void => {
   const start = span?.start ?? 0;
   const end = span?.end ?? start;
   ctx.diagnostics.push(diagError(start, end, message));
+};
+
+/**
+ * Record the type for a definition.
+ * Looks up the definition by span in the symbol table.
+ */
+const recordType = (ctx: CheckContext, span: ast.Span, type: Type): void => {
+  // Find the definition at this span
+  for (const def of ctx.symbols.definitions) {
+    if (def.span.start === span.start && def.span.end === span.end) {
+      ctx.types.set(def, type);
+      return;
+    }
+  }
 };
 
 // =============================================================================
@@ -525,7 +547,7 @@ const composeSubst = (s1: Subst, s2: Subst): Subst => {
  * @param t2 Second type
  * @returns Substitution that makes t1 and t2 equal (empty on error)
  */
-const unify = (ctx: InferContext, t1: Type, t2: Type, span?: ast.Span): Subst => {
+const unify = (ctx: CheckContext, t1: Type, t2: Type, span?: ast.Span): Subst => {
   // Same type variable - already equal, no substitution needed
   if (t1.kind === "TVar" && t2.kind === "TVar" && t1.name === t2.name) {
     return new Map();
@@ -604,7 +626,7 @@ const unify = (ctx: InferContext, t1: Type, t2: Type, span?: ast.Span): Subst =>
  * @param type The type to bind it to
  * @returns Substitution mapping name to type (empty on error)
  */
-const bindVar = (ctx: InferContext, name: string, type: Type): Subst => {
+const bindVar = (ctx: CheckContext, name: string, type: Type): Subst => {
   // Binding to itself is a no-op
   if (type.kind === "TVar" && type.name === name) {
     return new Map();
@@ -660,7 +682,7 @@ const freshTypeVar = (): Type => {
  * 3. Different fields → one must be open to absorb the difference
  * 4. Both have unique fields → both must be open, create fresh row for tail
  */
-const unifyRecords = (ctx: InferContext, t1: TRecord, t2: TRecord): Subst => {
+const unifyRecords = (ctx: CheckContext, t1: TRecord, t2: TRecord): Subst => {
   const fields1 = new Set(t1.fields.keys());
   const fields2 = new Set(t2.fields.keys());
 
@@ -952,7 +974,7 @@ export const typeToString = (type: Type): string => {
  * @param ctx Inference context for collecting diagnostics
  * @param constraints The constraints to check
  */
-const solveConstraints = (ctx: InferContext, constraints: readonly Constraint[]): void => {
+const solveConstraints = (ctx: CheckContext, constraints: readonly Constraint[]): void => {
   for (const c of constraints) {
     // Type variables - defer until instantiation
     if (c.type.kind === "TVar") {
@@ -984,20 +1006,20 @@ const solveConstraints = (ctx: InferContext, constraints: readonly Constraint[])
 type InferResult = [Subst, Type, readonly Constraint[]];
 
 /**
- * The full result of type inference including diagnostics.
+ * The full result of type checking including diagnostics.
  */
-export type InferOutput = {
+export type CheckOutput = {
   readonly subst: Subst;
   readonly type: Type;
   readonly constraints: readonly Constraint[];
   readonly diagnostics: readonly Diagnostic[];
-  readonly symbols: symbols.SymbolTable;
+  readonly types: TypeMap;
 };
 
 /**
- * Infer the type of an expression.
+ * Check (infer types for) an expression.
  *
- * This is the main entry point for type inference. It:
+ * This is the main entry point for type checking. It:
  * 1. Resets the type variable counter for consistent output
  * 2. Runs the inference algorithm
  * 3. Applies final substitutions to constraints
@@ -1007,11 +1029,17 @@ export type InferOutput = {
  * @param env The type environment (variables in scope)
  * @param registry The constructor registry (for exhaustiveness checking)
  * @param expr The expression to type-check
+ * @param symbols The symbol table from the binder
  * @returns The inferred type information with diagnostics
  */
-export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Expr): InferOutput => {
+export const check = (
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.Expr,
+  symbols: SymbolTable,
+): CheckOutput => {
   typeVarCounter = 0;
-  const ctx = createContext();
+  const ctx = createContext(symbols);
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
   solveConstraints(ctx, finalConstraints);
@@ -1020,9 +1048,12 @@ export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Exp
     type,
     constraints: finalConstraints,
     diagnostics: ctx.diagnostics,
-    symbols: symbols.finalize(ctx.symbols),
+    types: ctx.types,
   };
 };
+
+// Keep old name as alias for compatibility during migration
+export const infer = check;
 
 // =============================================================================
 // EXPRESSION INFERENCE
@@ -1044,7 +1075,7 @@ export const infer = (env: TypeEnv, registry: ConstructorRegistry, expr: ast.Exp
  * @returns Inference result tuple
  */
 const inferExpr = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.Expr,
@@ -1098,7 +1129,7 @@ const inferExpr = (
  * 4. Record is closed without field → error
  */
 const inferFieldAccess = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.FieldAccess,
@@ -1154,7 +1185,7 @@ const inferFieldAccess = (
  * The record is closed (no row variable) because we know exactly what fields it has.
  */
 const inferRecord = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.Record,
@@ -1192,19 +1223,13 @@ const inferRecord = (
  * let-bound variables which are polymorphic. This is key to Algorithm W.
  */
 const inferAbs = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.Abs,
 ): InferResult => {
   // Fresh type variable for the parameter (we don't know its type yet)
   const paramType = freshTypeVar();
-
-  // Record parameter definition if we have a span
-  const paramSpan = expr.paramSpan ?? expr.span;
-  if (paramSpan) {
-    symbols.addDefinition(ctx.symbols, expr.param, paramSpan, "parameter", paramType);
-  }
 
   // Add parameter to environment (monomorphic - empty quantifier list)
   const newEnv = new Map(env);
@@ -1213,8 +1238,11 @@ const inferAbs = (
   // Infer body type with parameter in scope
   const [subst, bodyType, constraints] = inferExpr(ctx, newEnv, registry, expr.body);
 
-  // Pop parameter from scope after body inference
-  symbols.popScope(ctx.symbols, expr.param);
+  // Record the parameter's final type
+  const paramSpan = expr.paramSpan ?? expr.span;
+  if (paramSpan) {
+    recordType(ctx, paramSpan, applySubst(subst, paramType));
+  }
 
   // Function type: apply substitutions to parameter type
   return [subst, tfun(applySubst(subst, paramType), bodyType), constraints];
@@ -1231,7 +1259,7 @@ const inferAbs = (
  * 5. Apply resulting substitution to return type
  */
 const inferApp = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.App,
@@ -1270,7 +1298,7 @@ const inferApp = (
  * Both operands must have the same type (unified first).
  */
 const inferBinOp = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.BinOp,
@@ -1333,7 +1361,7 @@ const inferBinOp = (
  * - Both branches must have the same type (the result type)
  */
 const inferIf = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.If,
@@ -1378,7 +1406,7 @@ const inferIf = (
  * work - `id` gets type `∀a. a -> a` and each use instantiates it fresh.
  */
 const inferLet = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.Let,
@@ -1392,10 +1420,10 @@ const inferLet = (
   // Generalize: quantify over variables not free in the environment
   const generalizedScheme = generalize(env1, applySubst(s1, valueType));
 
-  // Record the binding definition with inferred type
+  // Record the binding's type
   const nameSpan = expr.nameSpan ?? expr.span;
   if (nameSpan) {
-    symbols.addDefinition(ctx.symbols, expr.name, nameSpan, "variable", applySubst(s1, valueType));
+    recordType(ctx, nameSpan, applySubst(s1, valueType));
   }
 
   // Add binding to environment
@@ -1404,9 +1432,6 @@ const inferLet = (
 
   // Infer body with new binding
   const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
-
-  // Pop binding from scope after body inference
-  symbols.popScope(ctx.symbols, expr.name);
 
   const subst = composeSubst(s1, s2);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
@@ -1419,7 +1444,7 @@ const inferLet = (
  *
  * For recursion, the bound name must be in scope while inferring the value.
  * We do this by:
- * 1. Add a fresh type variable for the binding (both type env and symbol table)
+ * 1. Add a fresh type variable for the binding to type env
  * 2. Infer the value's type
  * 3. Generalize and add to environment for body
  * 4. Infer body
@@ -1428,7 +1453,7 @@ const inferLet = (
  * handle mutual recursion and better polymorphism.
  */
 const inferLetRec = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.LetRec,
@@ -1440,13 +1465,7 @@ const inferLetRec = (
   const envWithPlaceholder = new Map(env);
   envWithPlaceholder.set(expr.name, scheme([], placeholderType));
 
-  // Add definition to symbol table BEFORE inferring value (so recursive refs resolve)
-  const nameSpan = expr.nameSpan ?? expr.span;
-  if (nameSpan) {
-    symbols.addDefinition(ctx.symbols, expr.name, nameSpan, "variable", null);
-  }
-
-  // Infer the value's type (recursive references will now resolve)
+  // Infer the value's type (recursive references will resolve via type env)
   const [s1, valueType, c1] = inferExpr(ctx, envWithPlaceholder, registry, expr.value);
 
   // Apply substitution to environment before generalizing
@@ -1455,14 +1474,10 @@ const inferLetRec = (
   // Generalize: quantify over variables not free in the environment
   const generalizedScheme = generalize(env1, applySubst(s1, valueType));
 
-  // Update the definition's type now that we know it
+  // Record the binding's type
+  const nameSpan = expr.nameSpan ?? expr.span;
   if (nameSpan) {
-    const defStack = ctx.symbols.scope.get(expr.name);
-    if (defStack && defStack.length > 0) {
-      const def = defStack[defStack.length - 1]!;
-      // Mutate to update type (definitions array has same reference)
-      (def as { type: Type | null }).type = applySubst(s1, valueType);
-    }
+    recordType(ctx, nameSpan, applySubst(s1, valueType));
   }
 
   // Add binding to environment for body
@@ -1471,9 +1486,6 @@ const inferLetRec = (
 
   // Infer body with new binding
   const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
-
-  // Pop binding from scope after body inference
-  symbols.popScope(ctx.symbols, expr.name);
 
   const subst = composeSubst(s1, s2);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
@@ -1490,16 +1502,16 @@ const inferLetRec = (
  *
  * Look up the variable in the environment and instantiate its scheme.
  * Each use of a polymorphic variable gets fresh type variables.
+ *
+ * Note: The binder already reports unbound variable errors and tracks references.
+ * We still check here because the type environment might differ from the
+ * binder's scope (e.g., constructors from data declarations).
  */
-const inferVar = (ctx: InferContext, env: TypeEnv, expr: ast.Var): InferResult => {
-  // Record reference if we have a span
-  if (expr.span) {
-    symbols.addReference(ctx.symbols, expr.name, expr.span);
-  }
-
+const inferVar = (ctx: CheckContext, env: TypeEnv, expr: ast.Var): InferResult => {
   const s = env.get(expr.name);
   if (!s) {
-    addError(ctx, `Unknown variable: ${expr.name}`, expr.span);
+    // Don't duplicate error if binder already reported it
+    // Just return a fresh type variable to continue checking
     return [new Map(), freshTypeVar(), []];
   }
   // Instantiate with fresh variables
@@ -1517,7 +1529,7 @@ const inferVar = (ctx: InferContext, env: TypeEnv, expr: ast.Var): InferResult =
  * Single-element "tuples" are unwrapped to just their element type.
  */
 const inferTuple = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.Tuple,
@@ -1567,7 +1579,7 @@ const inferTuple = (
  * - PTuple: builds/matches tuple type with elements
  */
 const inferPattern = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   pattern: ast.Pattern,
   expectedType: Type,
@@ -1578,9 +1590,9 @@ const inferPattern = (
       // Variable pattern: bind the name to the expected type
       const boundType = applySubst(subst, expectedType);
 
-      // Record pattern binding definition
+      // Record pattern binding's type
       if (pattern.span) {
-        symbols.addDefinition(ctx.symbols, pattern.name, pattern.span, "parameter", boundType);
+        recordType(ctx, pattern.span, boundType);
       }
 
       return [subst, new Map([[pattern.name, boundType]])];
@@ -1600,12 +1612,8 @@ const inferPattern = (
     }
 
     case "PCon": {
-      // Record constructor reference
-      if (pattern.span) {
-        symbols.addReference(ctx.symbols, pattern.name, pattern.span);
-      }
-
       // Constructor pattern: look up constructor type and match
+      // Note: Binder already recorded this as a reference
       const conScheme = env.get(pattern.name);
       if (!conScheme) {
         addError(ctx, `Unknown constructor: ${pattern.name}`, pattern.span);
@@ -1788,7 +1796,7 @@ const inferPattern = (
  * 3. Check exhaustiveness
  */
 const inferMatch = (
-  ctx: InferContext,
+  ctx: CheckContext,
   env: TypeEnv,
   registry: ConstructorRegistry,
   expr: ast.Match,
