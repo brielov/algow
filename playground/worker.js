@@ -3004,6 +3004,22 @@ var id = abs("x", var_("x"));
 var const_ = abs("x", abs("_", var_("x")));
 var compose = abs("f", abs("g", abs("x", app(var_("f"), app(var_("g"), var_("x"))))));
 var flip = abs("f", abs("a", abs("b", app(app(var_("f"), var_("b")), var_("a")))));
+var functions = {
+  map,
+  filter,
+  head,
+  tail,
+  isEmpty,
+  length,
+  foldr,
+  foldl,
+  reverse,
+  concat,
+  id,
+  const: const_,
+  compose,
+  flip
+};
 
 // src/lsp/positions.ts
 var offsetToPosition = (source, offset) => {
@@ -3263,6 +3279,7 @@ ${def.name}: ${typeToString(type)}
     } else {
       items.push(...getVariableCompletions(doc, offset));
       items.push(...getConstructorCompletions(doc));
+      items.push(...getPreludeFunctionCompletions());
       items.push(...getKeywordCompletions());
     }
     return { isIncomplete: false, items };
@@ -3336,6 +3353,17 @@ ${def.name}: ${typeToString(type)}
           detail: typeName
         });
       }
+    }
+    return items;
+  };
+  const getPreludeFunctionCompletions = () => {
+    const items = [];
+    for (const name of Object.keys(functions)) {
+      items.push({
+        label: name,
+        kind: COMPLETION_KIND_FUNCTION,
+        detail: "prelude"
+      });
     }
     return items;
   };

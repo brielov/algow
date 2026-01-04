@@ -57,7 +57,7 @@ import {
 import type { Diagnostic } from "../diagnostics";
 import { createConstructorEnv, evaluate, RuntimeError, valueToString } from "../eval";
 import { parse, programToExpr, type Program } from "../parser";
-import { declarations as preludeDeclarations } from "../prelude";
+import { declarations as preludeDeclarations, functions as preludeFunctions } from "../prelude";
 
 import { positionToOffset, spanToRange } from "./positions";
 import {
@@ -399,9 +399,10 @@ export const createServer = (transport: Transport): void => {
       const fieldItems = getRecordFieldCompletions(doc, varName);
       items.push(...fieldItems);
     } else {
-      // General completions: variables, constructors, keywords
+      // General completions: variables, constructors, prelude, keywords
       items.push(...getVariableCompletions(doc, offset));
       items.push(...getConstructorCompletions(doc));
+      items.push(...getPreludeFunctionCompletions());
       items.push(...getKeywordCompletions());
     }
 
@@ -510,6 +511,23 @@ export const createServer = (transport: Transport): void => {
           detail: typeName,
         });
       }
+    }
+
+    return items;
+  };
+
+  /**
+   * Get completions for prelude functions.
+   */
+  const getPreludeFunctionCompletions = (): CompletionItem[] => {
+    const items: CompletionItem[] = [];
+
+    for (const name of Object.keys(preludeFunctions)) {
+      items.push({
+        label: name,
+        kind: COMPLETION_KIND_FUNCTION,
+        detail: "prelude",
+      });
     }
 
     return items;
