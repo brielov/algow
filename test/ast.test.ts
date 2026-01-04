@@ -1,7 +1,7 @@
 // oxlint-disable no-thenable
 
 import { describe, expect, it } from "bun:test";
-import * as ast from "./ast";
+import * as ast from "../src/ast";
 
 describe("AST Helper Functions", () => {
   describe("literal constructors", () => {

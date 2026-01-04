@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import * as ast from "./ast";
+import * as ast from "../src/ast";
 import {
   evaluate,
   valueToString,
@@ -11,8 +11,8 @@ import {
   evalPreludeFunction,
   RuntimeError,
   type Env,
-} from "./eval";
-import { functions } from "./prelude";
+} from "../src/eval";
+import { functions } from "../src/prelude";
 
 // Helper to build a list AST
 const list = (...items: ast.Expr[]): ast.Expr => {
@@ -419,6 +419,189 @@ describe("Interpreter", () => {
     it("formats constructors", () => {
       expect(valueToString(vcon("Nothing"))).toBe("Nothing");
       expect(valueToString(vcon("Just", [vnum(42)]))).toBe("(Just 42)");
+    });
+  });
+
+  describe("equality comparisons", () => {
+    it("compares booleans with ==", () => {
+      expect(evaluate(emptyEnv, ast.binOp("==", ast.bool(true), ast.bool(true)))).toEqual(
+        vbool(true),
+      );
+      expect(evaluate(emptyEnv, ast.binOp("==", ast.bool(true), ast.bool(false)))).toEqual(
+        vbool(false),
+      );
+    });
+
+    it("compares constructors with ==", () => {
+      const j1 = ast.app(ast.var_("Just"), ast.num(42));
+      const j2 = ast.app(ast.var_("Just"), ast.num(42));
+      const j3 = ast.app(ast.var_("Just"), ast.num(99));
+      // Just 42 == Just 42
+      expect(evaluate(baseEnv, ast.binOp("==", j1, j2))).toEqual(vbool(true));
+      // Just 42 == Just 99
+      expect(evaluate(baseEnv, ast.binOp("==", j1, j3))).toEqual(vbool(false));
+      // Just 42 == Nothing
+      expect(evaluate(baseEnv, ast.binOp("==", j1, ast.var_("Nothing")))).toEqual(vbool(false));
+    });
+
+    it("compares tuples with ==", () => {
+      const t1 = ast.tuple([ast.num(1), ast.num(2)]);
+      const t2 = ast.tuple([ast.num(1), ast.num(2)]);
+      const t3 = ast.tuple([ast.num(1), ast.num(3)]);
+      const t4 = ast.tuple([ast.num(1), ast.num(2), ast.num(3)]);
+      expect(evaluate(emptyEnv, ast.binOp("==", t1, t2))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("==", t1, t3))).toEqual(vbool(false));
+      // Different lengths
+      expect(evaluate(emptyEnv, ast.binOp("==", t1, t4))).toEqual(vbool(false));
+    });
+
+    it("compares records with ==", () => {
+      const r1 = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
+      const r2 = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
+      const r3 = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(3))]);
+      const r4 = ast.record([ast.field("x", ast.num(1))]);
+      expect(evaluate(emptyEnv, ast.binOp("==", r1, r2))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("==", r1, r3))).toEqual(vbool(false));
+      // Different number of fields
+      expect(evaluate(emptyEnv, ast.binOp("==", r1, r4))).toEqual(vbool(false));
+    });
+
+    it("compares closures (always false)", () => {
+      const f1 = ast.abs("x", ast.var_("x"));
+      const f2 = ast.abs("x", ast.var_("x"));
+      expect(evaluate(emptyEnv, ast.binOp("==", f1, f2))).toEqual(vbool(false));
+    });
+  });
+
+  describe("pattern matching edge cases", () => {
+    it("matches string literal pattern", () => {
+      const expr = ast.match(ast.str("hello"), [
+        ast.case_(ast.plit("hello"), ast.num(1)),
+        ast.case_(ast.plit("world"), ast.num(2)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(1));
+    });
+
+    it("matches boolean literal pattern", () => {
+      const expr = ast.match(ast.bool(true), [
+        ast.case_(ast.plit(true), ast.str("yes")),
+        ast.case_(ast.plit(false), ast.str("no")),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vstr("yes"));
+    });
+
+    it("rejects constructor with wrong number of args", () => {
+      const just42 = ast.app(ast.var_("Just"), ast.num(42));
+      const expr = ast.match(just42, [
+        // Try to match Just with 2 args (should fail)
+        ast.case_(ast.pcon("Just", [ast.pvar("x"), ast.pvar("y")]), ast.num(0)),
+        ast.case_(ast.pwildcard(), ast.num(99)),
+      ]);
+      expect(evaluate(baseEnv, expr)).toEqual(vnum(99));
+    });
+
+    it("rejects tuple with wrong number of elements", () => {
+      const tuple = ast.tuple([ast.num(1), ast.num(2)]);
+      const expr = ast.match(tuple, [
+        // Try to match 2-tuple with 3-element pattern (should fail)
+        ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b"), ast.pvar("c")]), ast.num(0)),
+        ast.case_(ast.pwildcard(), ast.num(99)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(99));
+    });
+
+    it("matches record with missing field pattern", () => {
+      const record = ast.record([ast.field("x", ast.num(1))]);
+      const expr = ast.match(record, [
+        // Try to match record with pattern that expects a missing field
+        ast.case_(ast.precord([ast.pfield("y", ast.pvar("a"))]), ast.num(0)),
+        ast.case_(ast.pwildcard(), ast.num(99)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(99));
+    });
+
+    it("rejects literal pattern when value doesn't match", () => {
+      const expr = ast.match(ast.num(5), [
+        ast.case_(ast.plit(1), ast.str("one")),
+        ast.case_(ast.plit(2), ast.str("two")),
+        ast.case_(ast.pwildcard(), ast.str("other")),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vstr("other"));
+    });
+
+    it("rejects string literal pattern when value doesn't match", () => {
+      const expr = ast.match(ast.str("foo"), [
+        ast.case_(ast.plit("bar"), ast.num(1)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+    });
+
+    it("rejects boolean literal pattern when value doesn't match", () => {
+      const expr = ast.match(ast.bool(false), [
+        ast.case_(ast.plit(true), ast.num(1)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+    });
+
+    it("rejects literal pattern when type doesn't match", () => {
+      // Matching a number against a string pattern
+      const expr = ast.match(ast.num(42), [
+        ast.case_(ast.plit("42"), ast.num(1)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+    });
+
+    it("matches nested record pattern", () => {
+      const record = ast.record([ast.field("x", ast.num(10)), ast.field("y", ast.num(20))]);
+      const expr = ast.match(record, [
+        ast.case_(
+          ast.precord([ast.pfield("x", ast.pvar("a")), ast.pfield("y", ast.pvar("b"))]),
+          ast.binOp("+", ast.var_("a"), ast.var_("b")),
+        ),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(30));
+    });
+
+    it("rejects record pattern against non-record value", () => {
+      // Matching a number against a record pattern
+      const expr = ast.match(ast.num(42), [
+        ast.case_(ast.precord([ast.pfield("x", ast.pvar("a"))]), ast.num(1)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+    });
+
+    it("rejects tuple pattern against non-tuple value", () => {
+      // Matching a number against a tuple pattern
+      const expr = ast.match(ast.num(42), [
+        ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), ast.num(1)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+    });
+
+    it("rejects constructor pattern against non-constructor value", () => {
+      // Matching a number against a constructor pattern
+      const expr = ast.match(ast.num(42), [
+        ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.num(1)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+    });
+
+    it("fails nested constructor pattern match", () => {
+      // Match Just(Just 1) against Just(Just 2)
+      const nestedJust = ast.app(ast.var_("Just"), ast.app(ast.var_("Just"), ast.num(1)));
+      const expr = ast.match(nestedJust, [
+        // Try to match inner value as 2 (should fail)
+        ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.plit(2)])]), ast.num(1)),
+        ast.case_(ast.pwildcard(), ast.num(0)),
+      ]);
+      expect(evaluate(baseEnv, expr)).toEqual(vnum(0));
     });
   });
 });

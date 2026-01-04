@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createLexer, nextToken, peek, peekAt, advance, slice, TokenKind } from "./lexer";
+import { createLexer, nextToken, peek, peekAt, advance, slice, TokenKind } from "../src/lexer";
 
 describe("Lexer", () => {
   describe("createLexer", () => {

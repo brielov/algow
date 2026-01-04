@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import * as ast from "./ast";
-import { bindWithConstructors } from "./binder";
+import * as ast from "../src/ast";
+import { bindWithConstructors } from "../src/binder";
 import {
   baseEnv,
   check,
@@ -8,10 +8,11 @@ import {
   mergeEnvs,
   mergeRegistries,
   processDataDecl,
+  processDeclarations,
   type TypeEnv,
   type ConstructorRegistry,
   typeToString,
-} from "./checker";
+} from "../src/checker";
 
 // Helper to run the full pipeline (bind + check)
 // Extracts constructor names from the registry (which maps type name -> constructor names)
@@ -1584,6 +1585,199 @@ describe("Type Inference", () => {
       );
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toBe("Fn number number");
+    });
+  });
+
+  describe("infinite type detection", () => {
+    it("reports error for infinite type (occurs check)", () => {
+      // let rec f = f f in f
+      // This applies f to itself, requiring a = a -> b
+      // The occurs check detects that 'a' appears in 'a -> b'
+      const { diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.letRec("f", ast.app(ast.var_("f"), ast.var_("f")), ast.var_("f")),
+      );
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(diagnostics[0]!.message).toContain("Infinite type");
+    });
+  });
+
+  describe("record unification edge cases", () => {
+    it("unifies open record with closed record with same fields", () => {
+      // Function expecting open record, applied to closed record
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.let_(
+          "getX",
+          ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
+          ast.let_(
+            "result",
+            ast.app(ast.var_("getX"), ast.record([ast.field("x", ast.num(1))])),
+            ast.var_("result"),
+          ),
+        ),
+      );
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("number");
+    });
+
+    it("reports error when closed record missing required fields", () => {
+      // Function expecting record with x and y, applied to record with only x
+      const { diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.let_(
+          "getXY",
+          ast.abs(
+            "r",
+            ast.binOp(
+              "+",
+              ast.fieldAccess(ast.var_("r"), "x"),
+              ast.fieldAccess(ast.var_("r"), "y"),
+            ),
+          ),
+          ast.app(ast.var_("getXY"), ast.record([ast.field("x", ast.num(1))])),
+        ),
+      );
+      expect(diagnostics.length).toBeGreaterThan(0);
+    });
+
+    it("unifies two open records with same fields", () => {
+      // Lines 721-722: Both open records, same fields, unify row variables
+      // Function takes two records that must have same x field
+      const { diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.let_(
+          "sameX",
+          ast.abs(
+            "r1",
+            ast.abs(
+              "r2",
+              ast.binOp(
+                "+",
+                ast.fieldAccess(ast.var_("r1"), "x"),
+                ast.fieldAccess(ast.var_("r2"), "x"),
+              ),
+            ),
+          ),
+          ast.app(
+            ast.app(
+              ast.var_("sameX"),
+              ast.record([ast.field("x", ast.num(1)), ast.field("z", ast.num(3))]),
+            ),
+            ast.record([ast.field("x", ast.num(2)), ast.field("z", ast.num(4))]),
+          ),
+        ),
+      );
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("unifies open record with closed record having same fields", () => {
+      // Lines 731-732: t1 closed, t2 open (same fields)
+      // Function accesses x, applied to record with exactly x
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.let_(
+          "getX",
+          ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
+          ast.app(ast.var_("getX"), ast.record([ast.field("x", ast.num(42))])),
+        ),
+      );
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("number");
+    });
+
+    it("unifies open record with closed record having extra fields", () => {
+      // Function expecting record with x, called with {x, y} closed record
+      // This tests lines 745-747: t1 has extra fields, t2 open
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.let_(
+          "getX",
+          ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
+          ast.app(
+            ast.var_("getX"),
+            ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]),
+          ),
+        ),
+      );
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("number");
+    });
+
+    it("reports error for closed record missing fields from open record", () => {
+      // This tests lines 753-754: t2 has extra fields, t1 is closed
+      // Function returns {x, y} but called with context expecting {x}
+      const { diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.let_(
+          "makeRecord",
+          ast.abs("n", ast.record([ast.field("x", ast.var_("n")), ast.field("y", ast.var_("n"))])),
+          ast.let_(
+            "useRecord",
+            ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
+            // Apply useRecord to makeRecord, but access z field which doesn't exist
+            ast.let_(
+              "f",
+              ast.abs(
+                "r",
+                ast.fieldAccess(ast.var_("r"), "z"), // access z
+              ),
+              ast.app(ast.var_("f"), ast.record([ast.field("x", ast.num(1))])),
+            ),
+          ),
+        ),
+      );
+      expect(diagnostics.length).toBeGreaterThan(0);
+    });
+
+    it("handles type variable self-binding during unification", () => {
+      // This tests line 632: bindVar with same variable
+      // Identity function applied to itself requires unifying a with a
+      const { type, diagnostics } = infer(
+        baseEnv,
+        new Map(),
+        ast.let_(
+          "id",
+          ast.abs("x", ast.var_("x")),
+          ast.let_("result", ast.app(ast.var_("id"), ast.var_("id")), ast.var_("result")),
+        ),
+      );
+      expect(diagnostics).toHaveLength(0);
+      // id id should be id with type a -> a (printed as "tN -> tN")
+      expect(typeToString(type)).toMatch(/t\d+ -> t\d+/);
+    });
+  });
+
+  describe("processDeclarations", () => {
+    it("processes multiple data declarations", () => {
+      // Test the processDeclarations utility function
+      const maybeDecl = ast.dataDecl(
+        "Maybe",
+        ["a"],
+        [ast.conDecl("Nothing", []), ast.conDecl("Just", [ast.tyvar("a")])],
+      );
+      const eitherDecl = ast.dataDecl(
+        "Either",
+        ["a", "b"],
+        [ast.conDecl("Left", [ast.tyvar("a")]), ast.conDecl("Right", [ast.tyvar("b")])],
+      );
+
+      const result = processDeclarations([maybeDecl, eitherDecl]);
+      expect(result.typeEnv.has("Nothing")).toBe(true);
+      expect(result.typeEnv.has("Just")).toBe(true);
+      expect(result.typeEnv.has("Left")).toBe(true);
+      expect(result.typeEnv.has("Right")).toBe(true);
+      expect(result.constructorNames).toContain("Nothing");
+      expect(result.constructorNames).toContain("Just");
+      expect(result.constructorNames).toContain("Left");
+      expect(result.constructorNames).toContain("Right");
     });
   });
 });

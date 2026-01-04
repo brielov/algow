@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { error, warning, info } from "./diagnostics";
+import { error, warning, info } from "../src/diagnostics";
 
 describe("Diagnostics", () => {
   describe("error", () => {
