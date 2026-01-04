@@ -145,7 +145,9 @@ if_expr      = "if" expression "then" expression "else" expression
 
 match_expr   = "match" expression "with" match_arm+ "end"
 
-match_arm    = "|" pattern "=>" expression
+match_arm    = "|" pattern guard? "=>" expression
+
+guard        = "if" expression                    -- pattern guard (must be boolean)
 
 lambda_expr  = LOWER "=>" expression
 ```
@@ -283,6 +285,18 @@ let rec fact n =
 let rec fib n =
   if n <= 1 then n
   else fib (n - 1) + fib (n - 2)
+
+-- Using pattern guards
+let abs n = match n with
+  | x if x < 0 => 0 - x
+  | x => x
+end
+
+let sign n = match n with
+  | x if x > 0 => 1
+  | x if x < 0 => 0 - 1
+  | _ => 0
+end
 ```
 
 ### Algebraic Data Types

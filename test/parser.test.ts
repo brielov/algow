@@ -1083,6 +1083,38 @@ describe("Parser", () => {
         ]),
       );
     });
+
+    it("parses match with pattern guard", () => {
+      const result = parse(`
+        match n with
+          | x if x > 0 => x
+          | _ => 0
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.kind).toBe("Match");
+      expect(matchExpr.cases).toHaveLength(2);
+      expect(matchExpr.cases[0]!.guard).toBeDefined();
+      expect(matchExpr.cases[0]!.guard?.kind).toBe("BinOp");
+      expect(matchExpr.cases[1]!.guard).toBeUndefined();
+    });
+
+    it("parses match with multiple pattern guards", () => {
+      const result = parse(`
+        match n with
+          | x if x > 0 => 1
+          | x if x < 0 => 2
+          | _ => 0
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.cases).toHaveLength(3);
+      expect(matchExpr.cases[0]!.guard).toBeDefined();
+      expect(matchExpr.cases[1]!.guard).toBeDefined();
+      expect(matchExpr.cases[2]!.guard).toBeUndefined();
+    });
   });
 
   describe("data declarations", () => {

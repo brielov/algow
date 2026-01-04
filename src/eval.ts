@@ -409,6 +409,15 @@ const evalMatch = (env: Env, expr: ast.Match): Value => {
       for (const [name, value] of result.bindings) {
         caseEnv = extendEnv(caseEnv, name, value);
       }
+
+      // Check guard if present
+      if (case_.guard) {
+        const guardResult = evaluate(caseEnv, case_.guard) as VBool;
+        if (!guardResult.value) {
+          continue; // Guard failed, try next case
+        }
+      }
+
       return evaluate(caseEnv, case_.body);
     }
   }

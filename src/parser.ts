@@ -725,10 +725,18 @@ const parseMatch = (state: ParserState): ast.Expr => {
     const caseStart = state.current[1];
     advance(state);
     const pattern = parsePattern(state);
+
+    // Parse optional guard: | pattern if condition => body
+    let guard: ast.Expr | undefined;
+    if (at(state, TokenKind.If)) {
+      advance(state);
+      guard = parseExpr(state);
+    }
+
     expect(state, TokenKind.Arrow, "expected '=>' after pattern");
     const body = parseExpr(state);
     const caseEnd = body.span?.end ?? state.current[1];
-    cases.push(ast.case_(pattern, body, span(caseStart, caseEnd)));
+    cases.push(ast.case_(pattern, body, guard, span(caseStart, caseEnd)));
   }
 
   const endToken = expect(state, TokenKind.End, "expected 'end' after match cases");

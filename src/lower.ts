@@ -588,6 +588,12 @@ const lowerMatch = (ctx: LowerContext, expr: ast.Match): ir.IRExpr => {
     const savedEnv = new Map(ctx.typeEnv);
     extendPatternBindings(ctx, case_.pattern, scrutineeResult.atom.type);
 
+    // Lower the guard if present
+    let guardIR: ir.IRExpr | undefined;
+    if (case_.guard) {
+      guardIR = lowerExpr(ctx, case_.guard);
+    }
+
     // Lower the body
     const bodyIR = lowerExpr(ctx, case_.body);
     resultType = bodyIR.type;
@@ -595,7 +601,7 @@ const lowerMatch = (ctx: LowerContext, expr: ast.Match): ir.IRExpr => {
     // Restore environment
     ctx.typeEnv = savedEnv;
 
-    irCases.push(ir.irCase(irPattern, bodyIR));
+    irCases.push(ir.irCase(irPattern, bodyIR, guardIR));
   }
 
   if (!resultType) {

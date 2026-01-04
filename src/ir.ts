@@ -245,6 +245,7 @@ export type IRClosureBinding = {
  */
 export type IRCase = {
   readonly pattern: IRPattern;
+  readonly guard?: IRExpr;
   readonly body: IRExpr;
 };
 
@@ -524,8 +525,9 @@ export const irPRecordField = (name: string, pattern: IRPattern): IRPRecordField
 
 // --- Cases ---
 
-export const irCase = (pattern: IRPattern, body: IRExpr): IRCase => ({
+export const irCase = (pattern: IRPattern, body: IRExpr, guard?: IRExpr): IRCase => ({
   pattern,
+  guard,
   body,
 });
 

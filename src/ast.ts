@@ -439,6 +439,7 @@ export interface PTuple extends Node {
  */
 export interface Case extends Node {
   readonly pattern: Pattern;
+  readonly guard?: Expr;
   readonly body: Expr;
 }
 
@@ -736,8 +737,9 @@ export const ptuple = (elements: readonly Pattern[], span?: Span): PTuple => ({
   span,
 });
 
-export const case_ = (pattern: Pattern, body: Expr, span?: Span): Case => ({
+export const case_ = (pattern: Pattern, body: Expr, guard?: Expr, span?: Span): Case => ({
   pattern,
+  guard,
   body,
   span,
 });

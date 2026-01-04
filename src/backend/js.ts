@@ -282,6 +282,9 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
   const scrutinee = genAtom(ctx, binding.scrutinee);
   const scrutineeVar = "_s";
 
+  // Check if any case has a guard
+  const hasGuards = binding.cases.some((c) => c.guard !== undefined);
+
   const lines: string[] = [];
   lines.push(`((${scrutineeVar}) => {`);
 
@@ -289,7 +292,12 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
     const case_ = binding.cases[i]!;
     const { condition, bindings } = genPatternMatch(scrutineeVar, case_.pattern);
 
-    const prefix = i === 0 ? "if" : "} else if";
+    // Use sequential ifs when guards are present (guard failure falls through)
+    // Use else-if chain when no guards (more efficient, no fall-through needed)
+    const prefix = hasGuards || i === 0 ? "if" : "} else if";
+    const suffix = hasGuards && i > 0 ? "}" : "";
+
+    if (suffix) lines.push(`  ${suffix}`);
     lines.push(`  ${prefix} (${condition}) {`);
 
     // Emit bindings
@@ -303,6 +311,12 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
     const savedLines = ctx.lines;
     ctx.lines = bodyLines;
 
+    // Generate guard if present
+    let guardResult: string | undefined;
+    if (case_.guard) {
+      guardResult = genExpr(ctx, case_.guard);
+    }
+
     const bodyResult = genExpr(ctx, case_.body);
 
     ctx.lines = savedLines;
@@ -311,7 +325,13 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
     for (const line of bodyLines) {
       lines.push("    " + line.trimStart());
     }
-    lines.push(`    return ${bodyResult};`);
+
+    // With guard: wrap return in guard check
+    if (guardResult) {
+      lines.push(`    if (${guardResult}) return ${bodyResult};`);
+    } else {
+      lines.push(`    return ${bodyResult};`);
+    }
   }
 
   lines.push("  }");

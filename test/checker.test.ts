@@ -1121,6 +1121,45 @@ describe("Type Inference", () => {
         expect(diagnostics[0]!.message).toContain("at least one case");
       });
     });
+
+    describe("pattern guards", () => {
+      it("infers match with pattern guard", () => {
+        // match 5 with | n if n > 0 => n | _ => 0 end
+        const expr = ast.match(ast.num(5), [
+          ast.case_(ast.pvar("n"), ast.var_("n"), ast.binOp(">", ast.var_("n"), ast.num(0))),
+          ast.case_(ast.pwildcard(), ast.num(0)),
+        ]);
+        const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("number");
+      });
+
+      it("reports error for non-boolean guard", () => {
+        // match 5 with | n if n => n | _ => 0 end (guard is number, not boolean)
+        const expr = ast.match(ast.num(5), [
+          ast.case_(ast.pvar("n"), ast.var_("n"), ast.var_("n")),
+          ast.case_(ast.pwildcard(), ast.num(0)),
+        ]);
+        const { diagnostics } = infer(baseEnv, new Map(), expr);
+        expect(diagnostics.length).toBeGreaterThan(0);
+        expect(diagnostics[0]!.message).toContain("Cannot unify");
+      });
+
+      it("guard can access pattern bindings", () => {
+        // match (1, 2) with | (a, b) if a < b => a | _ => 0 end
+        const expr = ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+          ast.case_(
+            ast.ptuple([ast.pvar("a"), ast.pvar("b")]),
+            ast.var_("a"),
+            ast.binOp("<", ast.var_("a"), ast.var_("b")),
+          ),
+          ast.case_(ast.pwildcard(), ast.num(0)),
+        ]);
+        const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("number");
+      });
+    });
   });
 
   describe("data declarations", () => {

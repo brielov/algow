@@ -1879,6 +1879,15 @@ const inferMatch = (
       caseEnv.set(name, scheme([], applySubst(subst, type)));
     }
 
+    // Check guard expression if present (must be boolean)
+    if (case_.guard) {
+      const [sg, guardType, cg] = inferExpr(ctx, caseEnv, registry, case_.guard);
+      subst = composeSubst(subst, sg);
+      constraints = [...applySubstConstraints(subst, constraints), ...cg];
+      const s4 = unify(ctx, applySubst(subst, guardType), tBool);
+      subst = composeSubst(subst, s4);
+    }
+
     // Infer body type
     const [s3, bodyType, c2] = inferExpr(ctx, caseEnv, registry, case_.body);
     subst = composeSubst(subst, s3);
@@ -1894,8 +1903,8 @@ const inferMatch = (
     }
   }
 
-  // Check exhaustiveness
-  const patterns = expr.cases.map((c) => c.pattern);
+  // Check exhaustiveness (only unguarded patterns count as covering)
+  const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
   const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
 
   if (missing.length > 0) {

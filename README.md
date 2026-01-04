@@ -35,7 +35,7 @@ A small, experimental type checker written in TypeScript. This is a learning pro
 #### Medium Priority
 
 - [ ] **Mutual recursion** — `let rec f = ... and g = ...` for co-recursive definitions
-- [ ] **Pattern guards** — `| n if n > 0 => ...` in match expressions
+- [x] **Pattern guards** — `| n if n > 0 => ...` in match expressions
 - [ ] **As-patterns** — `| (Cons x rest) as whole => ...`
 - [ ] **Or-patterns** — `| Nothing | Just Nothing => ...`
 - [ ] **Optional type annotations** — `let add (x: number) y: number = x + y`
