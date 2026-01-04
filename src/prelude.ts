@@ -269,3 +269,29 @@ export const functions = {
   compose,
   flip,
 } as const;
+
+/**
+ * Wrap an expression with all prelude function bindings.
+ * This makes map, filter, foldr, foldl, etc. available in the expression.
+ */
+export const wrapWithPrelude = (expr: ast.Expr): ast.Expr => {
+  // Wrap with simple functions (non-recursive)
+  let result: ast.Expr = ast.let_("flip", flip, expr);
+  result = ast.let_("compose", compose, result);
+  result = ast.let_("const", const_, result);
+  result = ast.let_("id", id, result);
+  result = ast.let_("concat", concat, result);
+  result = ast.let_("reverse", reverse, result);
+
+  // Wrap with recursive functions
+  result = ast.letRec([ast.recBinding("foldl", foldl.bindings[0]!.value)], result);
+  result = ast.letRec([ast.recBinding("foldr", foldr.bindings[0]!.value)], result);
+  result = ast.letRec([ast.recBinding("length", length.bindings[0]!.value)], result);
+  result = ast.let_("isEmpty", isEmpty, result);
+  result = ast.let_("tail", tail, result);
+  result = ast.let_("head", head, result);
+  result = ast.letRec([ast.recBinding("filter", filter.bindings[0]!.value)], result);
+  result = ast.letRec([ast.recBinding("map", map.bindings[0]!.value)], result);
+
+  return result;
+};

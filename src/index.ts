@@ -6,7 +6,7 @@ import { lowerToIR } from "./lower";
 import { offsetToLineCol } from "./lsp/positions";
 import { optimize } from "./optimize";
 import { type Diagnostic, parse, programToExpr } from "./parser";
-import { declarations as preludeDeclarations } from "./prelude";
+import { declarations as preludeDeclarations, wrapWithPrelude } from "./prelude";
 
 // ANSI color codes
 const RED = "\x1b[31m";
@@ -101,6 +101,9 @@ const run = (source: string, filename: string): void => {
     process.exit(1);
   }
 
+  // Wrap expression with prelude functions
+  const wrappedExpr = wrapWithPrelude(expr);
+
   // Process prelude + user data declarations
   const prelude = processDeclarations(preludeDeclarations);
   const { typeEnv, registry, constructorNames } = processDeclarations(
@@ -109,9 +112,9 @@ const run = (source: string, filename: string): void => {
   );
 
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, expr);
+  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
   diagnostics.push(...bindResult.diagnostics);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
+  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
   diagnostics.push(...checkResult.diagnostics);
 
   if (diagnostics.length > 0) {
@@ -121,7 +124,7 @@ const run = (source: string, filename: string): void => {
 
   // Evaluate with constructor environment
   const evalEnv: Env = createConstructorEnv(constructorNames);
-  const result = evaluate(evalEnv, expr);
+  const result = evaluate(evalEnv, wrappedExpr);
   console.log(result);
 };
 
@@ -139,6 +142,9 @@ const typeCheck = (source: string, filename: string): void => {
     process.exit(1);
   }
 
+  // Wrap expression with prelude functions
+  const wrappedExpr = wrapWithPrelude(expr);
+
   // Process prelude + user data declarations
   const prelude = processDeclarations(preludeDeclarations);
   const { typeEnv, registry, constructorNames } = processDeclarations(
@@ -147,8 +153,8 @@ const typeCheck = (source: string, filename: string): void => {
   );
 
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, expr);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
+  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
+  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -173,6 +179,9 @@ const emitIR = (source: string, filename: string): void => {
     process.exit(1);
   }
 
+  // Wrap expression with prelude functions
+  const wrappedExpr = wrapWithPrelude(expr);
+
   // Process prelude + user data declarations
   const prelude = processDeclarations(preludeDeclarations);
   const { typeEnv, registry, constructorNames } = processDeclarations(
@@ -181,8 +190,8 @@ const emitIR = (source: string, filename: string): void => {
   );
 
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, expr);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
+  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
+  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -191,7 +200,7 @@ const emitIR = (source: string, filename: string): void => {
   }
 
   // Lower to IR
-  const ir = lowerToIR(expr, typeEnv, checkResult);
+  const ir = lowerToIR(wrappedExpr, typeEnv, checkResult);
   console.log(JSON.stringify(ir, null, 2));
 };
 
@@ -209,6 +218,9 @@ const compile = (source: string, filename: string): void => {
     process.exit(1);
   }
 
+  // Wrap expression with prelude functions
+  const wrappedExpr = wrapWithPrelude(expr);
+
   // Process prelude + user data declarations
   const prelude = processDeclarations(preludeDeclarations);
   const { typeEnv, registry, constructorNames } = processDeclarations(
@@ -217,8 +229,8 @@ const compile = (source: string, filename: string): void => {
   );
 
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, expr);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols);
+  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
+  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -227,7 +239,7 @@ const compile = (source: string, filename: string): void => {
   }
 
   // Lower to IR, optimize, and generate JS
-  let ir = lowerToIR(expr, typeEnv, checkResult);
+  let ir = lowerToIR(wrappedExpr, typeEnv, checkResult);
   ir = optimize(ir);
   const output = generateJS(ir, constructorNames);
 

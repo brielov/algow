@@ -3020,6 +3020,23 @@ var functions = {
   compose,
   flip
 };
+var wrapWithPrelude = (expr) => {
+  let result = let_("flip", flip, expr);
+  result = let_("compose", compose, result);
+  result = let_("const", const_, result);
+  result = let_("id", id, result);
+  result = let_("concat", concat, result);
+  result = let_("reverse", reverse, result);
+  result = letRec([recBinding("foldl", foldl.bindings[0].value)], result);
+  result = letRec([recBinding("foldr", foldr.bindings[0].value)], result);
+  result = letRec([recBinding("length", length.bindings[0].value)], result);
+  result = let_("isEmpty", isEmpty, result);
+  result = let_("tail", tail, result);
+  result = let_("head", head, result);
+  result = letRec([recBinding("filter", filter.bindings[0].value)], result);
+  result = letRec([recBinding("map", map.bindings[0].value)], result);
+  return result;
+};
 
 // src/lsp/positions.ts
 var offsetToPosition = (source, offset) => {
@@ -3399,11 +3416,12 @@ ${def.name}: ${typeToString(type)}
     if (!expr) {
       return { success: false, error: "No expression to evaluate" };
     }
+    const wrappedExpr = wrapWithPrelude(expr);
     try {
       const prelude = processDeclarations(declarations);
       const { constructorNames } = processDeclarations(doc.program.declarations, prelude);
       const constructorEnv = createConstructorEnv(constructorNames);
-      const result = evaluate(constructorEnv, expr);
+      const result = evaluate(constructorEnv, wrappedExpr);
       return { success: true, value: valueToString(result) };
     } catch (err) {
       if (err instanceof RuntimeError) {
@@ -3424,12 +3442,13 @@ ${def.name}: ${typeToString(type)}
     let symbols = null;
     let types = null;
     if (expr) {
-      const bindResult = bindWithConstructors(constructorNames, expr);
+      const wrappedExpr = wrapWithPrelude(expr);
+      const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
       symbols = bindResult.symbols;
       for (const diag of bindResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
       }
-      const checkResult = check(typeEnv, registry, expr, symbols);
+      const checkResult = check(typeEnv, registry, wrappedExpr, symbols);
       types = checkResult.types;
       for (const diag of checkResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));

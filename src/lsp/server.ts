@@ -57,7 +57,11 @@ import {
 import type { Diagnostic } from "../diagnostics";
 import { createConstructorEnv, evaluate, RuntimeError, valueToString } from "../eval";
 import { parse, programToExpr, type Program } from "../parser";
-import { declarations as preludeDeclarations, functions as preludeFunctions } from "../prelude";
+import {
+  declarations as preludeDeclarations,
+  functions as preludeFunctions,
+  wrapWithPrelude,
+} from "../prelude";
 
 import { positionToOffset, spanToRange } from "./positions";
 import {
@@ -574,13 +578,16 @@ export const createServer = (transport: Transport): void => {
       return { success: false, error: "No expression to evaluate" };
     }
 
+    // Wrap expression with prelude functions
+    const wrappedExpr = wrapWithPrelude(expr);
+
     try {
       // Get constructor names from prelude + user declarations
       const prelude = processDeclarations(preludeDeclarations);
       const { constructorNames } = processDeclarations(doc.program.declarations, prelude);
 
       const constructorEnv = createConstructorEnv(constructorNames);
-      const result = evaluate(constructorEnv, expr);
+      const result = evaluate(constructorEnv, wrappedExpr);
       return { success: true, value: valueToString(result) };
     } catch (err) {
       if (err instanceof RuntimeError) {
@@ -613,8 +620,11 @@ export const createServer = (transport: Transport): void => {
     let types: TypeMap | null = null;
 
     if (expr) {
+      // Wrap expression with prelude functions
+      const wrappedExpr = wrapWithPrelude(expr);
+
       // Binding phase: resolve names and build symbol table
-      const bindResult = bindWithConstructors(constructorNames, expr);
+      const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
       symbols = bindResult.symbols;
 
       for (const diag of bindResult.diagnostics) {
@@ -622,7 +632,7 @@ export const createServer = (transport: Transport): void => {
       }
 
       // Type checking phase: infer types
-      const checkResult = check(typeEnv, registry, expr, symbols);
+      const checkResult = check(typeEnv, registry, wrappedExpr, symbols);
       types = checkResult.types;
 
       for (const diag of checkResult.diagnostics) {
