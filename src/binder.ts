@@ -360,6 +360,14 @@ const bindPattern = (ctx: BindContext, pattern: ast.Pattern): string[] => {
       }
       return bindings;
     }
+
+    case "PAs": {
+      // Bind the as-name and inner pattern
+      const span = pattern.nameSpan ?? pattern.span ?? { start: 0, end: 0 };
+      addDefinition(ctx, pattern.name, span, "parameter");
+      const innerBindings = bindPattern(ctx, pattern.pattern);
+      return [pattern.name, ...innerBindings];
+    }
   }
 };
 

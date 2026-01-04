@@ -408,6 +408,13 @@ const genPatternMatch = (
 
       return { condition: conditions.join(" && ") || "true", bindings };
     }
+
+    case "IRPAs": {
+      // Match inner pattern and add as-binding
+      const result = genPatternMatch(scrutinee, pattern.pattern);
+      result.bindings.push([pattern.name, scrutinee]);
+      return result;
+    }
   }
 };
 

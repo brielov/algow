@@ -674,6 +674,11 @@ const lowerPattern = (pattern: ast.Pattern, type: Type): ir.IRPattern => {
       });
       return ir.irPRecord(fields, type);
     }
+
+    case "PAs": {
+      const innerPattern = lowerPattern(pattern.pattern, type);
+      return ir.irPAs(innerPattern, pattern.name, type);
+    }
   }
 };
 
@@ -716,6 +721,12 @@ const extendPatternBindings = (ctx: LowerContext, pattern: ast.Pattern, type: Ty
             : { kind: "TVar" as const, name: `_field_${f.name}` };
         extendPatternBindings(ctx, f.pattern, fieldType);
       }
+      break;
+
+    case "PAs":
+      // Extend with the as-binding and inner pattern bindings
+      extendEnv(ctx, pattern.name, type);
+      extendPatternBindings(ctx, pattern.pattern, type);
       break;
   }
 };

@@ -252,7 +252,7 @@ export type IRCase = {
 /**
  * IR patterns - simplified from AST patterns, with types.
  */
-export type IRPattern = IRPVar | IRPWildcard | IRPCon | IRPLit | IRPTuple | IRPRecord;
+export type IRPattern = IRPVar | IRPWildcard | IRPCon | IRPLit | IRPTuple | IRPRecord | IRPAs;
 
 export type IRPVar = {
   readonly kind: "IRPVar";
@@ -293,6 +293,13 @@ export type IRPRecord = {
 export type IRPRecordField = {
   readonly name: string;
   readonly pattern: IRPattern;
+};
+
+export type IRPAs = {
+  readonly kind: "IRPAs";
+  readonly pattern: IRPattern;
+  readonly name: string;
+  readonly type: Type;
 };
 
 // =============================================================================
@@ -521,6 +528,13 @@ export const irPRecord = (fields: readonly IRPRecordField[], type: Type): IRPRec
 export const irPRecordField = (name: string, pattern: IRPattern): IRPRecordField => ({
   name,
   pattern,
+});
+
+export const irPAs = (pattern: IRPattern, name: string, type: Type): IRPAs => ({
+  kind: "IRPAs",
+  pattern,
+  name,
+  type,
 });
 
 // --- Cases ---

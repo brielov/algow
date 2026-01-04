@@ -39,6 +39,7 @@ export enum TokenKind {
   Data,
   True,
   False,
+  As,
 
   // Operators
   Plus, // +
@@ -153,6 +154,7 @@ const keywords: ReadonlyMap<string, TokenKind> = new Map([
   ["data", TokenKind.Data],
   ["true", TokenKind.True],
   ["false", TokenKind.False],
+  ["as", TokenKind.As],
 ]);
 
 // =============================================================================

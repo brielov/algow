@@ -1115,6 +1115,36 @@ describe("Parser", () => {
       expect(matchExpr.cases[1]!.guard).toBeDefined();
       expect(matchExpr.cases[2]!.guard).toBeUndefined();
     });
+
+    it("parses match with as-pattern", () => {
+      const result = parse(`
+        match pair with
+          | (a, b) as whole => whole
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.kind).toBe("Match");
+      expect(matchExpr.cases[0]!.pattern.kind).toBe("PAs");
+      const asPattern = matchExpr.cases[0]!.pattern as ast.PAs;
+      expect(asPattern.name).toBe("whole");
+      expect(asPattern.pattern.kind).toBe("PTuple");
+    });
+
+    it("parses match with constructor as-pattern", () => {
+      const result = parse(`
+        match xs with
+          | Cons x rest as whole => whole
+          | Nil => Nil
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.cases[0]!.pattern.kind).toBe("PAs");
+      const asPattern = matchExpr.cases[0]!.pattern as ast.PAs;
+      expect(asPattern.name).toBe("whole");
+      expect(asPattern.pattern.kind).toBe("PCon");
+    });
   });
 
   describe("data declarations", () => {

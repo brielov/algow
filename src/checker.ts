@@ -1830,6 +1830,23 @@ const inferPattern = (
 
       return [currentSubst, allBindings];
     }
+
+    case "PAs": {
+      // As-pattern: bind name to entire value, also match inner pattern
+      const [s, innerBindings] = inferPattern(ctx, env, pattern.pattern, expectedType, subst);
+      const boundType = applySubst(s, expectedType);
+
+      // Record type for LSP
+      if (pattern.nameSpan) {
+        recordType(ctx, pattern.nameSpan, boundType);
+      }
+
+      // Add the as-binding (the name bound to the whole value)
+      const allBindings: PatternBindings = new Map(innerBindings);
+      allBindings.set(pattern.name, boundType);
+
+      return [s, allBindings];
+    }
   }
 };
 
@@ -2010,6 +2027,14 @@ const getPatternConstructors = (patterns: readonly ast.Pattern[]): Set<string> =
         return new Set(["*"]);
       case "PLit":
         // Literals don't cover all constructors
+        break;
+      case "PAs":
+        // Unwrap as-pattern and check inner pattern
+        const inner = getPatternConstructors([pattern.pattern]);
+        for (const c of inner) {
+          constructors.add(c);
+        }
+        if (inner.has("*")) return new Set(["*"]);
         break;
     }
   }

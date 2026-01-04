@@ -1160,6 +1160,34 @@ describe("Type Inference", () => {
         expect(typeToString(type)).toBe("number");
       });
     });
+
+    describe("as-patterns", () => {
+      it("infers match with as-pattern", () => {
+        // match (1, 2) with | (a, b) as whole => whole end
+        const expr = ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+          ast.case_(
+            ast.pas(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), "whole"),
+            ast.var_("whole"),
+          ),
+        ]);
+        const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("(number, number)");
+      });
+
+      it("as-binding and inner bindings are both in scope", () => {
+        // match (1, 2) with | (a, b) as whole => a end
+        const expr = ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+          ast.case_(
+            ast.pas(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), "whole"),
+            ast.binOp("+", ast.var_("a"), ast.var_("b")),
+          ),
+        ]);
+        const { type, diagnostics } = infer(baseEnv, new Map(), expr);
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("number");
+      });
+    });
   });
 
   describe("data declarations", () => {

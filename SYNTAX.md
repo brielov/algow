@@ -149,6 +149,9 @@ match_arm    = "|" pattern guard? "=>" expression
 
 guard        = "if" expression                    -- pattern guard (must be boolean)
 
+pattern      = pattern_atom "as" LOWER            -- as-pattern
+             | pattern_atom
+
 lambda_expr  = LOWER "=>" expression
 ```
 
@@ -296,6 +299,14 @@ let sign n = match n with
   | x if x > 0 => 1
   | x if x < 0 => 0 - 1
   | _ => 0
+end
+
+-- Using as-patterns to bind whole and parts
+data List a = Nil | Cons a (List a)
+
+let rec duplicate xs = match xs with
+  | Nil => Nil
+  | Cons x rest as whole => Cons whole (duplicate rest)
 end
 ```
 

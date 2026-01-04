@@ -338,7 +338,7 @@ export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=" |
  * Pattern matching is exhaustive: the type checker verifies that all possible
  * cases are covered for algebraic data types.
  */
-export type Pattern = PVar | PWildcard | PCon | PLit | PRecord | PTuple;
+export type Pattern = PVar | PWildcard | PCon | PLit | PRecord | PTuple | PAs;
 
 /**
  * Variable pattern - binds the matched value to a name.
@@ -432,6 +432,22 @@ export interface PRecord extends Node {
 export interface PTuple extends Node {
   readonly kind: "PTuple";
   readonly elements: readonly Pattern[];
+}
+
+/**
+ * As-pattern - binds a name to the entire matched value while also destructuring it.
+ *
+ * Syntax: pattern as name
+ * Example: Cons x rest as whole => Cons whole (duplicate rest)
+ *
+ * The name is bound to the entire value that matched the inner pattern.
+ * Useful when you need both the whole value and its parts.
+ */
+export interface PAs extends Node {
+  readonly kind: "PAs";
+  readonly pattern: Pattern;
+  readonly name: string;
+  readonly nameSpan?: Span;
 }
 
 /**
@@ -735,6 +751,14 @@ export const ptuple = (elements: readonly Pattern[], span?: Span): PTuple => ({
   kind: "PTuple",
   elements,
   span,
+});
+
+export const pas = (pattern: Pattern, name: string, span?: Span, nameSpan?: Span): PAs => ({
+  kind: "PAs",
+  pattern,
+  name,
+  span,
+  nameSpan,
 });
 
 export const case_ = (pattern: Pattern, body: Expr, guard?: Expr, span?: Span): Case => ({

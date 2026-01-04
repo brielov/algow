@@ -392,6 +392,14 @@ const matchPattern = (pattern: ast.Pattern, value: Value): MatchResult => {
       }
       return { matched: true, bindings };
     }
+
+    case "PAs": {
+      // Match inner pattern, then add as-binding
+      const result = matchPattern(pattern.pattern, value);
+      if (!result.matched) return { matched: false };
+      result.bindings.set(pattern.name, value);
+      return result;
+    }
   }
 };
 

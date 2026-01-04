@@ -830,6 +830,24 @@ const PATTERN_STARTS = new Set([
 ]);
 
 const parsePattern = (state: ParserState, allowArgs = true): ast.Pattern => {
+  const pattern = parsePatternCore(state, allowArgs);
+
+  // Check for as-pattern: pattern as name
+  if (at(state, TokenKind.As)) {
+    advance(state);
+    const nameToken = expect(state, TokenKind.Lower, "expected name after 'as'");
+    if (!nameToken) return pattern;
+    const name = text(state, nameToken);
+    const nameSpan = tokenSpan(nameToken);
+    const start = pattern.span?.start ?? nameToken[1];
+    const end = nameToken[2];
+    return ast.pas(pattern, name, span(start, end), nameSpan);
+  }
+
+  return pattern;
+};
+
+const parsePatternCore = (state: ParserState, allowArgs = true): ast.Pattern => {
   const token = state.current;
   const kind = token[0];
   const start = token[1];
@@ -851,7 +869,7 @@ const parsePattern = (state: ParserState, allowArgs = true): ast.Pattern => {
 
       const args: ast.Pattern[] = [];
       while (PATTERN_STARTS.has(state.current[0])) {
-        args.push(parsePattern(state, false));
+        args.push(parsePatternCore(state, false));
       }
       const end = args[args.length - 1]?.span?.end ?? token[2];
       return ast.pcon(name, args, span(start, end), nameSpan);
