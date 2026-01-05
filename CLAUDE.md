@@ -50,7 +50,15 @@ Top-down operator precedence parser producing AST and collecting diagnostics (no
 
 All nodes use discriminated unions with `kind` field. Smart constructors (`num()`, `abs()`, `let_()`, etc.) for concise AST construction. Spans are optional to support programmatic AST (prelude).
 
-### `src/infer.ts` — Type Inference (Algorithm W)
+### `src/binder.ts` — Name Resolution
+
+Resolves variable references and builds symbol tables for LSP features:
+
+- `bindWithConstructors(constructorNames, expr)` → Main entry point
+- Tracks definitions and references with source spans
+- Provides `goToDefinition`, `findReferenceAt`, `findAllOccurrences`
+
+### `src/checker.ts` — Type Inference (Algorithm W)
 
 The core type checker. Key concepts:
 
@@ -63,8 +71,8 @@ The core type checker. Key concepts:
 
 Key functions:
 
-- `infer(env, registry, expr)` → Main entry point returning `InferOutput`
-- `processDataDecl(decl)` → Converts ADT to constructor schemes + registry
+- `check(typeEnv, registry, expr, symbols)` → Main entry point returning `CheckOutput`
+- `processDeclarations(decls)` → Converts ADT declarations to constructor schemes + registry
 - `checkExhaustiveness(registry, type, patterns)` → Pattern match coverage
 
 ### `src/eval.ts` — Tree-walking Interpreter
@@ -90,6 +98,14 @@ Transforms typed AST to ANF IR. Key operations:
 - `normalize(ctx, expr)` → Ensures expression is atomic (binds to fresh variable if needed)
 - Preserves type information from the type checker
 
+### `src/optimize.ts` — IR Optimization
+
+Transforms IR for better code generation:
+
+- Constant folding
+- Dead code elimination
+- Inlining of simple bindings
+
 ### `src/backend/` — Code Generation
 
 JavaScript backend that generates optimized JS from IR:
@@ -107,11 +123,7 @@ Runtime value representations:
 
 ### `src/prelude.ts` — Standard Library
 
-Built-in data types (`Maybe`, `Either`, `List`) and functions (`map`, `filter`, `foldr`, `foldl`) defined as AST nodes.
-
-### `src/symbols.ts` — LSP Support
-
-Symbol table builder for go-to-definition, find references, and rename. Tracks definitions and references with source spans.
+Built-in data types (`Maybe`, `Either`, `List`) and functions (`map`, `filter`, `foldr`, `foldl`, `concat`, `reverse`, `head`, `tail`, `length`, `isEmpty`, `id`, `const`, `compose`, `flip`) defined as AST nodes. The `wrapWithPrelude(expr)` function injects these into user expressions.
 
 ### `src/diagnostics.ts` — Error Reporting
 
@@ -119,13 +131,15 @@ Structured diagnostics with severity levels and source positions.
 
 ### `src/lsp/` — Language Server Protocol
 
-Transport-agnostic LSP implementation with diagnostics, hover, and go-to-definition:
+Transport-agnostic LSP implementation:
 
+- `server.ts` — Core LSP logic (document sync, diagnostics, hover, definition, completion, rename)
 - `transport.ts` — Transport interface + JSON-RPC message types
-- `server.ts` — Core LSP logic (document sync, diagnostics, hover, definition)
 - `stdio.ts` — stdio transport for editors (VS Code, Neovim)
 - `worker.ts` — Web worker transport for browser (Monaco playground)
 - `positions.ts` — Byte offset ↔ LSP Position conversion
+
+Completion triggers on `.` for record field and tuple index access.
 
 ### `playground/` — Monaco Editor Playground
 
