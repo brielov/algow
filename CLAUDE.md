@@ -156,41 +156,49 @@ Web-based playground with Monaco editor and LSP integration:
 -- Line comment
 {- Block comment -}
 
--- Data types
-data Maybe a = Nothing | Just a
-data List a = Nil | Cons a (List a)
+-- Type declarations (algebraic data types)
+type Maybe a = Nothing | Just a
+type List a = Nil | Cons a (List a)
 
 -- Functions (curried, single parameter)
 let add x y = x + y
 let rec fact n = if n == 0 then 1 else n * fact (n - 1)
+
+-- Lambdas
+let double = x -> x * 2
+let add = x y -> x + y  -- multi-param, desugars to x -> y -> x + y
 
 -- Mutual recursion (use 'and' to chain recursive bindings)
 let rec isEven n = if n == 0 then true else isOdd (n - 1)
 and isOdd n = if n == 0 then false else isEven (n - 1)
 
 -- Pattern matching
-match xs with
-| Nil => 0
-| Cons x rest => 1 + length rest
+match xs
+  when Nil -> 0
+  when Cons x rest -> 1 + length rest
 end
 
 -- Pattern guards
-match n with
-| x if x > 0 => x
-| _ => 0
+match n
+  when x if x > 0 -> x
+  when _ -> 0
 end
 
 -- As-patterns (bind whole value while destructuring)
-match xs with
-| Cons x rest as whole => whole
-| Nil => Nil
+match xs
+  when Cons x rest as whole -> whole
+  when Nil -> Nil
 end
 
 -- Or-patterns (match multiple patterns with same result)
-match x with
-| Nothing | Just Nothing => 0
-| Just (Just n) => n
+match x
+  when Nothing | Just Nothing -> 0
+  when Just (Just n) -> n
 end
+
+-- Type annotations
+let add : number -> number -> number = x y -> x + y
+let apply (f : number -> number) (x : number) = f x
 
 -- Operators: +, -, *, /, <, <=, >, >=, ==, !=
 -- Pipe operator: x |> f  (desugars to f x)

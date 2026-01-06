@@ -36,7 +36,8 @@ export enum TokenKind {
   Match,
   With,
   End,
-  Data,
+  Type,
+  When,
   True,
   False,
   As,
@@ -56,7 +57,7 @@ export enum TokenKind {
   EqEq, // ==
   Ne, // !=
   Pipe, // |>
-  Arrow, // =>
+  Arrow, // ->
   Eq, // =
   Bar, // |
   Comma, // ,
@@ -155,7 +156,8 @@ const keywords: ReadonlyMap<string, TokenKind> = new Map([
   ["match", TokenKind.Match],
   ["with", TokenKind.With],
   ["end", TokenKind.End],
-  ["data", TokenKind.Data],
+  ["type", TokenKind.Type],
+  ["when", TokenKind.When],
   ["true", TokenKind.True],
   ["false", TokenKind.False],
   ["as", TokenKind.As],
@@ -350,6 +352,10 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
       return [TokenKind.Plus, start, state.pos];
 
     case MINUS:
+      if (peek(state) === GT) {
+        advance(state);
+        return [TokenKind.Arrow, start, state.pos];
+      }
       return [TokenKind.Minus, start, state.pos];
 
     case STAR:
@@ -376,10 +382,6 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
       if (peek(state) === EQ) {
         advance(state);
         return [TokenKind.EqEq, start, state.pos];
-      }
-      if (peek(state) === GT) {
-        advance(state);
-        return [TokenKind.Arrow, start, state.pos];
       }
       return [TokenKind.Eq, start, state.pos];
 

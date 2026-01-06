@@ -124,12 +124,69 @@ const atNewStatement = (state: ParserState): boolean =>
   state.lexer.atLineStart && !at(state, TokenKind.Bar);
 
 // =============================================================================
+// LAMBDA DETECTION AND PARSING
+// =============================================================================
+
+/**
+ * Check if we're at the start of a lambda: lowercase+ ->
+ * Uses lookahead without consuming tokens.
+ */
+const isLambdaStart = (state: ParserState): boolean => {
+  // Save lexer state
+  const savedPos = state.lexer.pos;
+  const savedCurrent = state.current;
+
+  // Skip lowercase identifiers
+  while (at(state, TokenKind.Lower)) {
+    advance(state);
+  }
+
+  // Check if we hit an arrow
+  const isLambda = at(state, TokenKind.Arrow);
+
+  // Restore lexer state
+  state.lexer.pos = savedPos;
+  state.current = savedCurrent;
+
+  return isLambda;
+};
+
+/**
+ * Parse a lambda: x y z -> body
+ * Produces nested Abs nodes for currying.
+ */
+const parseLambda = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
+  const params: { name: string; span: ast.Span }[] = [];
+
+  // Collect all parameters
+  while (at(state, TokenKind.Lower) && !at(state, TokenKind.Arrow)) {
+    const token = advance(state);
+    params.push({ name: text(state, token), span: tokenSpan(token) });
+  }
+
+  expect(state, TokenKind.Arrow, "expected '->'");
+  const body = parseExpr(state);
+  const end = body.span?.end ?? state.current[1];
+
+  // Build curried lambdas from right to left
+  let result: ast.Expr = body;
+  for (let i = params.length - 1; i >= 0; i--) {
+    const p = params[i]!;
+    const absStart = i === 0 ? start : p.span.start;
+    result = ast.abs(p.name, result, span(absStart, end), p.span);
+  }
+
+  return result;
+};
+
+// =============================================================================
 // ERROR RECOVERY
 // =============================================================================
 
 const synchronize = (state: ParserState): void => {
   while (!at(state, TokenKind.Eof)) {
-    if (atAny(state, TokenKind.Let, TokenKind.Data, TokenKind.If, TokenKind.Match, TokenKind.End)) {
+    if (atAny(state, TokenKind.Let, TokenKind.Type, TokenKind.If, TokenKind.Match, TokenKind.End)) {
       return;
     }
     advance(state);
@@ -162,7 +219,7 @@ export const parse = (source: string): ParseResult => {
 
   // Parse data declarations, bindings, and expression
   while (!at(state, TokenKind.Eof)) {
-    if (at(state, TokenKind.Data)) {
+    if (at(state, TokenKind.Type)) {
       const decl = parseDataDecl(state);
       if (decl) declarations.push(decl);
     } else if (at(state, TokenKind.Let)) {
@@ -294,11 +351,11 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
 };
 
 // =============================================================================
-// DATA DECLARATIONS
+// TYPE DECLARATIONS
 // =============================================================================
 
 const parseDataDecl = (state: ParserState): ast.DataDecl | null => {
-  advance(state); // 'data'
+  advance(state); // 'type'
 
   const nameToken = expect(state, TokenKind.Upper, "expected type name");
   if (!nameToken) {
@@ -368,7 +425,7 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
   const bindings: ast.RecBinding[] = [];
 
   while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
-    if (at(state, TokenKind.Data)) {
+    if (at(state, TokenKind.Type)) {
       const decl = parseDataDecl(state);
       if (decl) declarations.push(decl);
     } else if (at(state, TokenKind.Let)) {
@@ -562,10 +619,8 @@ const parseType = (state: ParserState): ast.TypeExpr | null => {
   if (!left) return null;
 
   // Check for function type: a -> b
-  if (at(state, TokenKind.Minus) && state.lexer.source.charCodeAt(state.current[2]) === 0x3e) {
-    // This is '->' (minus followed by >)
-    advance(state); // -
-    advance(state); // >
+  if (at(state, TokenKind.Arrow)) {
+    advance(state); // ->
     const right = parseType(state); // Right-associative
     if (!right) return left;
     return ast.tyfun(left, right);
@@ -669,17 +724,13 @@ const parsePrefix = (state: ParserState): ast.Expr => {
       return ast.bool(false, tokenSpan(token));
 
     case TokenKind.Lower: {
-      advance(state);
-      const name = text(state, token);
-      const paramSpan = tokenSpan(token);
-
-      if (at(state, TokenKind.Arrow)) {
-        advance(state);
-        const body = parseExpr(state);
-        const end = body.span?.end ?? state.current[1];
-        return ast.abs(name, body, span(start, end), paramSpan);
+      // Check if this is a multi-param lambda: x y z -> body
+      if (isLambdaStart(state)) {
+        return parseLambda(state);
       }
 
+      advance(state);
+      const name = text(state, token);
       return ast.var_(name, tokenSpan(token));
     }
 
@@ -909,7 +960,7 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
     return ast.num(0);
   }
 
-  // Check if this is an annotated lambda: (name : type) => body
+  // Check if this is an annotated lambda: (name : type) -> body
   // We look for: Lower Colon
   if (at(state, TokenKind.Lower)) {
     const savedPos = state.lexer.pos;
@@ -917,13 +968,13 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
     const nameToken = advance(state);
 
     if (at(state, TokenKind.Colon)) {
-      // This is (name : type) => body
+      // This is (name : type) -> body
       advance(state); // :
       const paramType = parseType(state);
       expect(state, TokenKind.RParen, "expected ')' after type");
 
       if (at(state, TokenKind.Arrow)) {
-        advance(state); // =>
+        advance(state); // ->
         const body = parseExpr(state);
         const end = body.span?.end ?? state.current[1];
         return ast.abs(
@@ -935,8 +986,8 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
         );
       }
 
-      // Not followed by =>, this is an error
-      error(state, "expected '=>' after annotated parameter");
+      // Not followed by ->, this is an error
+      error(state, "expected '->' after annotated parameter");
       return ast.num(0);
     }
 
@@ -1048,16 +1099,14 @@ const parseMatch = (state: ParserState): ast.Expr => {
   advance(state); // match
 
   const scrutinee = parseExpr(state);
-  expect(state, TokenKind.With, "expected 'with' after match expression");
 
   const cases: ast.Case[] = [];
-  while (at(state, TokenKind.Bar)) {
+  while (at(state, TokenKind.When)) {
     const caseStart = state.current[1];
-    advance(state);
+    advance(state); // when
     let pattern = parsePattern(state);
 
-    // Check for or-pattern: | pat1 | pat2 | pat3 => ...
-    // If we see another | and it's not followed by =>, it's an or-pattern
+    // Check for or-pattern: when pat1 | pat2 | pat3 -> ...
     if (at(state, TokenKind.Bar)) {
       const alternatives: ast.Pattern[] = [pattern];
       while (at(state, TokenKind.Bar)) {
@@ -1068,14 +1117,14 @@ const parseMatch = (state: ParserState): ast.Expr => {
       pattern = ast.por(alternatives, span(caseStart, orEnd));
     }
 
-    // Parse optional guard: | pattern if condition => body
+    // Parse optional guard: when pattern if condition -> body
     let guard: ast.Expr | undefined;
     if (at(state, TokenKind.If)) {
       advance(state);
       guard = parseExpr(state);
     }
 
-    expect(state, TokenKind.Arrow, "expected '=>' after pattern");
+    expect(state, TokenKind.Arrow, "expected '->' after pattern");
     const body = parseExpr(state);
     const caseEnd = body.span?.end ?? state.current[1];
     cases.push(ast.case_(pattern, body, guard, span(caseStart, caseEnd)));

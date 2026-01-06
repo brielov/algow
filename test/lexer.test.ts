@@ -250,9 +250,14 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.End);
     });
 
-    it("lexes 'data' keyword", () => {
-      const state = createLexer("data");
-      expect(nextToken(state)[0]).toBe(TokenKind.Data);
+    it("lexes 'type' keyword", () => {
+      const state = createLexer("type");
+      expect(nextToken(state)[0]).toBe(TokenKind.Type);
+    });
+
+    it("lexes 'when' keyword", () => {
+      const state = createLexer("when");
+      expect(nextToken(state)[0]).toBe(TokenKind.When);
     });
 
     it("lexes 'true' keyword", () => {
@@ -308,7 +313,7 @@ describe("Lexer", () => {
     });
 
     it("lexes arrow operator", () => {
-      const state = createLexer("=>");
+      const state = createLexer("->");
       expect(nextToken(state)[0]).toBe(TokenKind.Arrow);
     });
 
@@ -536,7 +541,7 @@ describe("Lexer", () => {
     });
 
     it("lexes a lambda expression", () => {
-      const state = createLexer("x => x + 1");
+      const state = createLexer("x -> x + 1");
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Arrow);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
@@ -545,25 +550,24 @@ describe("Lexer", () => {
     });
 
     it("lexes a match expression", () => {
-      const state = createLexer("match x with | Just y => y | Nothing => 0 end");
+      const state = createLexer("match x when Just y -> y when Nothing -> 0 end");
       expect(nextToken(state)[0]).toBe(TokenKind.Match);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
-      expect(nextToken(state)[0]).toBe(TokenKind.With);
-      expect(nextToken(state)[0]).toBe(TokenKind.Bar);
+      expect(nextToken(state)[0]).toBe(TokenKind.When);
       expect(nextToken(state)[0]).toBe(TokenKind.Upper);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Arrow);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
-      expect(nextToken(state)[0]).toBe(TokenKind.Bar);
+      expect(nextToken(state)[0]).toBe(TokenKind.When);
       expect(nextToken(state)[0]).toBe(TokenKind.Upper);
       expect(nextToken(state)[0]).toBe(TokenKind.Arrow);
       expect(nextToken(state)[0]).toBe(TokenKind.Number);
       expect(nextToken(state)[0]).toBe(TokenKind.End);
     });
 
-    it("lexes a data declaration", () => {
-      const state = createLexer("data Maybe a = Nothing | Just a");
-      expect(nextToken(state)[0]).toBe(TokenKind.Data);
+    it("lexes a type declaration", () => {
+      const state = createLexer("type Maybe a = Nothing | Just a");
+      expect(nextToken(state)[0]).toBe(TokenKind.Type);
       expect(nextToken(state)[0]).toBe(TokenKind.Upper);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Eq);
@@ -631,7 +635,7 @@ describe("Lexer", () => {
     });
 
     it("distinguishes similar operators", () => {
-      const state = createLexer("< <= = == => |>");
+      const state = createLexer("< <= = == -> |>");
       expect(nextToken(state)[0]).toBe(TokenKind.Lt);
       expect(nextToken(state)[0]).toBe(TokenKind.Le);
       expect(nextToken(state)[0]).toBe(TokenKind.Eq);

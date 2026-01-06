@@ -444,15 +444,15 @@ describe("Parser", () => {
 
   describe("lambdas", () => {
     it("parses simple lambda", () => {
-      const result = parse("x => x + 1");
+      const result = parse("x -> x + 1");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1))),
       );
     });
 
-    it("parses curried lambda", () => {
-      const result = parse("x => y => x + y");
+    it("parses multi-param lambda", () => {
+      const result = parse("x y -> x + y");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
@@ -460,13 +460,13 @@ describe("Parser", () => {
     });
 
     it("parses lambda in parentheses", () => {
-      const result = parse("(x => x)");
+      const result = parse("(x -> x)");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(ast.abs("x", ast.var_("x")));
     });
 
     it("parses lambda with application in body", () => {
-      const result = parse("f => f x");
+      const result = parse("f -> f x");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.abs("f", ast.app(ast.var_("f"), ast.var_("x"))),
@@ -519,7 +519,7 @@ describe("Parser", () => {
     });
 
     it("parses application of lambda", () => {
-      const result = parse("(x => x) 42");
+      const result = parse("(x -> x) 42");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.app(ast.abs("x", ast.var_("x")), ast.num(42)),
@@ -824,7 +824,7 @@ describe("Parser", () => {
     });
 
     it("parses let with function parameter sugar", () => {
-      // let f x y = x + y in ... should desugar to let f = x => y => x + y in ...
+      // let f x y = x + y in ... should desugar to let f = x y -> x + y in ...
       const result = parse("let f x y = x + y in f 1 2");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
@@ -884,7 +884,7 @@ describe("Parser", () => {
     });
 
     it("parses let with tuple destructuring", () => {
-      // let (x, y) = (1, 2) in x + y desugars to match (1, 2) with | (x, y) => x + y end
+      // let (x, y) = (1, 2) in x + y desugars to match (1, 2) when (x, y) -> x + y end
       const result = parse("let (x, y) = (1, 2) in x + y");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
@@ -930,9 +930,9 @@ describe("Parser", () => {
   describe("match expressions", () => {
     it("parses simple match", () => {
       const result = parse(`
-        match x with
-          | Just y => y
-          | Nothing => 0
+        match x
+          when Just y -> y
+          when Nothing -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -946,8 +946,8 @@ describe("Parser", () => {
 
     it("parses match with wildcard", () => {
       const result = parse(`
-        match x with
-          | _ => 42
+        match x
+          when _ -> 42
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -958,9 +958,9 @@ describe("Parser", () => {
 
     it("parses match with literal patterns", () => {
       const result = parse(`
-        match n with
-          | 0 => true
-          | _ => false
+        match n
+          when 0 -> true
+          when _ -> false
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -974,9 +974,9 @@ describe("Parser", () => {
 
     it("parses match with boolean patterns", () => {
       const result = parse(`
-        match b with
-          | true => 1
-          | false => 0
+        match b
+          when true -> 1
+          when false -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -990,9 +990,9 @@ describe("Parser", () => {
 
     it("parses match with nested constructor patterns", () => {
       const result = parse(`
-        match xs with
-          | Cons x (Cons y Nil) => x + y
-          | _ => 0
+        match xs
+          when Cons x (Cons y Nil) -> x + y
+          when _ -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1005,8 +1005,8 @@ describe("Parser", () => {
 
     it("parses match with tuple patterns", () => {
       const result = parse(`
-        match pair with
-          | (x, y) => x + y
+        match pair
+          when (x, y) -> x + y
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1022,8 +1022,8 @@ describe("Parser", () => {
 
     it("parses match with record patterns", () => {
       const result = parse(`
-        match r with
-          | { x = a, y = b } => a + b
+        match r
+          when { x = a, y = b } -> a + b
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1039,8 +1039,8 @@ describe("Parser", () => {
 
     it("parses match with punned record patterns", () => {
       const result = parse(`
-        match r with
-          | { x, y } => x + y
+        match r
+          when { x, y } -> x + y
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1056,8 +1056,8 @@ describe("Parser", () => {
 
     it("parses match with mixed punned and explicit record patterns", () => {
       const result = parse(`
-        match r with
-          | { x, y = b, z } => x + b + z
+        match r
+          when { x, y = b, z } -> x + b + z
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1077,9 +1077,9 @@ describe("Parser", () => {
 
     it("parses match with string patterns", () => {
       const result = parse(`
-        match s with
-          | "hello" => 1
-          | _ => 0
+        match s
+          when "hello" -> 1
+          when _ -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1093,9 +1093,9 @@ describe("Parser", () => {
 
     it("parses match with pattern guard", () => {
       const result = parse(`
-        match n with
-          | x if x > 0 => x
-          | _ => 0
+        match n
+          when x if x > 0 -> x
+          when _ -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1109,10 +1109,10 @@ describe("Parser", () => {
 
     it("parses match with multiple pattern guards", () => {
       const result = parse(`
-        match n with
-          | x if x > 0 => 1
-          | x if x < 0 => 2
-          | _ => 0
+        match n
+          when x if x > 0 -> 1
+          when x if x < 0 -> 2
+          when _ -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1125,8 +1125,8 @@ describe("Parser", () => {
 
     it("parses match with as-pattern", () => {
       const result = parse(`
-        match pair with
-          | (a, b) as whole => whole
+        match pair
+          when (a, b) as whole -> whole
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1140,9 +1140,9 @@ describe("Parser", () => {
 
     it("parses match with constructor as-pattern", () => {
       const result = parse(`
-        match xs with
-          | Cons x rest as whole => whole
-          | Nil => Nil
+        match xs
+          when Cons x rest as whole -> whole
+          when Nil -> Nil
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1155,9 +1155,9 @@ describe("Parser", () => {
 
     it("parses match with or-pattern", () => {
       const result = parse(`
-        match x with
-          | Nothing | Just Nothing => 0
-          | Just (Just n) => n
+        match x
+          when Nothing | Just Nothing -> 0
+          when Just (Just n) -> n
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1171,9 +1171,9 @@ describe("Parser", () => {
 
     it("parses or-pattern with multiple alternatives", () => {
       const result = parse(`
-        match n with
-          | 0 | 1 | 2 => true
-          | _ => false
+        match n
+          when 0 | 1 | 2 -> true
+          when _ -> false
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1185,9 +1185,9 @@ describe("Parser", () => {
 
     it("parses or-pattern with variable bindings", () => {
       const result = parse(`
-        match x with
-          | Just x | Right x => x
-          | _ => 0
+        match x
+          when Just x | Right x -> x
+          when _ -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1197,9 +1197,9 @@ describe("Parser", () => {
 
     it("parses or-pattern with guard", () => {
       const result = parse(`
-        match x with
-          | Just n | Right n if n > 0 => n
-          | _ => 0
+        match x
+          when Just n | Right n if n > 0 -> n
+          when _ -> 0
         end
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1209,9 +1209,9 @@ describe("Parser", () => {
     });
   });
 
-  describe("data declarations", () => {
-    it("parses simple data declaration", () => {
-      const result = parse("data Bool = True | False");
+  describe("type declarations", () => {
+    it("parses simple type declaration", () => {
+      const result = parse("type Bool = True | False");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
       expect(stripSpans(result.program.declarations[0])).toEqual(
@@ -1219,42 +1219,42 @@ describe("Parser", () => {
       );
     });
 
-    it("parses data declaration with type variable argument", () => {
+    it("parses type declaration with type variable argument", () => {
       // This tests parseTypeAtomSimple TyVar case
-      const result = parse("data Box a = MkBox a");
+      const result = parse("type Box a = MkBox a");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Box", ["a"], [ast.conDecl("MkBox", [ast.tyvar("a")])]),
       );
     });
 
-    it("parses data declaration with type constructor argument", () => {
+    it("parses type declaration with type constructor argument", () => {
       // This tests parseTypeAtomSimple TyCon case
-      const result = parse("data Wrap = MkWrap Int");
+      const result = parse("type Wrap = MkWrap Int");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Wrap", [], [ast.conDecl("MkWrap", [ast.tycon("Int")])]),
       );
     });
 
-    it("parses data declaration with parenthesized type", () => {
+    it("parses type declaration with parenthesized type", () => {
       // This tests parseTypeAtomSimple LParen case
-      const result = parse("data Pair a b = MkPair (a) (b)");
+      const result = parse("type Pair a b = MkPair (a) (b)");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Pair", ["a", "b"], [ast.conDecl("MkPair", [ast.tyvar("a"), ast.tyvar("b")])]),
       );
     });
 
-    it("parses data declaration with nested type application", () => {
+    it("parses type declaration with nested type application", () => {
       // This tests parseTypeAtom returning type applications
-      const result = parse("data Tree a = Leaf | Node (Tree a) a (Tree a)");
+      const result = parse("type Tree a = Leaf | Node (Tree a) a (Tree a)");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
     });
 
-    it("parses parameterized data declaration", () => {
-      const result = parse("data Maybe a = Nothing | Just a");
+    it("parses parameterized type declaration", () => {
+      const result = parse("type Maybe a = Nothing | Just a");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
       expect(stripSpans(result.program.declarations[0])).toEqual(
@@ -1266,8 +1266,8 @@ describe("Parser", () => {
       );
     });
 
-    it("parses recursive data declaration", () => {
-      const result = parse("data List a = Nil | Cons a (List a)");
+    it("parses recursive type declaration", () => {
+      const result = parse("type List a = Nil | Cons a (List a)");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
       expect(stripSpans(result.program.declarations[0])).toEqual(
@@ -1282,8 +1282,8 @@ describe("Parser", () => {
       );
     });
 
-    it("parses multi-parameter data declaration", () => {
-      const result = parse("data Either a b = Left a | Right b");
+    it("parses multi-parameter type declaration", () => {
+      const result = parse("type Either a b = Left a | Right b");
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(1);
       expect(stripSpans(result.program.declarations[0])).toEqual(
@@ -1295,10 +1295,10 @@ describe("Parser", () => {
       );
     });
 
-    it("parses multiple data declarations", () => {
+    it("parses multiple type declarations", () => {
       const result = parse(`
-        data Bool = True | False
-        data Maybe a = Nothing | Just a
+        type Bool = True | False
+        type Maybe a = Nothing | Just a
         42
       `);
       expect(result.diagnostics).toHaveLength(0);
@@ -1308,7 +1308,7 @@ describe("Parser", () => {
 
     it("parses parenthesized type in constructor field", () => {
       // This covers parseTypeAtom line 299-304 (parenthesized types)
-      const result = parse("data Wrapper = Wrap (Maybe Int)");
+      const result = parse("type Wrapper = Wrap (Maybe Int)");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl(
@@ -1321,7 +1321,7 @@ describe("Parser", () => {
 
     it("parses type application with type constructor argument", () => {
       // This covers parseTypeAtomSimple lines 314-316 (Upper token)
-      const result = parse("data Container = Box Maybe");
+      const result = parse("type Container = Box Maybe");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Container", [], [ast.conDecl("Box", [ast.tycon("Maybe")])]),
@@ -1330,7 +1330,7 @@ describe("Parser", () => {
 
     it("parses deeply nested parenthesized type", () => {
       // This covers parseTypeAtomSimple lines 318-323 (parenthesized in simple)
-      const result = parse("data Deep = Deep (Either (Maybe Int) (List String))");
+      const result = parse("type Deep = Deep (Either (Maybe Int) (List String))");
       expect(result.diagnostics).toHaveLength(0);
       const decl = result.program.declarations[0] as ast.DataDecl;
       expect(decl.constructors[0]!.name).toBe("Deep");
@@ -1347,7 +1347,7 @@ describe("Parser", () => {
     it("stops type application at non-type token", () => {
       // After "Maybe" in first constructor, "|" is not a valid type atom
       // The while loop condition catches this before parseTypeAtomSimple is called
-      const result = parse("data Foo = Bar Maybe | Baz");
+      const result = parse("type Foo = Bar Maybe | Baz");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Foo", [], [ast.conDecl("Bar", [ast.tycon("Maybe")]), ast.conDecl("Baz", [])]),
@@ -1358,7 +1358,7 @@ describe("Parser", () => {
       // This covers parseTypeAtom line 291 (break when parseTypeAtomSimple returns null)
       // Maybe () - the empty parens cause parseTypeAtomSimple to return null
       // The parser gracefully handles this by stopping the type application
-      const result = parse("data Foo = Bar Maybe ()");
+      const result = parse("type Foo = Bar Maybe ()");
       // Parser stops at () - Maybe becomes the only field, () is left unparsed
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Foo", [], [ast.conDecl("Bar", [ast.tycon("Maybe")])]),
@@ -1368,7 +1368,7 @@ describe("Parser", () => {
     it("handles standalone parenthesized type", () => {
       // This covers parseTypeAtom lines 299-304 (LParen branch in parseTypeAtom)
       // When the first token in parseTypeAtom is LParen
-      const result = parse("data Wrapper = Wrap (Int)");
+      const result = parse("type Wrapper = Wrap (Int)");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.declarations[0])).toEqual(
         ast.dataDecl("Wrapper", [], [ast.conDecl("Wrap", [ast.tycon("Int")])]),
@@ -1495,7 +1495,7 @@ describe("Parser", () => {
     });
 
     it("reports error for missing 'end' in match", () => {
-      const result = parse("match x with | y => y");
+      const result = parse("match x when y -> y");
       expect(result.diagnostics.length).toBeGreaterThan(0);
       expect(result.diagnostics[0]!.message).toContain("end");
     });
@@ -1514,22 +1514,22 @@ describe("Parser", () => {
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
-    it("synchronizes after error in data declaration", () => {
+    it("synchronizes after error in type declaration", () => {
       const result = parse(`
-        data Maybe =
-        data List a = Nil | Cons a (List a)
+        type Maybe =
+        type List a = Nil | Cons a (List a)
         Nil
       `);
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
-    it("reports error for missing = in data declaration", () => {
-      const result = parse("data Maybe a Nothing | Just a");
+    it("reports error for missing = in type declaration", () => {
+      const result = parse("type Maybe a Nothing | Just a");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
     it("reports error for missing constructor name", () => {
-      const result = parse("data Maybe a = | Just a");
+      const result = parse("type Maybe a = | Just a");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
@@ -1545,20 +1545,21 @@ describe("Parser", () => {
       expect(result.diagnostics[0]!.message).toContain("in");
     });
 
-    it("reports error for missing with in match", () => {
-      const result = parse("match x | y => y end");
-      expect(result.diagnostics.length).toBeGreaterThan(0);
-      expect(result.diagnostics[0]!.message).toContain("with");
+    it("allows empty match (checked semantically later)", () => {
+      // Empty match is syntactically valid (exhaustiveness checked later)
+      const result = parse("match x end");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(result.program.expr?.kind).toBe("Match");
     });
 
     it("reports error for missing arrow in match case", () => {
-      const result = parse("match x with | y y end");
+      const result = parse("match x when y y end");
       expect(result.diagnostics.length).toBeGreaterThan(0);
-      expect(result.diagnostics[0]!.message).toContain("=>");
+      expect(result.diagnostics[0]!.message).toContain("->");
     });
 
     it("reports error for unexpected token in pattern", () => {
-      const result = parse("match x with | + => 1 end");
+      const result = parse("match x when + -> 1 end");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
@@ -1583,28 +1584,28 @@ describe("Parser", () => {
     });
 
     it("reports error for missing field name in record pattern", () => {
-      const result = parse("match r with | { = x } => x end");
+      const result = parse("match r when { = x } -> x end");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
     it("reports error for missing = in record pattern field", () => {
-      const result = parse("match r with | { x y } => y end");
+      const result = parse("match r when { x y } -> y end");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
     it("reports error for missing closing brace in record pattern", () => {
-      const result = parse("match r with | { x = y => y end");
+      const result = parse("match r when { x = y -> y end");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
     it("reports error for empty tuple pattern", () => {
-      const result = parse("match x with | () => 1 end");
+      const result = parse("match x when () -> 1 end");
       expect(result.diagnostics.length).toBeGreaterThan(0);
       expect(result.diagnostics[0]!.message).toContain("empty");
     });
 
     it("reports error for missing closing paren in tuple pattern", () => {
-      const result = parse("match x with | (a, b => a end");
+      const result = parse("match x when (a, b -> a end");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
@@ -1614,7 +1615,7 @@ describe("Parser", () => {
     });
 
     it("reports error for missing closing paren in type", () => {
-      const result = parse("data Foo = Bar (List a");
+      const result = parse("type Foo = Bar (List a");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
@@ -1623,16 +1624,16 @@ describe("Parser", () => {
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
-    it("reports error for missing type name in data declaration", () => {
-      // data without a type name
-      const result = parse("data = Nothing");
+    it("reports error for missing type name in type declaration", () => {
+      // type without a type name
+      const result = parse("type = Nothing");
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
 
-    it("synchronizes after missing type name in data declaration", () => {
+    it("synchronizes after missing type name in type declaration", () => {
       // Should synchronize and continue parsing
       const result = parse(`
-        data = Nothing
+        type = Nothing
         let x = 1
         x
       `);
@@ -1644,7 +1645,7 @@ describe("Parser", () => {
 
   describe("pattern atom edge cases", () => {
     it("parses number literal in constructor pattern", () => {
-      const result = parse("match x with | Foo 42 => 1 end");
+      const result = parse("match x when Foo 42 -> 1 end");
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
@@ -1652,7 +1653,7 @@ describe("Parser", () => {
     });
 
     it("parses string literal in constructor pattern", () => {
-      const result = parse('match x with | Foo "hello" => 1 end');
+      const result = parse('match x when Foo "hello" -> 1 end');
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
@@ -1660,7 +1661,7 @@ describe("Parser", () => {
     });
 
     it("parses true in constructor pattern", () => {
-      const result = parse("match x with | Foo true => 1 end");
+      const result = parse("match x when Foo true -> 1 end");
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
@@ -1668,7 +1669,7 @@ describe("Parser", () => {
     });
 
     it("parses false in constructor pattern", () => {
-      const result = parse("match x with | Foo false => 1 end");
+      const result = parse("match x when Foo false -> 1 end");
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
@@ -1676,7 +1677,7 @@ describe("Parser", () => {
     });
 
     it("parses tuple pattern in constructor pattern", () => {
-      const result = parse("match x with | Foo (a, b) => a end");
+      const result = parse("match x when Foo (a, b) -> a end");
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
@@ -1684,7 +1685,7 @@ describe("Parser", () => {
     });
 
     it("parses record pattern in constructor pattern", () => {
-      const result = parse("match x with | Foo { x = a } => a end");
+      const result = parse("match x when Foo { x = a } -> a end");
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
@@ -1692,7 +1693,7 @@ describe("Parser", () => {
     });
 
     it("parses nullary constructor in constructor pattern", () => {
-      const result = parse("match x with | Foo Bar => 1 end");
+      const result = parse("match x when Foo Bar -> 1 end");
       expect(result.diagnostics).toHaveLength(0);
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
@@ -1728,10 +1729,10 @@ describe("Parser", () => {
 
     it("parses list operations", () => {
       const result = parse(`
-        data List a = Nil | Cons a (List a)
-        let rec length xs = match xs with
-          | Nil => 0
-          | Cons _ rest => 1 + length rest
+        type List a = Nil | Cons a (List a)
+        let rec length xs = match xs
+          when Nil -> 0
+          when Cons _ rest -> 1 + length rest
         end
         Cons 1 (Cons 2 Nil) |> length
       `);
@@ -1742,12 +1743,12 @@ describe("Parser", () => {
 
     it("parses maybe operations", () => {
       const result = parse(`
-        data Maybe a = Nothing | Just a
-        let map f m = match m with
-          | Nothing => Nothing
-          | Just x => Just (f x)
+        type Maybe a = Nothing | Just a
+        let map f m = match m
+          when Nothing -> Nothing
+          when Just x -> Just (f x)
         end
-        map (x => x + 1) (Just 42)
+        map (x -> x + 1) (Just 42)
       `);
       expect(result.diagnostics).toHaveLength(0);
     });
@@ -1818,7 +1819,7 @@ describe("Parser", () => {
     });
 
     it("parses annotated lambda", () => {
-      const result = parse("(x : number) => x + 1");
+      const result = parse("(x : number) -> x + 1");
       expect(result.diagnostics).toHaveLength(0);
       const expr = result.program.expr;
       expect(expr?.kind).toBe("Abs");
@@ -1893,10 +1894,10 @@ describe("Parser", () => {
         expect(result.program.modules[0]?.bindings).toHaveLength(0);
       });
 
-      it("parses module with data declaration", () => {
+      it("parses module with type declaration", () => {
         const result = parse(`
           module Maybe
-            data Maybe a = Nothing | Just a
+            type Maybe a = Nothing | Just a
           end
         `);
         expect(result.diagnostics).toHaveLength(0);
@@ -1922,14 +1923,14 @@ describe("Parser", () => {
       it("parses module with multiple declarations and bindings", () => {
         const result = parse(`
           module List
-            data List a = Nil | Cons a (List a)
-            let rec map f xs = match xs with
-              | Nil => Nil
-              | Cons x rest => Cons (f x) (map f rest)
+            type List a = Nil | Cons a (List a)
+            let rec map f xs = match xs
+              when Nil -> Nil
+              when Cons x rest -> Cons (f x) (map f rest)
             end
-            let isEmpty xs = match xs with
-              | Nil => true
-              | Cons _ _ => false
+            let isEmpty xs = match xs
+              when Nil -> true
+              when Cons _ _ -> false
             end
           end
         `);
@@ -2029,9 +2030,9 @@ describe("Parser", () => {
       });
 
       it("parses qualified access in expressions", () => {
-        const result = parse("List.map (fn x => x + 1) xs");
+        const result = parse("List.map (x -> x + 1) xs");
         expect(result.diagnostics).toHaveLength(0);
-        // This should parse as (List.map (fn x => x + 1)) xs
+        // This should parse as (List.map (x -> x + 1)) xs
         expect(result.program.expr?.kind).toBe("App");
       });
 
@@ -2049,9 +2050,9 @@ describe("Parser", () => {
     describe("qualified patterns", () => {
       it("parses qualified constructor in pattern", () => {
         const result = parse(`
-          match x with
-          | Maybe.Just y => y
-          | Maybe.Nothing => 0
+          match x
+          when Maybe.Just y -> y
+          when Maybe.Nothing -> 0
           end
         `);
         expect(result.diagnostics).toHaveLength(0);
@@ -2068,9 +2069,9 @@ describe("Parser", () => {
 
       it("parses qualified constructor with no args", () => {
         const result = parse(`
-          match xs with
-          | List.Nil => 0
-          | List.Cons x _ => x
+          match xs
+          when List.Nil -> 0
+          when List.Cons x _ -> x
           end
         `);
         expect(result.diagnostics).toHaveLength(0);
