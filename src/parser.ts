@@ -194,6 +194,55 @@ const synchronize = (state: ParserState): void => {
 };
 
 // =============================================================================
+// PARAMETER PARSING
+// =============================================================================
+
+type Param = { name: string; span: ast.Span; type?: ast.TypeExpr };
+
+/**
+ * Parse function parameters: name | (name : type)
+ * Returns array of parameters with optional type annotations.
+ */
+const parseParams = (state: ParserState): Param[] => {
+  const params: Param[] = [];
+
+  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
+    if (at(state, TokenKind.LParen)) {
+      advance(state); // (
+      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
+      if (!paramToken) break;
+      const paramName = text(state, paramToken);
+      let paramType: ast.TypeExpr | undefined;
+
+      if (at(state, TokenKind.Colon)) {
+        advance(state); // :
+        paramType = parseType(state) ?? undefined;
+      }
+
+      expect(state, TokenKind.RParen, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      const paramToken = advance(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
+  }
+
+  return params;
+};
+
+/**
+ * Wrap body in nested lambdas for currying.
+ */
+const wrapInLambdas = (params: readonly Param[], body: ast.Expr): ast.Expr => {
+  let result = body;
+  for (let i = params.length - 1; i >= 0; i--) {
+    const p = params[i]!;
+    result = ast.abs(p.name, result, undefined, p.span, p.type);
+  }
+  return result;
+};
+
+// =============================================================================
 // MAIN PARSE FUNCTION
 // =============================================================================
 
@@ -269,7 +318,7 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
     const body = parseExpr(state);
     const end = body.span?.end ?? state.current[1];
 
-    // Desugar to: match value with | pattern => body end
+    // Desugar to: match value when pattern -> body end
     return { kind: "expr", expr: ast.match(value, [ast.case_(pattern, body)], span(start, end)) };
   }
 
@@ -280,30 +329,7 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
-
-  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
-  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
-    if (at(state, TokenKind.LParen)) {
-      // Parse (name : type)
-      advance(state); // (
-      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-      if (!paramToken) break;
-      const paramName = text(state, paramToken);
-      let paramType: ast.TypeExpr | undefined;
-
-      if (at(state, TokenKind.Colon)) {
-        advance(state); // :
-        paramType = parseType(state) ?? undefined;
-      }
-
-      expect(state, TokenKind.RParen, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      // Plain identifier (no annotation)
-      const paramToken = advance(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
-  }
+  const params = parseParams(state);
 
   // Check for return type: let f x y : number = ...
   let returnType: ast.TypeExpr | undefined;
@@ -320,11 +346,7 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
   const body = parseExpr(state);
 
   if (at(state, TokenKind.In) || (recursive && at(state, TokenKind.AndKw))) {
-    let value = body;
-    for (let i = params.length - 1; i >= 0; i--) {
-      const p = params[i]!;
-      value = ast.abs(p.name, value, undefined, p.span, p.type);
-    }
+    const value = wrapInLambdas(params, body);
 
     if (recursive) {
       // Parse additional bindings with 'and'
@@ -460,28 +482,7 @@ const parseModuleBinding = (state: ParserState): ast.RecBinding | null => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
-
-  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
-  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
-    if (at(state, TokenKind.LParen)) {
-      advance(state); // (
-      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-      if (!paramToken) break;
-      const paramName = text(state, paramToken);
-      let paramType: ast.TypeExpr | undefined;
-
-      if (at(state, TokenKind.Colon)) {
-        advance(state); // :
-        paramType = parseType(state) ?? undefined;
-      }
-
-      expect(state, TokenKind.RParen, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      const paramToken = advance(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
-  }
+  const params = parseParams(state);
 
   let returnType: ast.TypeExpr | undefined;
   if (at(state, TokenKind.Colon)) {
@@ -490,13 +491,7 @@ const parseModuleBinding = (state: ParserState): ast.RecBinding | null => {
   }
 
   expect(state, TokenKind.Eq, "expected '=' after parameters");
-
-  let value = parseExpr(state);
-
-  for (let i = params.length - 1; i >= 0; i--) {
-    const p = params[i]!;
-    value = ast.abs(p.name, value, undefined, p.span, p.type);
-  }
+  const value = wrapInLambdas(params, parseExpr(state));
 
   return ast.recBinding(name, value, nameSpan, returnType);
 };
@@ -1147,46 +1142,16 @@ const parseRecBinding = (state: ParserState): ast.RecBinding => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
+  const params = parseParams(state);
 
-  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
-  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
-    if (at(state, TokenKind.LParen)) {
-      // Parse (name : type)
-      advance(state); // (
-      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-      if (!paramToken) break;
-      const paramName = text(state, paramToken);
-      let paramType: ast.TypeExpr | undefined;
-
-      if (at(state, TokenKind.Colon)) {
-        advance(state); // :
-        paramType = parseType(state) ?? undefined;
-      }
-
-      expect(state, TokenKind.RParen, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      // Plain identifier (no annotation)
-      const paramToken = advance(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
-  }
-
-  // Check for return type: and f x y : number = ...
   let returnType: ast.TypeExpr | undefined;
   if (at(state, TokenKind.Colon)) {
-    advance(state); // :
+    advance(state);
     returnType = parseType(state) ?? undefined;
   }
 
   expect(state, TokenKind.Eq, "expected '=' after name");
-
-  let value = parseExpr(state);
-
-  for (let i = params.length - 1; i >= 0; i--) {
-    const p = params[i]!;
-    value = ast.abs(p.name, value, undefined, p.span, p.type);
-  }
+  const value = wrapInLambdas(params, parseExpr(state));
 
   return ast.recBinding(name, value, nameSpan, returnType);
 };
@@ -1232,46 +1197,16 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
+  const params = parseParams(state);
 
-  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
-  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
-    if (at(state, TokenKind.LParen)) {
-      // Parse (name : type)
-      advance(state); // (
-      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-      if (!paramToken) break;
-      const paramName = text(state, paramToken);
-      let paramType: ast.TypeExpr | undefined;
-
-      if (at(state, TokenKind.Colon)) {
-        advance(state); // :
-        paramType = parseType(state) ?? undefined;
-      }
-
-      expect(state, TokenKind.RParen, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      // Plain identifier (no annotation)
-      const paramToken = advance(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
-  }
-
-  // Check for return type: let f x y : number = ...
   let returnType: ast.TypeExpr | undefined;
   if (at(state, TokenKind.Colon)) {
-    advance(state); // :
+    advance(state);
     returnType = parseType(state) ?? undefined;
   }
 
   expect(state, TokenKind.Eq, "expected '=' after name");
-
-  let value = parseExpr(state);
-
-  for (let i = params.length - 1; i >= 0; i--) {
-    const p = params[i]!;
-    value = ast.abs(p.name, value, undefined, p.span, p.type);
-  }
+  const value = wrapInLambdas(params, parseExpr(state));
 
   expect(state, TokenKind.In, "expected 'in' after let value");
 
@@ -1283,7 +1218,7 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
 
 /**
  * Parse let destructuring: let pattern = expr in body
- * Desugars to: match expr with | pattern => body end
+ * Desugars to: match expr when pattern -> body end
  */
 const parseLetDestructuring = (state: ParserState, start: number): ast.Expr => {
   const pattern = parsePattern(state);
@@ -1297,7 +1232,7 @@ const parseLetDestructuring = (state: ParserState, start: number): ast.Expr => {
   const body = parseExpr(state);
   const end = body.span?.end ?? state.current[1];
 
-  // Desugar to: match value with | pattern => body end
+  // Desugar to: match value when pattern -> body end
   return ast.match(value, [ast.case_(pattern, body)], span(start, end));
 };
 

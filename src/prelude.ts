@@ -14,21 +14,21 @@ import * as ast from "./ast";
 // Data Declarations
 // =============================================================================
 
-/** data Maybe a = Nothing | Just a */
+/** type Maybe a = Nothing | Just a */
 export const maybe = ast.dataDecl(
   "Maybe",
   ["a"],
   [ast.conDecl("Nothing", []), ast.conDecl("Just", [ast.tyvar("a")])],
 );
 
-/** data Either a b = Left a | Right b */
+/** type Either a b = Left a | Right b */
 export const either = ast.dataDecl(
   "Either",
   ["a", "b"],
   [ast.conDecl("Left", [ast.tyvar("a")]), ast.conDecl("Right", [ast.tyvar("b")])],
 );
 
-/** data List a = Nil | Cons a (List a) */
+/** type List a = Nil | Cons a (List a) */
 export const list = ast.dataDecl(
   "List",
   ["a"],
@@ -44,7 +44,7 @@ export const declarations = [maybe, either, list] as const;
 // Function Expressions (for use in modules)
 // =============================================================================
 
-/** map = fn f => fn xs => match xs with Nil => Nil | Cons x rest => Cons (f x) (map f rest) */
+/** map f xs = match xs when Nil -> Nil | Cons x rest -> Cons (f x) (map f rest) end */
 const mapExpr = ast.abs(
   "f",
   ast.abs(
@@ -62,7 +62,7 @@ const mapExpr = ast.abs(
   ),
 );
 
-/** filter = fn p => fn xs => match xs with Nil => Nil | Cons x rest => if p x then Cons x (filter p rest) else filter p rest */
+/** filter p xs = match xs when Nil -> Nil | Cons x rest -> if p x then Cons x (filter p rest) else filter p rest end */
 const filterExpr = ast.abs(
   "p",
   ast.abs(
@@ -84,7 +84,7 @@ const filterExpr = ast.abs(
   ),
 );
 
-/** head = fn xs => match xs with Nil => Nothing | Cons x _ => Just x */
+/** head xs = match xs when Nil -> Nothing | Cons x _ -> Just x end */
 const headExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -96,7 +96,7 @@ const headExpr = ast.abs(
   ]),
 );
 
-/** tail = fn xs => match xs with Nil => Nothing | Cons _ rest => Just rest */
+/** tail xs = match xs when Nil -> Nothing | Cons _ rest -> Just rest end */
 const tailExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -108,7 +108,7 @@ const tailExpr = ast.abs(
   ]),
 );
 
-/** isEmpty = fn xs => match xs with Nil => true | Cons _ _ => false */
+/** isEmpty xs = match xs when Nil -> true | Cons _ _ -> false end */
 const isEmptyExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -117,7 +117,7 @@ const isEmptyExpr = ast.abs(
   ]),
 );
 
-/** length = fn xs => match xs with Nil => 0 | Cons _ rest => 1 + length rest */
+/** length xs = match xs when Nil -> 0 | Cons _ rest -> 1 + length rest end */
 const lengthExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -129,7 +129,7 @@ const lengthExpr = ast.abs(
   ]),
 );
 
-/** foldr = fn f => fn z => fn xs => match xs with Nil => z | Cons x rest => f x (foldr f z rest) */
+/** foldr f z xs = match xs when Nil -> z | Cons x rest -> f x (foldr f z rest) end */
 const foldrExpr = ast.abs(
   "f",
   ast.abs(
@@ -153,7 +153,7 @@ const foldrExpr = ast.abs(
   ),
 );
 
-/** foldl = fn f => fn z => fn xs => match xs with Nil => z | Cons x rest => foldl f (f z x) rest */
+/** foldl f z xs = match xs when Nil -> z | Cons x rest -> foldl f (f z x) rest end */
 const foldlExpr = ast.abs(
   "f",
   ast.abs(
@@ -177,7 +177,7 @@ const foldlExpr = ast.abs(
   ),
 );
 
-/** reverse = fn xs => foldl (fn acc => fn x => Cons x acc) Nil xs */
+/** reverse xs = foldl (acc x -> Cons x acc) Nil xs */
 const reverseExpr = ast.abs(
   "xs",
   ast.app(
@@ -195,7 +195,7 @@ const reverseExpr = ast.abs(
   ),
 );
 
-/** concat = fn xs => fn ys => foldr Cons ys xs */
+/** concat xs ys = foldr Cons ys xs */
 const concatExpr = ast.abs(
   "xs",
   ast.abs(
@@ -204,66 +204,23 @@ const concatExpr = ast.abs(
   ),
 );
 
-/** id = fn x => x */
+/** id x = x */
 const idExpr = ast.abs("x", ast.var_("x"));
 
-/** const = fn x => fn _ => x */
+/** const x _ = x */
 const constExpr = ast.abs("x", ast.abs("_", ast.var_("x")));
 
-/** compose = fn f => fn g => fn x => f (g x) */
+/** compose f g x = f (g x) */
 const composeExpr = ast.abs(
   "f",
   ast.abs("g", ast.abs("x", ast.app(ast.var_("f"), ast.app(ast.var_("g"), ast.var_("x"))))),
 );
 
-/** flip = fn f => fn a => fn b => f b a */
+/** flip f a b = f b a */
 const flipExpr = ast.abs(
   "f",
   ast.abs("a", ast.abs("b", ast.app(ast.app(ast.var_("f"), ast.var_("b")), ast.var_("a")))),
 );
-
-// =============================================================================
-// Module Definitions
-// =============================================================================
-
-/** Maybe module - contains Maybe type */
-export const maybeModule = ast.moduleDecl("Maybe", [maybe], []);
-
-/** Either module - contains Either type */
-export const eitherModule = ast.moduleDecl("Either", [either], []);
-
-/** List module - contains List type and operations */
-export const listModule = ast.moduleDecl(
-  "List",
-  [list],
-  [
-    ast.recBinding("map", mapExpr),
-    ast.recBinding("filter", filterExpr),
-    ast.recBinding("head", headExpr),
-    ast.recBinding("tail", tailExpr),
-    ast.recBinding("isEmpty", isEmptyExpr),
-    ast.recBinding("length", lengthExpr),
-    ast.recBinding("foldr", foldrExpr),
-    ast.recBinding("foldl", foldlExpr),
-    ast.recBinding("reverse", reverseExpr),
-    ast.recBinding("concat", concatExpr),
-  ],
-);
-
-/** Core module - utility functions */
-export const coreModule = ast.moduleDecl(
-  "Core",
-  [],
-  [
-    ast.recBinding("id", idExpr),
-    ast.recBinding("const", constExpr),
-    ast.recBinding("compose", composeExpr),
-    ast.recBinding("flip", flipExpr),
-  ],
-);
-
-/** All prelude modules */
-export const preludeModules = [maybeModule, eitherModule, listModule, coreModule] as const;
 
 // =============================================================================
 // Prelude Function Names (for LSP completion)

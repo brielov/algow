@@ -436,7 +436,7 @@ const removeUnusedBinding = (binding: ir.IRBinding, uses: Map<string, number>): 
 
 /**
  * Collect all parameters from nested lambdas.
- * `fn a => fn b => fn c => body` returns ["a", "b", "c"]
+ * `a -> b -> c -> body` returns ["a", "b", "c"]
  */
 const collectLambdaParams = (binding: ir.IRLambdaBinding): string[] => {
   const params: string[] = [binding.param];

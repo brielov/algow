@@ -116,11 +116,11 @@ export interface Str extends Node {
  * Let binding - introduces a new variable with polymorphic generalization.
  *
  * Syntax: let name = value in body
- * Example: let id = fn x => x in id 42
+ * Example: let id = x -> x in id 42
  *
  * The bound variable `name` is generalized (made polymorphic) before being
  * added to the environment for type checking `body`. This means:
- *   let id = fn x => x in (id 42, id "hello")
+ *   let id = x -> x in (id 42, id "hello")
  * is valid because `id` has type `∀a. a -> a` and can be instantiated
  * at different types in the body.
  */
@@ -149,7 +149,7 @@ export interface RecBinding {
  * Single binding syntax: let rec f = ... in body
  * Mutual recursion syntax: let rec f = ... and g = ... in body
  *
- * Example: let rec fact = fn n => if n == 0 then 1 else n * fact (n - 1) in fact 5
+ * Example: let rec fact n = if n == 0 then 1 else n * fact (n - 1) in fact 5
  *
  * Unlike regular let, all binding names are in scope within all values,
  * enabling recursive and mutually recursive function definitions.
@@ -200,14 +200,14 @@ export interface QualifiedVar extends Node {
 /**
  * Lambda abstraction - an anonymous function.
  *
- * Syntax: fn param => body
- * Example: fn x => x + 1
+ * Syntax: param -> body
+ * Example: x -> x + 1
  *
  * In lambda calculus terms, this is λparam.body. Our language only supports
  * single-parameter functions; multi-parameter functions are represented as
  * curried functions (functions that return functions).
  *
- * Example of currying: fn x => fn y => x + y
+ * Multi-param syntax: x y -> x + y (desugars to x -> y -> x + y)
  */
 export interface Abs extends Node {
   readonly kind: "Abs";
@@ -283,7 +283,7 @@ export interface RecordField extends Node {
  * Syntax: record.field
  * Example: person.name
  *
- * With row polymorphism, a function like `fn r => r.x` can work on any
+ * With row polymorphism, a function like `r -> r.x` can work on any
  * record that has an `x` field, regardless of other fields. This gives
  * the type `{ x: t | ρ } -> t` where ρ represents the unknown remaining fields.
  */
@@ -371,7 +371,7 @@ export type Pattern = PVar | PWildcard | PCon | QualifiedPCon | PLit | PRecord |
 /**
  * Variable pattern - binds the matched value to a name.
  *
- * Example: In `match x with y => y + 1`, `y` is a variable pattern
+ * Example: In `match x when y -> y + 1 end`, `y` is a variable pattern
  * that binds the entire value of `x`.
  *
  * Variable patterns always match and make the whole match exhaustive
@@ -522,11 +522,12 @@ export interface Case extends Node {
 /**
  * Match expression - pattern matching on a value.
  *
- * Syntax: match expr with pattern1 => body1 | pattern2 => body2 | ...
+ * Syntax: match expr when pattern1 -> body1 when pattern2 -> body2 end
  * Example:
- *   match maybeValue with
- *     Just x => x
- *     Nothing => 0
+ *   match maybeValue
+ *     when Just x -> x
+ *     when Nothing -> 0
+ *   end
  *
  * The type checker:
  * 1. Infers the type of the scrutinee (expr)
@@ -629,13 +630,13 @@ export interface ConDecl extends Node {
 /**
  * Data declaration - defines an algebraic data type (ADT).
  *
- * Syntax: data TypeName typeParams = Constructor1 fields1 | Constructor2 fields2 | ...
+ * Syntax: type TypeName typeParams = Constructor1 fields1 | Constructor2 fields2 | ...
  *
  * Examples:
- * - data Bool = True | False
- * - data Maybe a = Nothing | Just a
- * - data List a = Nil | Cons a (List a)
- * - data Either a b = Left a | Right b
+ * - type Bool = True | False
+ * - type Maybe a = Nothing | Just a
+ * - type List a = Nil | Cons a (List a)
+ * - type Either a b = Left a | Right b
  *
  * Data declarations create:
  * 1. A new type constructor (the type name)

@@ -240,11 +240,6 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.Match);
     });
 
-    it("lexes 'with' keyword", () => {
-      const state = createLexer("with");
-      expect(nextToken(state)[0]).toBe(TokenKind.With);
-    });
-
     it("lexes 'end' keyword", () => {
       const state = createLexer("end");
       expect(nextToken(state)[0]).toBe(TokenKind.End);
