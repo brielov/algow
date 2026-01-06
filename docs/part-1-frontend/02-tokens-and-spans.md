@@ -14,14 +14,14 @@ let count = 42 + x
 
 The lexer produces these tokens:
 
-| Token Kind | Text | Position |
-|------------|------|----------|
-| Let | "let" | 0-3 |
-| Lower | "count" | 4-9 |
-| Eq | "=" | 10-11 |
-| Number | "42" | 12-14 |
-| Plus | "+" | 15-16 |
-| Lower | "x" | 17-18 |
+| Token Kind | Text    | Position |
+| ---------- | ------- | -------- |
+| Let        | "let"   | 0-3      |
+| Lower      | "count" | 4-9      |
+| Eq         | "="     | 10-11    |
+| Number     | "42"    | 12-14    |
+| Plus       | "+"     | 15-16    |
+| Lower      | "x"     | 17-18    |
 
 Each token has three pieces of information:
 
@@ -102,6 +102,7 @@ Upper,    // Just, Nothing, Cons (uppercase start)
 ```
 
 The distinction matters:
+
 - `Lower` identifiers are variables and function names
 - `Upper` identifiers are constructors (like `Just` and `Nothing`)
 
@@ -150,7 +151,6 @@ And,        // &&
 Or,         // ||
 
 // Other
-PlusPlus,   // ++  (string concatenation)
 Pipe,       // |>  (pipe operator)
 ColonColon, // ::  (cons)
 ```
@@ -357,6 +357,7 @@ Error at 1:5: Expected '=' after variable name
 ```
 
 Good error messages include:
+
 - **Position**: Line and column
 - **Context**: What we found
 - **Expectation**: What we wanted

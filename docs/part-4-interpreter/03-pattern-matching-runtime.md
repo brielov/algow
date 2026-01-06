@@ -51,6 +51,7 @@ const evalMatch = (env: Env, expr: ast.Match): Value => {
 ```
 
 The algorithm:
+
 1. Evaluate the scrutinee (the value being matched)
 2. Try each pattern in order
 3. If a pattern matches, extend environment with bindings
@@ -108,6 +109,7 @@ case "PWildcard":
 ```
 
 Example:
+
 ```
 match x with
 | _ => "matched anything"
@@ -126,6 +128,7 @@ case "PVar":
 ```
 
 Example:
+
 ```
 match x with
 | y => y + 1
@@ -162,6 +165,7 @@ const matchLiteral = (pattern: ast.PLit, value: Value): MatchResult => {
 ```
 
 Example:
+
 ```
 match n with
 | 0 => "zero"
@@ -203,6 +207,7 @@ const matchConstructor = (pattern: ast.PCon, value: Value): MatchResult => {
 ```
 
 Example:
+
 ```
 match list with
 | Nil => 0
@@ -211,6 +216,7 @@ end
 ```
 
 For `Cons 42 Nil`:
+
 1. Check tag: `"Cons" === "Cons"` ✓
 2. Check arity: 2 === 2 ✓
 3. Match `x` against `42` → binds `x = 42`
@@ -246,6 +252,7 @@ const matchTuple = (pattern: ast.PTuple, value: Value): MatchResult => {
 ```
 
 Example:
+
 ```
 match pair with
 | (x, y) => x + y
@@ -281,6 +288,7 @@ const matchRecord = (pattern: ast.PRecord, value: Value): MatchResult => {
 ```
 
 Example:
+
 ```
 match point with
 | { x = a, y = b } => a + b
@@ -308,6 +316,7 @@ const matchAs = (pattern: ast.PAs, value: Value): MatchResult => {
 ```
 
 Example:
+
 ```
 match list with
 | Cons x rest as whole => (whole, x, rest)
@@ -333,6 +342,7 @@ const matchOr = (pattern: ast.POr, value: Value): MatchResult => {
 ```
 
 Example:
+
 ```
 match maybe with
 | Nothing | Just Nothing => "nothing"
@@ -357,6 +367,7 @@ end
 ```
 
 In `evalMatch`:
+
 ```typescript
 if (case_.guard) {
   const guardResult = evaluate(caseEnv, case_.guard) as VBool;

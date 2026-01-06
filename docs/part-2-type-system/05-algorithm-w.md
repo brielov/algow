@@ -99,6 +99,7 @@ type TypeEnv = Map<string, Scheme>;
 ```
 
 The environment maps names to type schemes:
+
 - `x` → `∀. number` (monomorphic)
 - `id` → `∀a. a -> a` (polymorphic)
 - `Cons` → `∀a. a -> List a -> List a` (constructor)
@@ -645,6 +646,7 @@ const inferIf = (
 ```
 
 Key constraints:
+
 - Condition must be `boolean`
 - Both branches must unify to the same type
 
@@ -705,12 +707,6 @@ const inferBinOp = (
       constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }
-
-    // String concatenation: both operands must be string
-    case "++": {
-      const s4 = unify(ctx, operandType, tStr, expr.span);
-      return [composeSubst(subst, s4), tStr, constraints];
-    }
   }
 };
 ```
@@ -721,7 +717,6 @@ const inferBinOp = (
 2. **`-`, `*`, `/`**: Only work on numbers
 3. **`<`, `>`, `<=`, `>=`**: Work on ordered types via `Ord` class
 4. **`==`, `!=`**: Work on equatable types via `Eq` class (most types except functions)
-5. **`++`**: Only works on strings
 
 The constraints are collected and verified after inference completes.
 

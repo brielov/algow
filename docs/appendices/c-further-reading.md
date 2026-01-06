@@ -7,9 +7,10 @@ This appendix provides pointers to academic papers, books, and online resources 
 ## Type Systems and Type Inference
 
 ### Principal Type Schemes for Functional Programs
+
 **Luis Damas and Robin Milner (1982)**
 
-*The foundational paper for Algorithm W and Hindley-Milner type inference.*
+_The foundational paper for Algorithm W and Hindley-Milner type inference._
 
 This paper proves that Algorithm W always finds the most general (principal) type for any expression, and that the algorithm is sound and complete. It's the theoretical basis for type inference in ML, Haskell, and Algow.
 
@@ -20,9 +21,10 @@ This paper proves that Algorithm W always finds the most general (principal) typ
 ---
 
 ### A Theory of Type Polymorphism in Programming
+
 **Robin Milner (1978)**
 
-*The paper that introduced polymorphic type inference to programming languages.*
+_The paper that introduced polymorphic type inference to programming languages._
 
 Milner describes the type system of ML, introduces the key concepts of type schemes and let-polymorphism, and proves that well-typed programs don't go wrong.
 
@@ -33,9 +35,10 @@ Milner describes the type system of ML, introduces the key concepts of type sche
 ---
 
 ### The Essence of ML Type Inference
+
 **François Pottier and Didier Rémy (2005)**
 
-*A comprehensive tutorial on ML type inference, from a textbook on advanced types.*
+_A comprehensive tutorial on ML type inference, from a textbook on advanced types._
 
 This chapter (from "Advanced Topics in Types and Programming Languages") walks through type inference in detail, covering unification, constraint generation, and extensions like records and variants.
 
@@ -48,9 +51,10 @@ This chapter (from "Advanced Topics in Types and Programming Languages") walks t
 ## Pattern Matching and Exhaustiveness
 
 ### Compiling Pattern Matching
+
 **Luc Maranget (2008)**
 
-*How to compile pattern matching efficiently.*
+_How to compile pattern matching efficiently._
 
 Pattern matching in the source language is simple to write but complex to compile well. This paper covers algorithms for compiling matches to decision trees while maintaining efficiency.
 
@@ -61,9 +65,10 @@ Pattern matching in the source language is simple to write but complex to compil
 ---
 
 ### Warnings for Pattern Matching
+
 **Luc Maranget (2007)**
 
-*The algorithm behind exhaustiveness and redundancy checking.*
+_The algorithm behind exhaustiveness and redundancy checking._
 
 This paper describes how to detect missing patterns (non-exhaustive matches) and redundant patterns (unreachable cases). The algorithm works by constructing a matrix of pattern clauses and iteratively refining it.
 
@@ -76,9 +81,10 @@ This paper describes how to detect missing patterns (non-exhaustive matches) and
 ## Parsing
 
 ### Top Down Operator Precedence
+
 **Vaughan Pratt (1973)**
 
-*The original paper introducing Pratt parsing.*
+_The original paper introducing Pratt parsing._
 
 Pratt describes a simple yet powerful parsing technique that handles operator precedence naturally. The algorithm is elegant and efficient, making it popular for expression parsing.
 
@@ -89,9 +95,10 @@ Pratt describes a simple yet powerful parsing technique that handles operator pr
 ---
 
 ### Simple but Powerful Pratt Parsing
+
 **Bob Nystrom (2011)**
 
-*A practical, accessible introduction to Pratt parsing.*
+_A practical, accessible introduction to Pratt parsing._
 
 Bob Nystrom (author of "Crafting Interpreters") explains Pratt parsing with clear examples in Java. The blog post is more approachable than Pratt's original paper.
 
@@ -104,9 +111,10 @@ Bob Nystrom (author of "Crafting Interpreters") explains Pratt parsing with clea
 ## Intermediate Representations
 
 ### The Essence of Compiling with Continuations
+
 **Cormac Flanagan, Amr Sabry, Bruce F. Duba, and Matthias Felleisen (1993)**
 
-*Why A-Normal Form is as powerful as CPS but simpler.*
+_Why A-Normal Form is as powerful as CPS but simpler._
 
 This paper compares CPS (Continuation-Passing Style) with ANF (A-Normal Form) and shows that ANF achieves the same benefits with less complexity. ANF is now the preferred IR for many functional language compilers.
 
@@ -119,9 +127,10 @@ This paper compares CPS (Continuation-Passing Style) with ANF (A-Normal Form) an
 ## Books
 
 ### Types and Programming Languages
+
 **Benjamin C. Pierce (2002)**
 
-*The comprehensive textbook on type systems.*
+_The comprehensive textbook on type systems._
 
 Often called "TAPL" (Types and Programming Languages), this book covers type theory from the ground up: untyped lambda calculus, simple types, polymorphism, subtyping, recursive types, and more.
 
@@ -132,9 +141,10 @@ Often called "TAPL" (Types and Programming Languages), this book covers type the
 ---
 
 ### Crafting Interpreters
+
 **Bob Nystrom (2021)**
 
-*A hands-on guide to building interpreters.*
+_A hands-on guide to building interpreters._
 
 This book walks through building two complete interpreters: a tree-walker in Java and a bytecode VM in C. Extremely practical, with beautiful illustrations and clear explanations.
 
@@ -145,9 +155,10 @@ This book walks through building two complete interpreters: a tree-walker in Jav
 ---
 
 ### Programming Languages: Application and Interpretation (PLAI)
+
 **Shriram Krishnamurthi (2003, ongoing)**
 
-*A modern, practical introduction to programming language implementation.*
+_A modern, practical introduction to programming language implementation._
 
 PLAI teaches language implementation concepts through building interpreters in Racket. It emphasizes understanding through implementation.
 
@@ -158,9 +169,10 @@ PLAI teaches language implementation concepts through building interpreters in R
 ---
 
 ### Modern Compiler Implementation in ML
+
 **Andrew W. Appel (1998)**
 
-*A complete compiler course in a book.*
+_A complete compiler course in a book._
 
 Covers the full compiler pipeline: lexing, parsing, semantic analysis, IR, instruction selection, register allocation, and garbage collection. Uses ML, showing functional programming techniques for compiler construction.
 
@@ -169,9 +181,10 @@ Covers the full compiler pipeline: lexing, parsing, semantic analysis, IR, instr
 ---
 
 ### Compilers: Principles, Techniques, and Tools
+
 **Alfred Aho, Monica Lam, Ravi Sethi, and Jeffrey Ullman (2006)**
 
-*The classic "Dragon Book" on compiler construction.*
+_The classic "Dragon Book" on compiler construction._
 
 The most comprehensive treatment of classical compiler techniques: lexical analysis, parsing, type checking, code optimization, code generation.
 
@@ -182,9 +195,10 @@ The most comprehensive treatment of classical compiler techniques: lexical analy
 ## Online Resources
 
 ### Write You a Haskell
+
 **Stephen Diehl**
 
-*Building a Haskell subset from scratch.*
+_Building a Haskell subset from scratch._
 
 An online book that walks through implementing a subset of Haskell: parsing, type inference, interpreters, and compilation. Uses Haskell itself for the implementation.
 
@@ -195,9 +209,10 @@ An online book that walks through implementing a subset of Haskell: parsing, typ
 ---
 
 ### The Implementation of Functional Programming Languages
+
 **Simon Peyton Jones (1987)**
 
-*How to implement a lazy functional language.*
+_How to implement a lazy functional language._
 
 Covers graph reduction, supercombinators, and the G-machine—techniques for implementing lazy evaluation efficiently.
 
@@ -208,9 +223,10 @@ Covers graph reduction, supercombinators, and the G-machine—techniques for imp
 ---
 
 ### Language Server Protocol Specification
+
 **Microsoft**
 
-*The official LSP documentation.*
+_The official LSP documentation._
 
 Detailed specification of all LSP messages, capabilities, and features. Essential reference for LSP implementation.
 
@@ -221,20 +237,24 @@ Detailed specification of all LSP messages, capabilities, and features. Essentia
 ## Academic Papers by Topic
 
 ### Lexing
+
 - **Lex - A Lexical Analyzer Generator** (Lesk & Schmidt, 1975) — The original lexer generator
 - **RE2: A Principled Approach to Fast Regular Expression Matching** (Cox, 2007) — Efficient regex engines
 
 ### Parsing
+
 - **LR Parsing** (Knuth, 1965) — The foundation of parser generators
 - **Packrat Parsing** (Ford, 2002) — Memoized recursive descent for PEGs
 - **Parsing Expression Grammars** (Ford, 2004) — An alternative to CFGs
 
 ### Type Systems
+
 - **Extensible Records with Scoped Labels** (Leijen, 2005) — Advanced record types
 - **Practical Type Inference for Arbitrary-Rank Types** (Peyton Jones et al., 2007) — Higher-rank polymorphism
 - **OutsideIn(X)** (Vytiniotis et al., 2011) — GHC's constraint solver
 
 ### Compilation
+
 - **An Incremental Approach to Compiler Construction** (Ghuloum, 2006) — Build a compiler in small steps
 - **Compiling with Continuations** (Appel, 1992) — CPS-based compilation
 - **The Next 700 Programming Languages** (Landin, 1966) — Foundational paper on language design
@@ -271,4 +291,4 @@ For those with programming experience wanting to understand type theory:
 
 ---
 
-Learning to implement programming languages is a journey. Start with practical implementations, then dive into theory to understand *why* things work. The resources above will take you from building your first interpreter to understanding cutting-edge type system research.
+Learning to implement programming languages is a journey. Start with practical implementations, then dive into theory to understand _why_ things work. The resources above will take you from building your first interpreter to understanding cutting-edge type system research.

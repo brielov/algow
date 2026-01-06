@@ -66,7 +66,7 @@ const enum Bp {
   Cons = 15,          // ::
   Equality = 20,      // == !=
   Comparison = 30,    // < <= > >=
-  Additive = 40,      // + - ++
+  Additive = 40,      // + -
   Multiplicative = 50, // * /
   Application = 60,    // function application
   FieldAccess = 70,    // .
@@ -74,6 +74,7 @@ const enum Bp {
 ```
 
 When we see `1 + 2 * 3`:
+
 - `+` has binding power 40
 - `*` has binding power 50
 - Since 50 > 40, `*` binds tighter: `1 + (2 * 3)`
@@ -274,9 +275,6 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
     case TokenKind.Slash:
       return binOp("/");
 
-    case TokenKind.PlusPlus:
-      return binOp("++");  // String concatenation
-
     // ─────────────────────────────────────────────────────────────
     // Comparison operators
     // ─────────────────────────────────────────────────────────────
@@ -453,6 +451,7 @@ const infixBindingPower = (state: ParserState): number => {
 Let's trace through parsing `1 + 2 * 3`:
 
 ### Initial State
+
 ```
 Tokens: [Num 1] [Plus] [Num 2] [Star] [Num 3] [Eof]
                 ^
@@ -472,6 +471,7 @@ left = parsePrefix(state)  // Returns Num(1)
 ```
 
 State after:
+
 ```
 Tokens: [Num 1] [Plus] [Num 2] [Star] [Num 3] [Eof]
                   ^
@@ -493,6 +493,7 @@ parseInfix(state, left=Num(1), bp=40)
 ```
 
 This calls:
+
 ```typescript
 right = parsePrecedence(state, 40)  // Recursive call with minBp=40
 ```
@@ -502,6 +503,7 @@ right = parsePrecedence(state, 40)  // Recursive call with minBp=40
 This parses the right side with minBp=40.
 
 First, parsePrefix returns Num(2):
+
 ```
 Tokens: [Num 1] [Plus] [Num 2] [Star] [Num 3] [Eof]
                                  ^
@@ -509,6 +511,7 @@ Tokens: [Num 1] [Plus] [Num 2] [Star] [Num 3] [Eof]
 ```
 
 Then, check binding power of Star:
+
 ```typescript
 bp = infixBindingPower(state)  // Star → 50
 ```
@@ -522,11 +525,12 @@ parseInfix(state, left=Num(2), bp=50)
 ```
 
 This calls parsePrecedence(50), which:
+
 1. Parses "3" as Num(3)
 2. Checks next token (Eof), binding power 0
 3. Is 0 > 50? No! Returns Num(3)
 
-### Step 7: Build 2 * 3
+### Step 7: Build 2 \* 3
 
 ```typescript
 // Back in the Star case:
@@ -574,11 +578,13 @@ case TokenKind.ColonColon: {
 With `bp - 1`, the recursive call has a lower minimum binding power. So when it sees another `::` with the same binding power, it doesn't return—it keeps parsing right.
 
 **Left-associative** (use `bp`):
+
 ```
 a + b + c  →  (a + b) + c
 ```
 
 **Right-associative** (use `bp - 1`):
+
 ```
 a :: b :: c  →  a :: (b :: c)
 ```
@@ -621,11 +627,13 @@ case TokenKind.Pipe: {
 ```
 
 The pipe makes left-to-right data flow readable:
+
 ```
 data |> process |> format |> output
 ```
 
 Desugars to:
+
 ```
 output (format (process data))
 ```
@@ -712,6 +720,7 @@ Pratt parsing handles precedence elegantly:
 6. **Desugaring** transforms complex syntax into simpler forms
 
 The result is a clean, extensible parser where adding a new operator is just:
+
 1. Add it to `infixBindingPower` with its precedence
 2. Add a case in `parseInfix` to build the AST node
 

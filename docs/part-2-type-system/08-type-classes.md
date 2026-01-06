@@ -46,35 +46,35 @@ Algow has three built-in type classes:
 
 Types that support `==` and `!=`:
 
-| Type | Supports Eq? |
-|------|-------------|
-| `number` | Yes |
-| `string` | Yes |
-| `boolean` | Yes |
-| `a -> b` | No |
-| `List a` | No (simplified) |
+| Type      | Supports Eq?    |
+| --------- | --------------- |
+| `number`  | Yes             |
+| `string`  | Yes             |
+| `boolean` | Yes             |
+| `a -> b`  | No              |
+| `List a`  | No (simplified) |
 
 ### Ord (Ordering)
 
 Types that support `<`, `>`, `<=`, `>=`:
 
-| Type | Supports Ord? |
-|------|--------------|
-| `number` | Yes |
-| `string` | Yes |
-| `boolean` | No |
-| `a -> b` | No |
+| Type      | Supports Ord? |
+| --------- | ------------- |
+| `number`  | Yes           |
+| `string`  | Yes           |
+| `boolean` | No            |
+| `a -> b`  | No            |
 
 ### Add (Addition/Concatenation)
 
 Types that support `+`:
 
-| Type | Supports Add? |
-|------|--------------|
-| `number` | Yes (addition) |
-| `string` | Yes (concatenation) |
-| `boolean` | No |
-| `a -> b` | No |
+| Type      | Supports Add?       |
+| --------- | ------------------- |
+| `number`  | Yes (addition)      |
+| `string`  | Yes (concatenation) |
+| `boolean` | No                  |
+| `a -> b`  | No                  |
 
 ---
 
@@ -167,27 +167,20 @@ const inferBinOp = (
       constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }
-
-    // String concatenation: no constraint (must be string)
-    case "++": {
-      const s4 = unify(ctx, operandType, tStr, expr.span);
-      return [composeSubst(subst, s4), tStr, constraints];
-    }
   }
 };
 ```
 
 ### Operator Classification
 
-| Operator | Constraint | Return Type |
-|----------|------------|-------------|
-| `+` | Add | Same as operands |
-| `-`, `*`, `/` | None (must be number) | `number` |
-| `<`, `>`, `<=`, `>=` | Ord | `boolean` |
-| `==`, `!=` | Eq | `boolean` |
-| `++` | None (must be string) | `string` |
+| Operator             | Constraint            | Return Type      |
+| -------------------- | --------------------- | ---------------- |
+| `+`                  | Add                   | Same as operands |
+| `-`, `*`, `/`        | None (must be number) | `number`         |
+| `<`, `>`, `<=`, `>=` | Ord                   | `boolean`        |
+| `==`, `!=`           | Eq                    | `boolean`        |
 
-Notice: `-`, `*`, `/` require `number` directly (via unification) rather than using a constraint. This is because they only work on numbers—no constraint polymorphism needed.
+Notice: `-`, `*`, `/` require `number` directly (via unification) rather than using a constraint. This is because they only work on numbers—no constraint polymorphism needed. The `+` operator is overloaded for both numbers and strings via the `Add` type class.
 
 ---
 
@@ -200,6 +193,7 @@ type InferResult = [Subst, Type, readonly Constraint[]];
 ```
 
 Each inference function returns:
+
 1. A substitution (what we learned about types)
 2. The inferred type
 3. Accumulated constraints
@@ -294,6 +288,7 @@ let eq x y = x == y
 Type: `∀t0. Eq t0 => t0 -> t0 -> boolean`
 
 When used:
+
 ```
 eq 1 2      -- t0 = number, Eq number satisfied
 eq "a" "b"  -- t0 = string, Eq string satisfied
@@ -345,6 +340,7 @@ let eq x y = x == y
 ```
 
 Scheme for `eq`:
+
 - vars: `["t0"]`
 - constraints: `[{ className: "Eq", type: TVar("t0") }]`
 - type: `t0 -> t0 -> boolean`
@@ -358,12 +354,14 @@ Written mathematically: `∀t0. Eq t0 => t0 -> t0 -> boolean`
 Algow's type class system is deliberately simple:
 
 ### What We Have
+
 - Fixed set of type classes (Eq, Ord, Add)
 - Fixed instances (primitives only)
 - Single-parameter constraints
 - Constraint deferral for polymorphic types
 
 ### What We Don't Have
+
 - User-defined type classes
 - User-defined instances
 - Superclass constraints (Ord implies Eq)
@@ -371,6 +369,7 @@ Algow's type class system is deliberately simple:
 - Functional dependencies
 
 This simplicity keeps the implementation straightforward while still enabling:
+
 - Polymorphic comparison (`==` works on numbers and strings)
 - Clear error messages when operations aren't supported
 - Type-safe operator overloading

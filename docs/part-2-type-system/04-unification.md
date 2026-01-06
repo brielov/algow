@@ -7,6 +7,7 @@ Unification is the heart of type inference. Given two types that should be equal
 ## What Is Unification?
 
 When we see `f x` where:
+
 - `f : t0 -> t1`
 - `x : number`
 
@@ -119,6 +120,7 @@ const bindVar = (ctx: CheckContext, name: string, type: Type): Subst => {
 ### The Occurs Check
 
 Consider unifying `t0` with `List t0`. This would mean:
+
 - `t0 = List t0`
 - `t0 = List (List t0)`
 - `t0 = List (List (List t0))`
@@ -394,6 +396,7 @@ Let's walk through each case with examples:
 ```
 
 Both records have exactly fields `x` and `y`. Just unify the field types:
+
 - `t0 = number`
 - `t1 = string`
 
@@ -412,6 +415,7 @@ After unifying `x` types, unify `ρ1` with `ρ2`.
 ```
 
 t1 has `y`, t2 doesn't. Since t2 is open (has row `ρ`), its row absorbs the extra field:
+
 - `ρ = { y: string }`
 
 If t2 were closed, this would be an error.
@@ -427,6 +431,7 @@ Symmetric to Case 2.
 ```
 
 t1 has `x`, t2 has `y`. Both must be open for this to work:
+
 - Create fresh row variable `ρ3`
 - `ρ1 = { y: string | ρ3 }`
 - `ρ2 = { x: number | ρ3 }`
@@ -444,14 +449,17 @@ let getX r = r.x
 What type should `getX` have?
 
 Without row polymorphism, we might require an exact record:
+
 - `getX : { x: a } -> a`
 
 But that's too restrictive—we can't pass `{ x = 1, y = 2 }`.
 
 With row polymorphism:
+
 - `getX : { x: a | ρ } -> a`
 
 Now any record with at least field `x` works:
+
 - `getX { x = 1 }` ✓
 - `getX { x = 1, y = 2 }` ✓
 - `getX { x = "hi", z = true }` ✓
@@ -475,6 +483,7 @@ ctx.diagnostics.push({
 ```
 
 Good error messages include:
+
 - What types were expected vs. found
 - Where in the source code the error occurred
 - Why the types don't match (when possible)

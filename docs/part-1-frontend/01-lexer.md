@@ -121,7 +121,6 @@ export enum TokenKind {
   ColonColon, // ::  (cons operator)
   And,        // &&  (logical and)
   Or,         // ||  (logical or)
-  PlusPlus,   // ++  (string concatenation)
   Colon,      // :   (type annotations)
 
   // Delimiters - grouping symbols
@@ -235,6 +234,7 @@ Why hex codes? Several reasons:
 3. **Convention**: This is standard practice in production lexers
 
 The patterns are easy to remember:
+
 - Digits: 0x30-0x39 (48-57 in decimal)
 - Uppercase: 0x41-0x5a (65-90)
 - Lowercase: 0x61-0x7a (97-122)
@@ -346,6 +346,7 @@ export const slice = (state: LexerState, start: number, end: number): string =>
 ```
 
 These are the fundamental operations:
+
 - `peek`: Look at current character without moving
 - `peekAt`: Look ahead by some offset
 - `advance`: Move forward by one
@@ -404,6 +405,7 @@ const skipWhitespaceAndComments = (state: LexerState): void => {
 ```
 
 This function runs before each token. It skips over:
+
 - Spaces and tabs
 - Newlines (but remembers we crossed one)
 - Line comments (`--` to end of line)
@@ -549,6 +551,7 @@ const scanUpper = (state: LexerState, start: number): Token => {
 ```
 
 The difference between lowercase and uppercase matters:
+
 - Lowercase: Variables, function names, keywords
 - Uppercase: Type constructors like `Just`, `Cons`, `Nothing`
 
@@ -564,11 +567,6 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
 
   switch (ch) {
     case PLUS:
-      // + or ++
-      if (peek(state) === PLUS) {
-        advance(state);
-        return [TokenKind.PlusPlus, start, state.pos];  // ++
-      }
       return [TokenKind.Plus, start, state.pos];  // +
 
     case MINUS:
@@ -764,6 +762,7 @@ while (true) {
 ### The Zero-Copy Design
 
 Traditional lexers allocate a string for each token's text. Ours stores only positions. This means:
+
 - Lexing is faster (no memory allocation)
 - Tokens are smaller (just three numbers)
 - Text extraction is lazy (only done when needed)
@@ -773,6 +772,7 @@ The trade-off is that you need to keep the source string around. In practice, th
 ### Character Codes vs Strings
 
 Comparing `ch === 0x61` is faster than `str === "a"` because:
+
 - Integer comparison is a single CPU instruction
 - String comparison involves checking lengths and characters
 

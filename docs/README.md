@@ -96,7 +96,7 @@ let safeDivide x y =
 
 match safeDivide 10 2 with
 | Nothing => "Can't divide by zero"
-| Just result => "Result: " ++ toString result
+| Just result => "Result: " + toString result
 end
 ```
 
@@ -251,11 +251,13 @@ Ready? Let's build a compiler.
 ## Table of Contents
 
 ### Part 0: Foundations
+
 - [Chapter 1: Introduction](part-0-foundations/01-introduction.md)
 - [Chapter 2: TypeScript Primer](part-0-foundations/02-typescript-primer.md)
 - [Chapter 3: Functional Programming Concepts](part-0-foundations/03-functional-concepts.md)
 
 ### Part 1: Frontend
+
 - [Chapter 1: The Lexer](part-1-frontend/01-lexer.md)
 - [Chapter 2: Tokens and Spans](part-1-frontend/02-tokens-and-spans.md)
 - [Chapter 3: Parser Introduction](part-1-frontend/03-parser-intro.md)
@@ -264,6 +266,7 @@ Ready? Let's build a compiler.
 - [Chapter 6: Name Resolution](part-1-frontend/06-binder.md)
 
 ### Part 2: Type System
+
 - [Chapter 1: Types Introduction](part-2-type-system/01-types-intro.md)
 - [Chapter 2: Type Representation](part-2-type-system/02-type-representation.md)
 - [Chapter 3: Substitution](part-2-type-system/03-substitution.md)
@@ -274,6 +277,7 @@ Ready? Let's build a compiler.
 - [Chapter 8: Type Classes](part-2-type-system/08-type-classes.md)
 
 ### Part 3: Backend
+
 - [Chapter 1: IR Introduction](part-3-backend/01-ir-intro.md)
 - [Chapter 2: A-Normal Form](part-3-backend/02-anf.md)
 - [Chapter 3: Lowering](part-3-backend/03-lowering.md)
@@ -282,17 +286,20 @@ Ready? Let's build a compiler.
 - [Chapter 6: Runtime](part-3-backend/06-runtime.md)
 
 ### Part 4: Interpreter
+
 - [Chapter 1: Evaluation](part-4-interpreter/01-evaluation.md)
 - [Chapter 2: Closures](part-4-interpreter/02-closures.md)
 - [Chapter 3: Pattern Matching at Runtime](part-4-interpreter/03-pattern-matching-runtime.md)
 
 ### Part 5: Putting It Together
+
 - [Chapter 1: The Pipeline](part-5-putting-it-together/01-pipeline.md)
 - [Chapter 2: The Prelude](part-5-putting-it-together/02-prelude.md)
 - [Chapter 3: Diagnostics](part-5-putting-it-together/03-diagnostics.md)
 - [Chapter 4: Language Server](part-5-putting-it-together/04-lsp.md)
 
 ### Appendices
+
 - [Appendix A: Language Reference](appendices/a-language-reference.md)
 - [Appendix B: Glossary](appendices/b-glossary.md)
 - [Appendix C: Further Reading](appendices/c-further-reading.md)

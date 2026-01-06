@@ -107,6 +107,7 @@ number -> string -> boolean  -- TFun(number, TFun(string, boolean))
 ```
 
 Function types are **right-associative**:
+
 - `a -> b -> c` means `a -> (b -> c)`
 - A function that takes `a` and returns a function from `b` to `c`
 
@@ -341,6 +342,7 @@ const freeTypeVars = (type: Type): Set<string> => {
 ```
 
 This is used for:
+
 - **Occurs check**: Preventing infinite types
 - **Generalization**: Finding which variables to quantify
 - **Substitution**: Knowing what to replace
@@ -377,16 +379,17 @@ The `vars` list says "these variables are universally quantified"—they can be 
 
 Types in Algow are represented as:
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `TVar` | Unknown type variable | `t0`, `a` |
-| `TCon` | Named type constructor | `number`, `List` |
-| `TFun` | Function type | `number -> string` |
-| `TApp` | Type application | `List number` |
-| `TRecord` | Record with fields | `{ x: number }` |
-| `TTuple` | Fixed-size tuple | `(number, string)` |
+| Type      | Description            | Example            |
+| --------- | ---------------------- | ------------------ |
+| `TVar`    | Unknown type variable  | `t0`, `a`          |
+| `TCon`    | Named type constructor | `number`, `List`   |
+| `TFun`    | Function type          | `number -> string` |
+| `TApp`    | Type application       | `List number`      |
+| `TRecord` | Record with fields     | `{ x: number }`    |
+| `TTuple`  | Fixed-size tuple       | `(number, string)` |
 
 Type schemes add polymorphism:
+
 - **Scheme**: `∀a b. constraints => type`
 - **Quantified vars**: Can be instantiated to any type
 

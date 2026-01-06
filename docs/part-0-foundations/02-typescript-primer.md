@@ -51,6 +51,7 @@ const double = (n: number) => n * 2;  // Returns number
 ```
 
 We write explicit types when:
+
 - The type isn't obvious from context
 - We want to document the API
 - We need TypeScript to check against a specific type
@@ -146,6 +147,7 @@ type Shape =
 ```
 
 Now `Shape` can be a circle, rectangle, or triangle. Each variant has:
+
 1. A `kind` field with a specific literal value
 2. Additional fields specific to that variant
 
@@ -351,6 +353,7 @@ seen.size;          // 2
 ```
 
 We use Maps extensively for things like:
+
 - Symbol tables (mapping names to their definitions)
 - Type environments (mapping names to their type schemes)
 - Substitutions (mapping type variables to types)

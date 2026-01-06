@@ -110,6 +110,7 @@ Output: [LET] [IDENT "x"] [EQUALS] [NUMBER 1] [PLUS] [NUMBER 2]
 ```
 
 The lexer handles details like:
+
 - Skipping whitespace and comments
 - Recognizing multi-character tokens (`==`, `<=`, `|>`)
 - Distinguishing keywords (`let`, `if`) from identifiers (`foo`, `myVar`)
@@ -130,6 +131,7 @@ Output:
 ```
 
 The parser handles:
+
 - Operator precedence (`1 + 2 * 3` means `1 + (2 * 3)`)
 - Nested expressions (`(1 + 2) * 3`)
 - Complex syntax (`if`/`then`/`else`, `match`/`with`, function definitions)
@@ -191,6 +193,7 @@ This makes code generation simpler because the evaluation order is explicit.
 ### 7. Optimizer
 
 The optimizer transforms the IR to make it faster or smaller. We implement:
+
 - **Constant folding**: `1 + 2` becomes `3` at compile time
 - **Dead code elimination**: Remove unused bindings
 - **Tail call optimization**: Mark tail-recursive calls for efficient execution

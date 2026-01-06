@@ -366,6 +366,7 @@ export type IRPCon = {
 Let's trace through a complete example:
 
 Source:
+
 ```
 let add x y = x + y in add 1 2
 ```
@@ -398,6 +399,7 @@ irLet("add",
 ```
 
 Key observations:
+
 1. The curried function becomes nested lambdas
 2. The application `add 1 2` becomes two separate applications
 3. Every intermediate result has a name (`_t0`, `_t1`, `_t2`)

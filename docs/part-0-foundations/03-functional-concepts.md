@@ -76,6 +76,7 @@ scale(5);       // Returns 15 (different result, same input)
 In practice, programs need side effects—they need to read files, display output, and interact with the world. The functional approach is to push side effects to the edges of your program. The core logic is pure; side effects happen only at the boundaries.
 
 In Algow:
+
 - Parsing is pure: source string in, AST out
 - Type checking is pure: AST in, types out
 - Code generation is pure: IR in, JavaScript string out
@@ -251,6 +252,7 @@ The structure of the code follows the structure of the data.
 ## Higher-Order Functions
 
 A **higher-order function** either:
+
 - Takes a function as an argument, or
 - Returns a function as its result
 
@@ -386,6 +388,7 @@ add5 10  -- 15
 ```
 
 The type of `add` is `number -> number -> number`, which means:
+
 - Give it a number, get back a function `number -> number`
 - Give that function a number, get back a number
 
@@ -403,7 +406,7 @@ data Maybe a = Nothing | Just a
 let describe x =
   match x with
   | Nothing => "Empty"
-  | Just n => "Contains: " ++ toString n
+  | Just n => "Contains: " + toString n
   end
 ```
 
@@ -442,6 +445,7 @@ let second list =
 ```
 
 This matches:
+
 - Empty list → `Nothing`
 - Single-element list → `Nothing`
 - List with at least two elements → `Just` the second element
@@ -508,6 +512,7 @@ type Point = { x: number; y: number };
 ```
 
 Called "product" because the number of possible values is the product:
+
 - If x can be 10 things and y can be 10 things, Point can be 100 things
 
 ### Sum Types (OR)
@@ -522,6 +527,7 @@ type Shape =
 ```
 
 Called "sum" because the number of possible values is the sum:
+
 - If there are 10 possible circles and 10 possible rectangles, there are 20 possible shapes
 
 ### In Algow
@@ -629,6 +635,7 @@ const transform = (expr: Expr): Expr => {
 ```
 
 This function:
+
 - Is **pure**: no side effects, same input → same output
 - Uses **immutability**: creates new nodes instead of modifying
 - Uses **recursion**: processes the tree by calling itself

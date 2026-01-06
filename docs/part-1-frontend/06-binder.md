@@ -59,6 +59,7 @@ export type SymbolTable = {
 ```
 
 For each name in the program:
+
 - **Definitions** record where names are introduced
 - **References** record where names are used, linked to their definitions
 
@@ -539,6 +540,7 @@ export const findReferences = (table: SymbolTable, definition: Definition): Refe
 ### Rename
 
 To rename a variable:
+
 1. Find the definition at cursor
 2. Find all references to that definition
 3. Replace text at all those spans

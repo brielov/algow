@@ -102,6 +102,7 @@ let rec map f list =
 The compiler infers: `map : (a -> b) -> List a -> List b`. Same type, no annotations.
 
 Type inference gives you:
+
 - **Concise code**: Write what you mean, not types for everything
 - **Safety**: Still catches all type errors at compile time
 - **Documentation**: Inferred types are available in editor hover
@@ -160,6 +161,7 @@ number -> number -> number    -- curried function of two numbers
 ```
 
 The arrow is right-associative:
+
 - `a -> b -> c` means `a -> (b -> c)`
 
 ### Type Variables
@@ -183,6 +185,7 @@ data Either a b = Left a | Right b
 ```
 
 These types can be:
+
 - **Parameterized**: `Maybe a`, `List a` work for any type `a`
 - **Recursive**: `List a` contains another `List a`
 - **Sum types**: Multiple constructors (like `Nothing | Just a`)
@@ -230,6 +233,7 @@ Error: Cannot unify 'number' with 'string'
 ```
 
 The error tells you:
+
 - What went wrong (types don't match)
 - Where it happened (the expression)
 - What was expected vs. found
@@ -245,6 +249,7 @@ let double (x : number) : number = x * 2
 ```
 
 Annotations are useful for:
+
 - **Documentation**: Making types explicit for readers
 - **Constraining**: Forcing a specific type when inference would be more general
 - **Error localization**: Helping the compiler give better error messages

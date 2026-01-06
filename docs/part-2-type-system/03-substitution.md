@@ -115,6 +115,7 @@ Each step adds to our knowledge. We apply the accumulated substitution to propag
 Often we learn multiple facts in sequence. We need to combine substitutions.
 
 Given two substitutions:
+
 - `s1 = { t0 = number }`
 - `s2 = { t1 = t0 }`
 
@@ -200,12 +201,14 @@ const applySubstScheme = (subst: Subst, scheme: Scheme): Scheme => {
 Consider scheme `∀a. a -> t0` (a polymorphic function where the return type is unknown).
 
 If our substitution is `{ a = number, t0 = string }`:
+
 - We should NOT replace `a`—it's bound by the `∀`
 - We SHOULD replace `t0`—it's a free variable
 
 Result: `∀a. a -> string`
 
 If we replaced `a`, we'd lose the polymorphism:
+
 - Wrong: `∀a. number -> string` (makes no sense—`a` isn't used)
 
 ---
@@ -237,11 +240,13 @@ const emptySubst: Subst = new Map();
 ```
 
 Properties:
+
 - `applySubst(emptySubst, type) = type`
 - `composeSubst(emptySubst, s) = s`
 - `composeSubst(s, emptySubst) = s`
 
 We return the empty substitution when:
+
 - Two types are already equal (no new information)
 - An error occurred (we can't make types equal)
 
@@ -282,6 +287,7 @@ const infer = (env: TypeEnv, expr: Expr): [Subst, Type] => {
 ```
 
 The pattern:
+
 1. Infer sub-expressions, getting substitutions
 2. Apply earlier substitutions before inferring later expressions
 3. Compose substitutions as we go

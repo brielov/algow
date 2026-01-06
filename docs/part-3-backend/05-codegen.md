@@ -172,10 +172,6 @@ const genBinOp = (ctx: CodeGenContext, binding: ir.IRBinOpBinding): string => {
         return `!$eq(${left}, ${right})`;
       }
       return `(${left} !== ${right})`;
-
-    case "++":
-      // String concatenation uses + in JavaScript
-      return `(${left} + ${right})`;
   }
 };
 ```
@@ -386,6 +382,7 @@ const genExprTCO = (
 ### Example: Factorial with TCO
 
 Source:
+
 ```
 let rec fact n acc =
   if n == 0 then acc
@@ -393,6 +390,7 @@ let rec fact n acc =
 ```
 
 Generated JavaScript:
+
 ```javascript
 const fact = (n) => (acc) => {
   while (true) {

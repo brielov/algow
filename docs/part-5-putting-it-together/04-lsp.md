@@ -27,6 +27,7 @@ The protocol uses JSON-RPC messages over some transport (stdio, TCP, WebSocket).
 ## Transport Abstraction
 
 Algow's LSP works in two environments:
+
 - **stdio**: Traditional editors (VS Code, Neovim)
 - **Web Worker**: Browser (Monaco playground)
 
@@ -180,6 +181,7 @@ const handleDidOpen = (params: DidOpenTextDocumentParams): void => {
 ```
 
 When a document opens:
+
 1. Parse, bind, and type check
 2. Store results for queries
 3. Send diagnostics to editor
@@ -443,6 +445,7 @@ const handleCompletion = (params: TextDocumentPositionParams): CompletionList | 
 ### Completion Sources
 
 **Variables in scope**:
+
 ```typescript
 const getVariableCompletions = (doc: DocumentState, _offset: number): CompletionItem[] => {
   if (!doc.symbols || !doc.types) return [];
@@ -467,6 +470,7 @@ const getVariableCompletions = (doc: DocumentState, _offset: number): Completion
 ```
 
 **Constructors**:
+
 ```typescript
 const getConstructorCompletions = (doc: DocumentState): CompletionItem[] => {
   const items: CompletionItem[] = [];
@@ -486,6 +490,7 @@ const getConstructorCompletions = (doc: DocumentState): CompletionItem[] => {
 ```
 
 **Prelude functions**:
+
 ```typescript
 const getPreludeFunctionCompletions = (): CompletionItem[] => {
   return Object.keys(preludeFunctions).map((name) => ({
@@ -497,6 +502,7 @@ const getPreludeFunctionCompletions = (): CompletionItem[] => {
 ```
 
 **Keywords**:
+
 ```typescript
 const getKeywordCompletions = (): CompletionItem[] => {
   const keywords = ["let", "rec", "in", "if", "then", "else", "match", "with", "end", "data", "true", "false"];
@@ -675,6 +681,7 @@ const createStdioTransport = (): Transport => {
 ```
 
 LSP over stdio uses a simple protocol:
+
 ```
 Content-Length: 123\r\n
 \r\n

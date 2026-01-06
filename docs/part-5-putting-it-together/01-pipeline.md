@@ -9,11 +9,13 @@ This chapter shows how all the pieces connect. From source code to execution, we
 Algow supports two execution paths:
 
 **Interpreter** (default):
+
 ```
 Source → Parse → Bind → Check → Evaluate → Value
 ```
 
 **Compiler** (`-c` flag):
+
 ```
 Source → Parse → Bind → Check → Lower → Optimize → Generate → JavaScript
 ```
@@ -199,6 +201,7 @@ const { typeEnv, registry, constructorNames } = processDeclarations(
 ```
 
 `processDeclarations` returns:
+
 - **typeEnv**: Type schemes for constructors
 - **registry**: Maps type names to their constructors (for exhaustiveness)
 - **constructorNames**: List of constructor names (for code generation)

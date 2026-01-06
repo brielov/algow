@@ -2358,10 +2358,12 @@ const simplePatternToString = (p: SimplePattern): string => {
       return "_";
     case "Con":
       if (p.args.length === 0) return p.name;
-      return `${p.name} ${p.args.map((a) => {
-        const s = simplePatternToString(a);
-        return a.kind === "Con" && a.args.length > 0 ? `(${s})` : s;
-      }).join(" ")}`;
+      return `${p.name} ${p.args
+        .map((a) => {
+          const s = simplePatternToString(a);
+          return a.kind === "Con" && a.args.length > 0 ? `(${s})` : s;
+        })
+        .join(" ")}`;
     case "Tuple":
       return `(${p.elements.map(simplePatternToString).join(", ")})`;
     case "Lit":
@@ -2390,11 +2392,7 @@ type PatternMatrix = readonly PatternRow[];
  * - If it starts with a different constructor, remove the row
  * - If it starts with an or-pattern, expand and recurse
  */
-const specialize = (
-  matrix: PatternMatrix,
-  conName: string,
-  arity: number,
-): PatternMatrix => {
+const specialize = (matrix: PatternMatrix, conName: string, arity: number): PatternMatrix => {
   const result: PatternRow[] = [];
 
   for (const row of matrix) {
@@ -2543,7 +2541,8 @@ const _isUseful = (
       const newPattern = [...firstPattern.args, ...restPattern];
       // Get the actual argument types from the constructor and scrutinee type
       const argTypes = firstType ? getConstructorArgTypes(env, firstPattern.name, firstType) : [];
-      const finalArgTypes = argTypes.length > 0 ? argTypes : Array(arity).fill({ kind: "TVar", name: "_" } as Type);
+      const finalArgTypes =
+        argTypes.length > 0 ? argTypes : Array(arity).fill({ kind: "TVar", name: "_" } as Type);
       return _isUseful(env, registry, specialized, newPattern, [...finalArgTypes, ...restTypes]);
     }
 
@@ -2598,10 +2597,13 @@ const _isUseful = (
         const arity = firstType.elements.length;
         const specialized = specializeTuple(matrix, arity);
         const wildcards: SimplePattern[] = Array(arity).fill({ kind: "Wild" });
-        return _isUseful(env, registry, specialized, [...wildcards, ...restPattern], [
-          ...firstType.elements,
-          ...restTypes,
-        ]);
+        return _isUseful(
+          env,
+          registry,
+          specialized,
+          [...wildcards, ...restPattern],
+          [...firstType.elements, ...restTypes],
+        );
       }
 
       // Handle ADTs
@@ -2619,8 +2621,19 @@ const _isUseful = (
           const wildcards: SimplePattern[] = Array(con.arity).fill({ kind: "Wild" });
           // Get the actual argument types from the constructor and scrutinee type
           const argTypes = getConstructorArgTypes(env, con.name, firstType);
-          const finalArgTypes = argTypes.length > 0 ? argTypes : Array(con.arity).fill({ kind: "TVar", name: "_" } as Type);
-          if (_isUseful(env, registry, specialized, [...wildcards, ...restPattern], [...finalArgTypes, ...restTypes])) {
+          const finalArgTypes =
+            argTypes.length > 0
+              ? argTypes
+              : Array(con.arity).fill({ kind: "TVar", name: "_" } as Type);
+          if (
+            _isUseful(
+              env,
+              registry,
+              specialized,
+              [...wildcards, ...restPattern],
+              [...finalArgTypes, ...restTypes],
+            )
+          ) {
             return true;
           }
         }
@@ -2671,7 +2684,13 @@ const findWitness = (
   if (firstType.kind === "TTuple") {
     const arity = firstType.elements.length;
     const specialized = specializeTuple(matrix, arity);
-    const witness = findWitness(env, registry, specialized, [...firstType.elements, ...restTypes], depth + 1);
+    const witness = findWitness(
+      env,
+      registry,
+      specialized,
+      [...firstType.elements, ...restTypes],
+      depth + 1,
+    );
     if (witness) {
       const tupleElements = witness.slice(0, arity);
       const rest = witness.slice(arity);
@@ -2699,8 +2718,15 @@ const findWitness = (
       const specialized = specialize(matrix, con.name, con.arity);
       // Get the actual argument types from the constructor and scrutinee type
       const argTypes = getConstructorArgTypes(env, con.name, firstType);
-      const finalArgTypes = argTypes.length > 0 ? argTypes : Array(con.arity).fill({ kind: "TVar", name: "_" } as Type);
-      const witness = findWitness(env, registry, specialized, [...finalArgTypes, ...restTypes], depth + 1);
+      const finalArgTypes =
+        argTypes.length > 0 ? argTypes : Array(con.arity).fill({ kind: "TVar", name: "_" } as Type);
+      const witness = findWitness(
+        env,
+        registry,
+        specialized,
+        [...finalArgTypes, ...restTypes],
+        depth + 1,
+      );
       if (witness) {
         const args = witness.slice(0, con.arity);
         const rest = witness.slice(con.arity);

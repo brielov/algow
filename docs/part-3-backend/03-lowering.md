@@ -18,6 +18,7 @@ type NormalizeResult = {
 ```
 
 The result contains:
+
 1. **Bindings** to prepend (the work needed to compute the value)
 2. **Atom** representing the result
 
@@ -271,9 +272,6 @@ const lowerBinOp = (ctx: LowerContext, expr: ast.BinOp): ir.IRExpr => {
     case "==":
     case "!=":
       resultType = tBool;
-      break;
-    case "++":
-      resultType = tStr;
       break;
   }
 

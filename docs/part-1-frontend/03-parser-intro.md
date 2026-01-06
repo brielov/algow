@@ -247,6 +247,7 @@ BinOp(+)
 ```
 
 The AST:
+
 - Omits punctuation that doesn't affect meaning (parentheses, commas)
 - Collapses grammar rules into meaningful nodes
 - Directly represents the program structure
@@ -283,6 +284,7 @@ type ParseResult = {
 This lets us report multiple errors in one pass. The user doesn't have to fix one error, re-run, find the next error, repeat.
 
 Recovery strategies include:
+
 - **Synchronization**: Skip tokens until we find a known starting point (like the next `let` or `data`)
 - **Insertion**: Pretend a missing token was there
 - **Substitution**: Treat an unexpected token as something else
@@ -355,6 +357,7 @@ type ParserState = {
 ```
 
 The parser:
+
 - Reads tokens from the lexer
 - Tracks current and previous tokens
 - Collects diagnostics as it goes
@@ -388,20 +391,21 @@ const expect = (state: ParserState, kind: TokenKind, message: string): void => {
 
 Before diving into Pratt parsing, here's Algow's precedence from lowest to highest:
 
-| Precedence | Operators | Associativity |
-|------------|-----------|---------------|
-| 1 (lowest) | `\|>` (pipe) | Left |
-| 2 | `\|\|` (or) | Left |
-| 3 | `&&` (and) | Left |
-| 4 | `::` (cons) | Right |
-| 5 | `==` `!=` | Left |
-| 6 | `<` `<=` `>` `>=` | Left |
-| 7 | `+` `-` `++` | Left |
-| 8 | `*` `/` | Left |
-| 9 | Function application | Left |
-| 10 (highest) | `.` (field access) | Left |
+| Precedence   | Operators            | Associativity |
+| ------------ | -------------------- | ------------- |
+| 1 (lowest)   | `\|>` (pipe)         | Left          |
+| 2            | `\|\|` (or)          | Left          |
+| 3            | `&&` (and)           | Left          |
+| 4            | `::` (cons)          | Right         |
+| 5            | `==` `!=`            | Left          |
+| 6            | `<` `<=` `>` `>=`    | Left          |
+| 7            | `+` `-`              | Left          |
+| 8            | `*` `/`              | Left          |
+| 9            | Function application | Left          |
+| 10 (highest) | `.` (field access)   | Left          |
 
 Higher precedence means tighter binding:
+
 - `1 + 2 * 3` → `1 + (2 * 3)` because `*` (8) > `+` (7)
 - `f x + g y` → `(f x) + (g y)` because application (9) > `+` (7)
 

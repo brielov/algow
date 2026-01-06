@@ -17,6 +17,7 @@ f (g x) (h y)
 ```
 
 The AST represents this as nested applications:
+
 ```
 App(
   App(f, App(g, x)),
@@ -25,6 +26,7 @@ App(
 ```
 
 To generate code, we need to:
+
 1. Evaluate `g x` first
 2. Store the result somewhere
 3. Evaluate `h y`
@@ -60,6 +62,7 @@ Source → AST → IR → Target Code
 ```
 
 An IR is designed to:
+
 1. Make code generation straightforward
 2. Enable analysis and optimization
 3. Be independent of both source syntax and target details
@@ -147,10 +150,12 @@ Algow uses **A-Normal Form** because:
 The key property of ANF: **all arguments to complex operations are atomic**.
 
 An **atom** is something that requires no computation:
+
 - A literal: `42`, `"hello"`, `true`
 - A variable: `x`, `f`, `result`
 
 A **complex operation** requires computation:
+
 - Function application: `f x`
 - Binary operations: `x + y`
 - Constructing data: `(a, b)`, `{ x = 1 }`
@@ -160,11 +165,13 @@ A **complex operation** requires computation:
 ### Example Transformation
 
 Source:
+
 ```
 f (g x) (h y)
 ```
 
 ANF:
+
 ```
 let t0 = g x in
 let t1 = h y in
@@ -173,6 +180,7 @@ t2 t1
 ```
 
 Every application now has atomic arguments:
+
 - `g x`: `g` and `x` are variables (atoms)
 - `h y`: `h` and `y` are variables (atoms)
 - `f t0`: `f` and `t0` are variables (atoms)
@@ -182,13 +190,13 @@ Every application now has atomic arguments:
 
 ## IR vs AST
 
-| Aspect | AST | IR (ANF) |
-|--------|-----|----------|
-| Purpose | Represent source structure | Enable code generation |
-| Nesting | Arbitrarily deep | Flat (let bindings) |
-| Intermediates | Implicit | Named explicitly |
-| Types | Attached during type checking | Carried on every node |
-| Evaluation order | Implicit in structure | Explicit in binding order |
+| Aspect           | AST                           | IR (ANF)                  |
+| ---------------- | ----------------------------- | ------------------------- |
+| Purpose          | Represent source structure    | Enable code generation    |
+| Nesting          | Arbitrarily deep              | Flat (let bindings)       |
+| Intermediates    | Implicit                      | Named explicitly          |
+| Types            | Attached during type checking | Carried on every node     |
+| Evaluation order | Implicit in structure         | Explicit in binding order |
 
 ---
 
@@ -229,6 +237,7 @@ export type IRVar = {
 ```
 
 This enables:
+
 1. **Type-directed code generation**: Different types may need different representations
 2. **Type checking optimizations**: Verify that transformations preserve types
 3. **Runtime optimization**: Know when deep equality is needed vs. primitive comparison

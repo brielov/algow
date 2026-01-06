@@ -66,6 +66,7 @@ export const error = (start: number, end: number, message: string): Diagnostic =
 ```
 
 Examples:
+
 - Type mismatches
 - Unbound variables
 - Syntax errors
@@ -85,6 +86,7 @@ export const warning = (start: number, end: number, message: string): Diagnostic
 ```
 
 Examples:
+
 - Unused variables
 - Redundant patterns (future)
 
@@ -102,6 +104,7 @@ export const info = (start: number, end: number, message: string): Diagnostic =>
 ```
 
 Examples:
+
 - Style suggestions (future)
 
 ---
@@ -144,6 +147,7 @@ error: Type mismatch in function application
 ```
 
 The `expected` and `actual` fields are separate from the message, enabling:
+
 - Structured display (as shown above)
 - LSP integration
 - Custom formatters
@@ -226,12 +230,12 @@ export const levenshteinDistance = (a: string, b: string): number => {
 
 Examples:
 
-| String A | String B | Distance |
-|----------|----------|----------|
-| `length` | `lenght` | 1 (swap h/t) |
+| String A | String B | Distance       |
+| -------- | -------- | -------------- |
+| `length` | `lenght` | 1 (swap h/t)   |
 | `map`    | `mop`    | 1 (substitute) |
-| `filter` | `flter`  | 1 (delete i) |
-| `hello`  | `world`  | 4 |
+| `filter` | `flter`  | 1 (delete i)   |
+| `hello`  | `world`  | 4              |
 
 ### Finding Similar Names
 
@@ -519,6 +523,7 @@ const convertDiagnostic = (source: string, diag: Diagnostic): LspDiagnostic => {
 ```
 
 The LSP specification uses numeric severity codes:
+
 - 1 = Error
 - 2 = Warning
 - 3 = Information

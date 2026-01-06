@@ -7,6 +7,7 @@ The **prelude** is a standard library included in every Algow program. It provid
 ## Design Philosophy
 
 The prelude is:
+
 - **Minimal**: Only essential types and functions
 - **Built programmatically**: Defined as AST nodes, not parsed from source
 - **Type-safe**: Same type checking as user code
@@ -40,6 +41,7 @@ export const maybe = ast.dataDecl(
 ```
 
 Usage:
+
 ```
 head Nil           -- Nothing
 head (Cons 1 Nil)  -- Just 1
@@ -67,6 +69,7 @@ export const either = ast.dataDecl(
 ```
 
 Usage:
+
 ```
 Left "error"    -- Either string b
 Right 42        -- Either a number
@@ -97,6 +100,7 @@ export const list = ast.dataDecl(
 ```
 
 Usage:
+
 ```
 Nil                        -- List a
 Cons 1 Nil                -- List number
@@ -144,6 +148,7 @@ export const map = ast.letRec(
 ```
 
 Usage:
+
 ```
 map (fn x => x * 2) (1 :: 2 :: 3 :: Nil)
 -- Result: 2 :: 4 :: 6 :: Nil
@@ -158,6 +163,7 @@ filter : (a -> boolean) -> List a -> List a
 ```
 
 Usage:
+
 ```
 filter (fn x => x > 0) (-1 :: 2 :: -3 :: 4 :: Nil)
 -- Result: 2 :: 4 :: Nil
@@ -172,6 +178,7 @@ foldr : (a -> b -> b) -> b -> List a -> b
 ```
 
 Usage:
+
 ```
 foldr (fn x => fn acc => x + acc) 0 (1 :: 2 :: 3 :: Nil)
 -- Result: 6  (1 + (2 + (3 + 0)))
@@ -186,6 +193,7 @@ foldl : (b -> a -> b) -> b -> List a -> b
 ```
 
 Usage:
+
 ```
 foldl (fn acc => fn x => acc - x) 0 (1 :: 2 :: 3 :: Nil)
 -- Result: -6  (((0 - 1) - 2) - 3)
@@ -213,6 +221,7 @@ export const head = ast.abs(
 ```
 
 Usage:
+
 ```
 head Nil              -- Nothing
 head (1 :: 2 :: Nil)  -- Just 1
@@ -227,6 +236,7 @@ tail : List a -> Maybe (List a)
 ```
 
 Usage:
+
 ```
 tail Nil              -- Nothing
 tail (1 :: 2 :: Nil)  -- Just (2 :: Nil)
@@ -241,6 +251,7 @@ length : List a -> number
 ```
 
 Usage:
+
 ```
 length Nil                -- 0
 length (1 :: 2 :: 3 :: Nil)  -- 3
@@ -255,6 +266,7 @@ isEmpty : List a -> boolean
 ```
 
 Usage:
+
 ```
 isEmpty Nil       -- true
 isEmpty (1 :: Nil)  -- false
@@ -359,6 +371,7 @@ export const compose = ast.abs(
 ```
 
 Usage:
+
 ```
 let double = fn x => x * 2 in
 let addOne = fn x => x + 1 in
@@ -456,6 +469,7 @@ const { typeEnv, registry, constructorNames } = processDeclarations(
 ```
 
 `processDeclarations` extracts:
+
 - Type schemes for constructors (e.g., `Just : ∀a. a -> Maybe a`)
 - Registry mapping type names to constructors
 - List of constructor names
@@ -481,15 +495,18 @@ The prelude is defined as AST nodes rather than source code because:
 The prelude provides essential types and functions:
 
 **Data Types**:
+
 - `Maybe a` for optional values
 - `Either a b` for sum types
 - `List a` for sequences
 
 **Functions**:
+
 - List: `map`, `filter`, `foldr`, `foldl`, `head`, `tail`, `length`, `isEmpty`, `reverse`, `concat`
 - Utility: `id`, `const`, `compose`, `flip`
 
 All prelude code is:
+
 - Defined as AST nodes
 - Type-checked like user code
 - Injected via `wrapWithPrelude`

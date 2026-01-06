@@ -8,16 +8,16 @@ The runtime provides helper functions that generated JavaScript code depends on.
 
 Before examining the helpers, let's understand how Algow values become JavaScript values:
 
-| Algow Type | JavaScript Representation |
-|------------|--------------------------|
-| `number` | JavaScript `number` |
-| `string` | JavaScript `string` |
-| `boolean` | JavaScript `boolean` |
-| `a -> b` | JavaScript function (closure) |
-| `(a, b, c)` | JavaScript array `[a, b, c]` |
+| Algow Type       | JavaScript Representation          |
+| ---------------- | ---------------------------------- |
+| `number`         | JavaScript `number`                |
+| `string`         | JavaScript `string`                |
+| `boolean`        | JavaScript `boolean`               |
+| `a -> b`         | JavaScript function (closure)      |
+| `(a, b, c)`      | JavaScript array `[a, b, c]`       |
 | `{ x: a, y: b }` | JavaScript object `{ x: a, y: b }` |
-| `Just x` | `{ $tag: "Just", $args: [x] }` |
-| `Nil` | `{ $tag: "Nil", $args: [] }` |
+| `Just x`         | `{ $tag: "Just", $args: [x] }`     |
+| `Nil`            | `{ $tag: "Nil", $args: [] }`       |
 
 Most types map naturally. Constructors need a special tagged format for pattern matching.
 
@@ -158,6 +158,7 @@ Actually, the code generator uses `$con` for unapplied constructors and builds u
 ### Why Tagged Objects?
 
 We need to:
+
 1. Distinguish between different constructors (via `$tag`)
 2. Store constructor arguments (via `$args`)
 3. Enable pattern matching to inspect the structure
@@ -247,6 +248,7 @@ For primitives (`number`, `string`, `boolean`), we use `===` directly—it's fas
 ### Minimal Runtime
 
 Algow's runtime is intentionally small:
+
 - **3 functions** totaling about 30 lines
 - **No external dependencies**
 - **Embeddable** in any JavaScript environment
@@ -266,6 +268,7 @@ No `$env` parameter or explicit capture list needed—JavaScript's closure mecha
 ### Performance
 
 By using native JavaScript features:
+
 - Function calls are fast (JIT-optimized)
 - Closures are fast (JIT-optimized)
 - Object/array creation is fast
@@ -354,6 +357,7 @@ The Algow runtime is minimal but essential:
 3. **$eq**: Provides structural equality for complex types
 
 Design choices that keep the runtime small:
+
 - Native JavaScript closures (no explicit environment)
 - Native JavaScript functions (no trampolining for most cases)
 - Direct primitive operations (no wrapping)

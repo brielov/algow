@@ -38,11 +38,13 @@ const inferPattern = (
 ```
 
 Example:
+
 ```
 match x with
 | y => y + 1
 end
 ```
+
 - `x : number`
 - Pattern `y` binds to `number`
 - Body `y + 1` type checks with `y : number`
@@ -73,12 +75,14 @@ if (pattern.kind === "PLit") {
 ```
 
 Example:
+
 ```
 match x with
 | 0 => "zero"
 | _ => "non-zero"
 end
 ```
+
 - `x` must be `number` (because `0` is a number)
 
 ### Constructor Patterns
@@ -113,11 +117,13 @@ if (pattern.kind === "PCon") {
 ```
 
 Example:
+
 ```
 match list with
 | Cons x rest => ...
 end
 ```
+
 - `Cons : ∀a. a -> List a -> List a`
 - Instantiate: `t0 -> List t0 -> List t0`
 - Unify `List t0` with `list`'s type
@@ -192,11 +198,13 @@ if (pattern.kind === "PAs") {
 ```
 
 Example:
+
 ```
 match list with
 | Cons x rest as whole => ...
 end
 ```
+
 - `x`, `rest` bound from constructor pattern
 - `whole` bound to entire list
 

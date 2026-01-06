@@ -18,20 +18,25 @@ This appendix provides a complete reference for the Algow language syntax.
 ### Identifiers
 
 **Lowercase identifiers** (variables, function names):
+
 ```
 x, foo, my_var, x1, camelCase
 ```
+
 Must start with lowercase letter or underscore.
 
 **Uppercase identifiers** (constructors, type names):
+
 ```
 Nothing, Just, Cons, MyType
 ```
+
 Must start with uppercase letter.
 
 ### Literals
 
 **Numbers**:
+
 ```
 42          -- integer
 3.14        -- floating point
@@ -39,6 +44,7 @@ Must start with uppercase letter.
 ```
 
 **Strings**:
+
 ```
 "hello"
 "hello\nworld"    -- escape sequences
@@ -48,6 +54,7 @@ Must start with uppercase letter.
 Escape sequences: `\n`, `\t`, `\r`, `\\`, `\"`
 
 **Booleans**:
+
 ```
 true
 false
@@ -57,23 +64,23 @@ false
 
 ## Keywords
 
-| Keyword | Usage |
-|---------|-------|
-| `let` | Variable binding |
-| `rec` | Recursive binding |
-| `and` | Mutual recursion |
-| `in` | Body of let expression |
-| `if` | Conditional |
-| `then` | Then branch |
-| `else` | Else branch |
-| `match` | Pattern matching |
-| `with` | Pattern clauses |
-| `end` | End of match |
-| `data` | Data type declaration |
-| `as` | As-pattern |
-| `true` | Boolean literal |
-| `false` | Boolean literal |
-| `fn` | Lambda expression |
+| Keyword | Usage                  |
+| ------- | ---------------------- |
+| `let`   | Variable binding       |
+| `rec`   | Recursive binding      |
+| `and`   | Mutual recursion       |
+| `in`    | Body of let expression |
+| `if`    | Conditional            |
+| `then`  | Then branch            |
+| `else`  | Else branch            |
+| `match` | Pattern matching       |
+| `with`  | Pattern clauses        |
+| `end`   | End of match           |
+| `data`  | Data type declaration  |
+| `as`    | As-pattern             |
+| `true`  | Boolean literal        |
+| `false` | Boolean literal        |
+| `fn`    | Lambda expression      |
 
 ---
 
@@ -81,56 +88,50 @@ false
 
 ### Arithmetic
 
-| Operator | Meaning | Type |
-|----------|---------|------|
-| `+` | Addition | `number -> number -> number` |
-| `-` | Subtraction | `number -> number -> number` |
-| `*` | Multiplication | `number -> number -> number` |
-| `/` | Division | `number -> number -> number` |
+| Operator | Meaning        | Type                         |
+| -------- | -------------- | ---------------------------- |
+| `+`      | Addition       | `number -> number -> number` |
+| `-`      | Subtraction    | `number -> number -> number` |
+| `*`      | Multiplication | `number -> number -> number` |
+| `/`      | Division       | `number -> number -> number` |
 
 Note: `+` is also overloaded for string concatenation.
 
 ### Comparison
 
-| Operator | Meaning | Type |
-|----------|---------|------|
-| `<` | Less than | `Ord a => a -> a -> boolean` |
-| `<=` | Less or equal | `Ord a => a -> a -> boolean` |
-| `>` | Greater than | `Ord a => a -> a -> boolean` |
-| `>=` | Greater or equal | `Ord a => a -> a -> boolean` |
+| Operator | Meaning          | Type                         |
+| -------- | ---------------- | ---------------------------- |
+| `<`      | Less than        | `Ord a => a -> a -> boolean` |
+| `<=`     | Less or equal    | `Ord a => a -> a -> boolean` |
+| `>`      | Greater than     | `Ord a => a -> a -> boolean` |
+| `>=`     | Greater or equal | `Ord a => a -> a -> boolean` |
 
 Works on numbers and strings.
 
 ### Equality
 
-| Operator | Meaning | Type |
-|----------|---------|------|
-| `==` | Equal | `Eq a => a -> a -> boolean` |
-| `!=` | Not equal | `Eq a => a -> a -> boolean` |
+| Operator | Meaning   | Type                        |
+| -------- | --------- | --------------------------- |
+| `==`     | Equal     | `Eq a => a -> a -> boolean` |
+| `!=`     | Not equal | `Eq a => a -> a -> boolean` |
 
 Works on all types except functions.
 
 ### Boolean
 
-| Operator | Meaning | Type |
-|----------|---------|------|
-| `&&` | Logical AND | `boolean -> boolean -> boolean` |
-| `\|\|` | Logical OR | `boolean -> boolean -> boolean` |
+| Operator | Meaning     | Type                            |
+| -------- | ----------- | ------------------------------- |
+| `&&`     | Logical AND | `boolean -> boolean -> boolean` |
+| `\|\|`   | Logical OR  | `boolean -> boolean -> boolean` |
 
 Short-circuit evaluation.
 
-### String
-
-| Operator | Meaning | Type |
-|----------|---------|------|
-| `++` | Concatenation | `string -> string -> string` |
-
 ### Special
 
-| Operator | Meaning | Desugars To |
-|----------|---------|-------------|
-| `\|>` | Pipe | `x \|> f` → `f x` |
-| `::` | Cons | `x :: xs` → `Cons x xs` |
+| Operator | Meaning | Desugars To             |
+| -------- | ------- | ----------------------- |
+| `\|>`    | Pipe    | `x \|> f` → `f x`       |
+| `::`     | Cons    | `x :: xs` → `Cons x xs` |
 
 ---
 
@@ -138,19 +139,18 @@ Short-circuit evaluation.
 
 From lowest to highest precedence:
 
-| Level | Operators | Associativity |
-|-------|-----------|---------------|
-| 1 | `\|\|` | Left |
-| 2 | `&&` | Left |
-| 3 | `==`, `!=` | Left |
-| 4 | `<`, `<=`, `>`, `>=` | Left |
-| 5 | `++` | Left |
-| 6 | `::` | Right |
-| 7 | `+`, `-` | Left |
-| 8 | `*`, `/` | Left |
-| 9 | `\|>` | Left |
-| 10 | Function application | Left |
-| 11 | `.` (field access) | Left |
+| Level | Operators            | Associativity |
+| ----- | -------------------- | ------------- |
+| 1     | `\|\|`               | Left          |
+| 2     | `&&`                 | Left          |
+| 3     | `==`, `!=`           | Left          |
+| 4     | `<`, `<=`, `>`, `>=` | Left          |
+| 5     | `::`                 | Right         |
+| 6     | `+`, `-`             | Left          |
+| 7     | `*`, `/`             | Left          |
+| 8     | `\|>`                | Left          |
+| 9     | Function application | Left          |
+| 10    | `.` (field access)   | Left          |
 
 ---
 
@@ -354,6 +354,7 @@ data Tree a = Leaf a | Node (Tree a) (Tree a)
 ### Using Constructors
 
 Constructors are functions:
+
 ```
 Just        -- a -> Maybe a
 Cons        -- a -> List a -> List a
@@ -361,6 +362,7 @@ Left        -- a -> Either a b
 ```
 
 Apply them like functions:
+
 ```
 Just 42                     -- Maybe number
 Cons 1 (Cons 2 Nil)        -- List number
@@ -391,15 +393,15 @@ fn (x : number) => fn (y : number) : number => x + y
 
 ### Type Syntax
 
-| Syntax | Meaning |
-|--------|---------|
-| `number` | Number type |
-| `string` | String type |
-| `boolean` | Boolean type |
-| `a` | Type variable |
-| `a -> b` | Function type |
-| `(a, b)` | Tuple type |
-| `Maybe a` | Type application |
+| Syntax        | Meaning                   |
+| ------------- | ------------------------- |
+| `number`      | Number type               |
+| `string`      | String type               |
+| `boolean`     | Boolean type              |
+| `a`           | Type variable             |
+| `a -> b`      | Function type             |
+| `(a, b)`      | Tuple type                |
+| `Maybe a`     | Type application          |
 | `List number` | Concrete type application |
 
 ---
@@ -418,27 +420,27 @@ data List a = Nil | Cons a (List a)
 
 ### List Functions
 
-| Function | Type | Description |
-|----------|------|-------------|
-| `map` | `(a -> b) -> List a -> List b` | Transform each element |
-| `filter` | `(a -> boolean) -> List a -> List a` | Keep matching elements |
-| `foldr` | `(a -> b -> b) -> b -> List a -> b` | Right fold |
-| `foldl` | `(b -> a -> b) -> b -> List a -> b` | Left fold |
-| `head` | `List a -> Maybe a` | First element |
-| `tail` | `List a -> Maybe (List a)` | All but first |
-| `length` | `List a -> number` | Count elements |
-| `isEmpty` | `List a -> boolean` | Check if empty |
-| `reverse` | `List a -> List a` | Reverse list |
-| `concat` | `List a -> List a -> List a` | Concatenate lists |
+| Function  | Type                                 | Description            |
+| --------- | ------------------------------------ | ---------------------- |
+| `map`     | `(a -> b) -> List a -> List b`       | Transform each element |
+| `filter`  | `(a -> boolean) -> List a -> List a` | Keep matching elements |
+| `foldr`   | `(a -> b -> b) -> b -> List a -> b`  | Right fold             |
+| `foldl`   | `(b -> a -> b) -> b -> List a -> b`  | Left fold              |
+| `head`    | `List a -> Maybe a`                  | First element          |
+| `tail`    | `List a -> Maybe (List a)`           | All but first          |
+| `length`  | `List a -> number`                   | Count elements         |
+| `isEmpty` | `List a -> boolean`                  | Check if empty         |
+| `reverse` | `List a -> List a`                   | Reverse list           |
+| `concat`  | `List a -> List a -> List a`         | Concatenate lists      |
 
 ### Utility Functions
 
-| Function | Type | Description |
-|----------|------|-------------|
-| `id` | `a -> a` | Identity function |
-| `const` | `a -> b -> a` | Constant function |
+| Function  | Type                             | Description          |
+| --------- | -------------------------------- | -------------------- |
+| `id`      | `a -> a`                         | Identity function    |
+| `const`   | `a -> b -> a`                    | Constant function    |
 | `compose` | `(b -> c) -> (a -> b) -> a -> c` | Function composition |
-| `flip` | `(a -> b -> c) -> b -> a -> c` | Swap arguments |
+| `flip`    | `(a -> b -> c) -> b -> a -> c`   | Swap arguments       |
 
 ---
 

@@ -15,6 +15,7 @@ add 5
 ```
 
 When we evaluate `add 5`:
+
 1. Look up `add` → get a function `fn y => x + y`
 2. Apply it to `5`
 3. Evaluate `x + y` with `y = 5`
@@ -34,6 +35,7 @@ case "Abs":
 ```
 
 The closure stores:
+
 - `param`: The parameter name (`"y"`)
 - `body`: The function body (`x + y`)
 - `env`: The environment at creation time (`{ x → 10 }`)
@@ -70,6 +72,7 @@ const apply = (func: Value, arg: Value): Value => {
 ```
 
 Key steps:
+
 1. Start with the closure's captured environment (`func.env`)
 2. Extend it with the argument binding (`param → arg`)
 3. Evaluate the body in this extended environment
@@ -193,6 +196,7 @@ h 30
 ```
 
 Each function captures its enclosing environment:
+
 - Outer lambda captures `{ a → 1 }`
 - Middle lambda captures `{ a → 1, x → 10, b → 2 }`
 - Inner lambda captures `{ a → 1, x → 10, b → 2, y → 20, c → 3 }`
@@ -251,6 +255,7 @@ case "LetRec": {
 ```
 
 The trick:
+
 1. Create mutable reference cells for all bindings
 2. Add all refs to the environment (values still null)
 3. Evaluate each binding—closures capture refs, not values
@@ -260,14 +265,17 @@ The trick:
 ### Why Refs Work
 
 When we create the `fact` closure:
+
 - Environment contains `{ fact → VRef(null) }`
 - Closure captures this environment
 
 When we fill the ref:
+
 - `refs.get("fact").value = <the closure>`
 - Now `VRef.value` points to the closure
 
 When the closure runs and looks up `fact`:
+
 1. Get `VRef` from captured environment
 2. Dereference to get the actual closure
 3. Apply recursively

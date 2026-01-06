@@ -13,6 +13,7 @@ fn x => x
 ```
 
 What type should it have?
+
 - If we call it with a number, it's `number -> number`
 - If we call it with a string, it's `string -> string`
 
@@ -51,6 +52,7 @@ let id = fn x => x in (id 42, id "hello")
 ```
 
 This works because:
+
 1. `id` is generalized to `∀a. a -> a`
 2. First use instantiates to `t0 -> t0`, unifies with `number -> number`
 3. Second use instantiates to `t1 -> t1`, unifies with `string -> string`
@@ -70,10 +72,12 @@ fn f => (f 42, f "hello")
 This doesn't work. Why?
 
 The parameter `f` has type `t0` (a single type variable). When we see `f 42`:
+
 - We unify `t0` with `number -> t1`
 - Now `f : number -> t1`
 
 When we then see `f "hello"`:
+
 - We try to apply `f : number -> t1` to `string`
 - ERROR: `number` doesn't match `string`
 
@@ -99,12 +103,14 @@ let r = ref None in (r := Some 42; !r)
 ```
 
 If we generalized `r` to `∀a. ref (option a)`, we could:
+
 - Store an `int` with `r := Some 42`
 - Read it as a `string` with `(!r : option string)`
 
 This would be unsound—type safety would be violated.
 
 The **value restriction** says: only **values** can be generalized. A value is:
+
 - A lambda: `fn x => ...`
 - A literal: `42`, `"hello"`
 - A constructor application: `Just x`
@@ -140,6 +146,7 @@ let id = fn x => x
 ```
 
 After inferring `fn x => x`:
+
 - Type: `t0 -> t0`
 - Environment: `{}` (empty)
 - Free in type: `{t0}`
@@ -155,6 +162,7 @@ let f x =
 ```
 
 After inferring `fn y => x + y`:
+
 - Type: `number -> number` (because `+` requires numbers)
 - Environment: `{x: number, f: ...}`
 - Free in type: `{}`
@@ -171,6 +179,7 @@ let compose f g = fn x => f (g x)
 ```
 
 After inferring:
+
 - Type: `(t1 -> t2) -> (t0 -> t1) -> t0 -> t2`
 - Environment: `{}`
 - Quantify all: `{t0, t1, t2}`
@@ -205,11 +214,13 @@ let id = fn x => x in
 ```
 
 First `id`:
+
 - Instantiate: `t5 -> t5`
 - Apply to `42`: unify `t5` with `number`
 - Result: `number`
 
 Second `id`:
+
 - Instantiate: `t6 -> t6` (fresh variables!)
 - Apply to `"hello"`: unify `t6` with `string`
 - Result: `string`
@@ -220,12 +231,12 @@ Each use is independent because instantiation creates fresh variables.
 
 ## Monomorphism vs Polymorphism
 
-| Context | Polymorphic? | Why |
-|---------|--------------|-----|
-| `let x = v in body` | Yes | `x` is generalized |
-| `fn x => body` | No | `x` is a parameter |
-| `match e with x => body` | No | `x` is pattern-bound |
-| `let rec f = v in body` | Yes | `f` is generalized after inference |
+| Context                  | Polymorphic? | Why                                |
+| ------------------------ | ------------ | ---------------------------------- |
+| `let x = v in body`      | Yes          | `x` is generalized                 |
+| `fn x => body`           | No           | `x` is a parameter                 |
+| `match e with x => body` | No           | `x` is pattern-bound               |
+| `let rec f = v in body`  | Yes          | `f` is generalized after inference |
 
 ---
 
@@ -256,6 +267,7 @@ id 42 + id "hello"  -- ERROR!
 ```
 
 Even though `id` is polymorphic:
+
 - `id 42` has type `number`
 - `id "hello"` has type `string`
 - `+` requires both operands to have the same numeric type
@@ -275,6 +287,7 @@ end
 ```
 
 Process:
+
 1. Create fresh type `t0` for `length`
 2. Add `length : t0` to environment (monomorphic)
 3. Infer body with `length` in scope

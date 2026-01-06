@@ -348,28 +348,28 @@ The pattern `_` that matches anything without binding.
 
 ## Cross-Reference by Chapter
 
-| Concept | Primary Chapter |
-|---------|-----------------|
-| Lexer, Tokens | Part 1, Ch 1-2 |
-| Parser, Pratt Parsing | Part 1, Ch 3-4 |
-| AST | Part 1, Ch 5 |
-| Binder, Name Resolution | Part 1, Ch 6 |
-| Types, Type Variables | Part 2, Ch 1-2 |
-| Substitution | Part 2, Ch 3 |
-| Unification | Part 2, Ch 4 |
-| Algorithm W | Part 2, Ch 5 |
-| Generalization, Let Polymorphism | Part 2, Ch 6 |
-| Pattern Matching (types) | Part 2, Ch 7 |
-| Type Classes | Part 2, Ch 8 |
-| IR, ANF | Part 3, Ch 1-2 |
-| Lowering | Part 3, Ch 3 |
-| Optimizations, TCO | Part 3, Ch 4 |
-| Code Generation | Part 3, Ch 5 |
-| Runtime | Part 3, Ch 6 |
-| Evaluation | Part 4, Ch 1 |
-| Closures | Part 4, Ch 2 |
-| Pattern Matching (runtime) | Part 4, Ch 3 |
-| Pipeline | Part 5, Ch 1 |
-| Prelude | Part 5, Ch 2 |
-| Diagnostics | Part 5, Ch 3 |
-| LSP | Part 5, Ch 4 |
+| Concept                          | Primary Chapter |
+| -------------------------------- | --------------- |
+| Lexer, Tokens                    | Part 1, Ch 1-2  |
+| Parser, Pratt Parsing            | Part 1, Ch 3-4  |
+| AST                              | Part 1, Ch 5    |
+| Binder, Name Resolution          | Part 1, Ch 6    |
+| Types, Type Variables            | Part 2, Ch 1-2  |
+| Substitution                     | Part 2, Ch 3    |
+| Unification                      | Part 2, Ch 4    |
+| Algorithm W                      | Part 2, Ch 5    |
+| Generalization, Let Polymorphism | Part 2, Ch 6    |
+| Pattern Matching (types)         | Part 2, Ch 7    |
+| Type Classes                     | Part 2, Ch 8    |
+| IR, ANF                          | Part 3, Ch 1-2  |
+| Lowering                         | Part 3, Ch 3    |
+| Optimizations, TCO               | Part 3, Ch 4    |
+| Code Generation                  | Part 3, Ch 5    |
+| Runtime                          | Part 3, Ch 6    |
+| Evaluation                       | Part 4, Ch 1    |
+| Closures                         | Part 4, Ch 2    |
+| Pattern Matching (runtime)       | Part 4, Ch 3    |
+| Pipeline                         | Part 5, Ch 1    |
+| Prelude                          | Part 5, Ch 2    |
+| Diagnostics                      | Part 5, Ch 3    |
+| LSP                              | Part 5, Ch 4    |

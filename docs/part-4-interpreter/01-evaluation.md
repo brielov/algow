@@ -49,6 +49,7 @@ export type VClosure = {
 ```
 
 A closure stores:
+
 - **param**: The parameter name
 - **body**: The function body (AST node)
 - **env**: The captured environment (for free variables)
@@ -280,6 +281,7 @@ case "Abs":
 ```
 
 The closure stores:
+
 - The parameter name
 - The body (unevaluated)
 - The current environment (for free variables)
@@ -383,10 +385,6 @@ const evalBinOp = (env: Env, expr: ast.BinOp): Value => {
       return vbool(valuesEqual(left, right));
     case "!=":
       return vbool(!valuesEqual(left, right));
-
-    // String concatenation
-    case "++":
-      return vstr((left as VStr).value + (right as VStr).value);
   }
 };
 ```

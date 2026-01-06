@@ -25,6 +25,7 @@ Let
 ```
 
 The AST is:
+
 - **Abstract**: Ignores syntactic details (parentheses, whitespace, keywords)
 - **Structured**: Represents hierarchical relationships
 - **Typed**: Each node has a specific type with known fields
@@ -454,10 +455,9 @@ export interface BinOp extends Node {
  * All supported operators.
  */
 export type Op =
-  | "+" | "-" | "/" | "*"     // Arithmetic
+  | "+" | "-" | "/" | "*"     // Arithmetic (+ also works for string concatenation)
   | "<" | "<=" | ">" | ">="   // Comparison
-  | "==" | "!="               // Equality
-  | "++";                      // String concatenation
+  | "==" | "!=";              // Equality
 ```
 
 ---

@@ -43,6 +43,7 @@ let x = 2 + 3 in x * 2
 ```
 
 After constant folding:
+
 ```
 let x = 5 in x * 2
 ```
@@ -109,11 +110,11 @@ const evalBinOp = (
     }
   }
 
-  // String concatenation
+  // String operations
   if (typeof left === "string" && typeof right === "string") {
     switch (op) {
-      case "++":
-        return left + right;
+      case "+":
+        return left + right;  // + is overloaded for string concatenation
       case "==":
         return left === right;
       // ... comparisons
@@ -152,6 +153,7 @@ z
 ```
 
 After DCE (if `y` is unused):
+
 ```
 let x = 1 in
 let z = x + 3 in
@@ -473,6 +475,7 @@ const defaultPasses: readonly OptPass[] = [
 ```
 
 Order matters:
+
 1. **Constant folding** first—may create dead code
 2. **DCE** second—removes code made dead by folding
 3. **TCO** last—marks functions for loop generation
@@ -482,6 +485,7 @@ Order matters:
 ## Example: Full Optimization
 
 Source:
+
 ```
 let rec fact n acc =
   if n == 0 then acc
