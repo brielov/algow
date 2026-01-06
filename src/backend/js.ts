@@ -202,10 +202,6 @@ const genBinOp = (ctx: CodeGenContext, binding: ir.IRBinOpBinding): string => {
         return `!$eq(${left}, ${right})`;
       }
       return `(${left} !== ${right})`;
-
-    case "++":
-      // String concatenation uses + in JavaScript
-      return `(${left} + ${right})`;
   }
 };
 

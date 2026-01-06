@@ -332,12 +332,11 @@ export interface BinOp extends Node {
 /**
  * Supported binary operators.
  *
- * Arithmetic: +, -, *, /
+ * Arithmetic: +, -, *, / (+ also works for string concatenation)
  * Comparison: <, <=, >, >=
  * Equality: ==, !=
- * String: ++ (concatenation)
  */
-export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=" | "++";
+export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=";
 
 // =============================================================================
 // PATTERNS

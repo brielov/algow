@@ -63,10 +63,10 @@ const evalBinOp = (
     }
   }
 
-  // String concatenation
+  // String operations
   if (typeof left === "string" && typeof right === "string") {
     switch (op) {
-      case "++":
+      case "+":
         return left + right;
       case "==":
         return left === right;

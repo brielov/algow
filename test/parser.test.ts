@@ -149,26 +149,12 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(ast.binOp("/", ast.num(10), ast.num(2)));
     });
 
-    it("parses string concatenation", () => {
-      const result = parse('"hello" ++ " world"');
+    it("parses string concatenation with +", () => {
+      const result = parse('"hello" + " world"');
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.binOp("++", ast.str("hello"), ast.str(" world")),
+        ast.binOp("+", ast.str("hello"), ast.str(" world")),
       );
-    });
-
-    it("parses chained string concatenation (left-associative)", () => {
-      const result = parse('"a" ++ "b" ++ "c"');
-      expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(
-        ast.binOp("++", ast.binOp("++", ast.str("a"), ast.str("b")), ast.str("c")),
-      );
-    });
-
-    it("++ has same precedence as +", () => {
-      // "a" ++ "b" + 1 should fail type check but parse as (("a" ++ "b") + 1)
-      const result = parse('"x" ++ "y"');
-      expect(result.diagnostics).toHaveLength(0);
     });
 
     it("parses less than", () => {

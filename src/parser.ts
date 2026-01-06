@@ -533,8 +533,6 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
       return binOp("==");
     case TokenKind.Ne:
       return binOp("!=");
-    case TokenKind.PlusPlus:
-      return binOp("++");
 
     // Logical operators desugar to if expressions for short-circuit evaluation:
     // a && b  →  if a then b else false
@@ -631,7 +629,6 @@ const infixBindingPower = (state: ParserState): number => {
 
     case TokenKind.Plus:
     case TokenKind.Minus:
-    case TokenKind.PlusPlus:
       return Bp.Additive;
 
     case TokenKind.Star:

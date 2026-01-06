@@ -68,16 +68,25 @@ type CheckContext = {
   readonly diagnostics: Diagnostic[];
   readonly types: Map<Definition, Type>;
   readonly symbols: SymbolTable;
+  readonly definitionMap: ReadonlyMap<string, Definition>;
 };
 
 /**
  * Create a fresh check context.
  */
-const createContext = (symbols: SymbolTable): CheckContext => ({
-  diagnostics: [],
-  types: new Map(),
-  symbols,
-});
+const createContext = (symbols: SymbolTable): CheckContext => {
+  const definitionMap = new Map<string, Definition>();
+  for (const def of symbols.definitions) {
+    definitionMap.set(`${def.span.start}:${def.span.end}`, def);
+  }
+
+  return {
+    diagnostics: [],
+    types: new Map(),
+    symbols,
+    definitionMap,
+  };
+};
 
 /**
  * Add an error diagnostic to the context.
@@ -94,12 +103,10 @@ const addError = (ctx: CheckContext, message: string, span?: ast.Span): void => 
  * Looks up the definition by span in the symbol table.
  */
 const recordType = (ctx: CheckContext, span: ast.Span, type: Type): void => {
-  // Find the definition at this span
-  for (const def of ctx.symbols.definitions) {
-    if (def.span.start === span.start && def.span.end === span.end) {
-      ctx.types.set(def, type);
-      return;
-    }
+  const key = `${span.start}:${span.end}`;
+  const def = ctx.definitionMap.get(key);
+  if (def) {
+    ctx.types.set(def, type);
   }
 };
 
@@ -977,24 +984,50 @@ export const typeToString = (type: Type): string => {
  * @param constraints The constraints to check
  */
 const solveConstraints = (ctx: CheckContext, constraints: readonly Constraint[]): void => {
-  for (const c of constraints) {
-    // Type variables - defer until instantiation
-    if (c.type.kind === "TVar") {
-      continue;
-    }
+  const solve = (c: Constraint): void => {
+    const { className, type } = c;
 
-    // Concrete type - check it has the required instance
-    if (c.type.kind === "TCon") {
-      const classInstances = instances.get(c.className);
-      if (!classInstances?.has(c.type.name)) {
-        addError(ctx, `Type '${c.type.name}' does not satisfy ${c.className}`);
+    switch (type.kind) {
+      case "TVar":
+        // Defer until instantiation
+        return;
+
+      case "TCon": {
+        const classInstances = instances.get(className);
+        if (!classInstances?.has(type.name)) {
+          addError(ctx, `Type '${type.name}' does not satisfy ${className}`);
+        }
+        return;
       }
-    }
 
-    // Function types never satisfy our type classes
-    if (c.type.kind === "TFun") {
-      addError(ctx, `Function types do not satisfy ${c.className}`);
+      case "TFun":
+        addError(ctx, `Function types do not satisfy ${className}`);
+        return;
+
+      case "TTuple": {
+        if (className === "Eq" || className === "Ord") {
+          for (const elemType of type.elements) {
+            solve({ className, type: elemType });
+          }
+          return;
+        }
+        addError(ctx, `Tuples do not satisfy ${className}`);
+        return;
+      }
+
+      case "TApp":
+        // Could be extended for things like List a, but for now, we don't have instances for them.
+        addError(ctx, `Type '${typeToString(type)}' does not satisfy ${className}`);
+        return;
+
+      case "TRecord":
+        addError(ctx, `Record types do not satisfy ${className}`);
+        return;
     }
+  };
+
+  for (const c of constraints) {
+    solve(c);
   }
 };
 
@@ -1279,9 +1312,8 @@ const inferAbs = (
 
   if (expr.paramType) {
     // Convert annotation to type, replacing type variables with fresh ones
-    const [annotatedType, tvSubst] = instantiateTypeExpr(expr.paramType);
+    const annotatedType = instantiateTypeExpr(expr.paramType);
     paramType = annotatedType;
-    subst = tvSubst;
   } else {
     // No annotation - use fresh type variable
     paramType = freshTypeVar();
@@ -1403,12 +1435,6 @@ const inferBinOp = (
       constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }
-
-    // String concatenation: both operands must be string, returns string
-    case "++": {
-      const s4 = unify(ctx, operandType, tStr, expr.span);
-      return [composeSubst(subst, s4), tStr, constraints];
-    }
   }
 };
 
@@ -1480,7 +1506,7 @@ const inferLet = (
   // If there's a return type annotation, unify with the innermost return type
   // (after peeling off all function parameter types)
   if (expr.returnType) {
-    const [annotatedType] = instantiateTypeExpr(expr.returnType);
+    const annotatedType = instantiateTypeExpr(expr.returnType);
     // Peel off function types to get to the return type
     let currentType = applySubst(s1, valueType);
     while (currentType.kind === "TFun") {
@@ -1559,7 +1585,7 @@ const inferLetRec = (
 
     // If there's a return type annotation, unify with the innermost return type
     if (binding.returnType) {
-      const [annotatedType] = instantiateTypeExpr(binding.returnType);
+      const annotatedType = instantiateTypeExpr(binding.returnType);
       // Peel off function types to get to the return type
       let currentType = applySubst(subst, valueType);
       while (currentType.kind === "TFun") {
@@ -1939,23 +1965,26 @@ const inferPattern = (
         currentSubst = s2;
 
         // Check that bindings match
-        if (firstBindings.size !== altBindings.size) {
-          addError(
-            ctx,
-            `Or-pattern alternatives must bind the same variables (alternative ${i + 1} binds different variables)`,
-          );
+        const keys1 = new Set(firstBindings.keys());
+        const keys2 = new Set(altBindings.keys());
+        const diff1 = [...keys1].filter((k) => !keys2.has(k));
+        const diff2 = [...keys2].filter((k) => !keys1.has(k));
+
+        if (diff1.length > 0 || diff2.length > 0) {
+          const missing = diff1.length > 0 ? `missing ${diff1.join(", ")}` : "";
+          const extra = diff2.length > 0 ? `extra ${diff2.join(", ")}` : "";
+          const message = [`Or-pattern alternatives must bind the same variables.`, missing, extra]
+            .filter(Boolean)
+            .join(" ");
+          addError(ctx, message);
           continue;
         }
 
         for (const [name, type1] of firstBindings) {
-          const type2 = altBindings.get(name);
-          if (!type2) {
-            addError(ctx, `Or-pattern alternative ${i + 1} is missing binding for '${name}'`);
-          } else {
-            // Unify the types
-            const s3 = unify(ctx, applySubst(currentSubst, type1), applySubst(currentSubst, type2));
-            currentSubst = composeSubst(currentSubst, s3);
-          }
+          const type2 = altBindings.get(name)!;
+          // Unify the types
+          const s3 = unify(ctx, applySubst(currentSubst, type1), applySubst(currentSubst, type2));
+          currentSubst = composeSubst(currentSubst, s3);
         }
       }
 
@@ -2034,12 +2063,40 @@ const inferMatch = (
     }
   }
 
-  // Check exhaustiveness (only unguarded patterns count as covering)
-  const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
-  const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
+  // Check exhaustiveness
+  const lastCase = expr.cases[expr.cases.length - 1];
+  let isExhaustive = false;
 
-  if (missing.length > 0) {
-    addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+  if (lastCase) {
+    const isWildcardPattern = (p: ast.Pattern): boolean => {
+      if (p.kind === "PVar" || p.kind === "PWildcard") return true;
+      if (p.kind === "PAs") return isWildcardPattern(p.pattern);
+      return false;
+    };
+
+    // An unconditional catch-all makes it exhaustive
+    if (isWildcardPattern(lastCase.pattern) && !lastCase.guard) {
+      isExhaustive = true;
+    }
+
+    // A catch-all with a `true` guard is also exhaustive
+    if (
+      isWildcardPattern(lastCase.pattern) &&
+      lastCase.guard?.kind === "Bool" &&
+      lastCase.guard.value === true
+    ) {
+      isExhaustive = true;
+    }
+  }
+
+  if (!isExhaustive) {
+    // Fallback to checking constructors (only unguarded patterns count)
+    const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
+    const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
+
+    if (missing.length > 0) {
+      addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+    }
   }
 
   return [subst, applySubst(subst, resultType!), constraints];
@@ -2080,7 +2137,7 @@ const PRIMITIVE_TYPES = new Set(["number", "string", "boolean"]);
  *
  * Returns the instantiated type and a substitution mapping the fresh variables.
  */
-const instantiateTypeExpr = (texpr: ast.TypeExpr): [Type, Subst] => {
+const instantiateTypeExpr = (texpr: ast.TypeExpr): Type => {
   const varMapping = new Map<string, Type>();
 
   const convert = (t: ast.TypeExpr): Type => {
@@ -2107,11 +2164,7 @@ const instantiateTypeExpr = (texpr: ast.TypeExpr): [Type, Subst] => {
     }
   };
 
-  const result = convert(texpr);
-
-  // Build a substitution from the mapping (not really needed but useful for tracking)
-  const subst: Subst = new Map();
-  return [result, subst];
+  return convert(texpr);
 };
 
 /**

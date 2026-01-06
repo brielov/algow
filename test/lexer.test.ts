@@ -327,15 +327,17 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.And);
     });
 
-    it("lexes string concatenation operator", () => {
+    it("lexes two pluses as two tokens", () => {
       const state = createLexer("++");
-      expect(nextToken(state)[0]).toBe(TokenKind.PlusPlus);
+      expect(nextToken(state)[0]).toBe(TokenKind.Plus);
+      expect(nextToken(state)[0]).toBe(TokenKind.Plus);
     });
 
-    it("distinguishes + from ++", () => {
+    it("handles sequences of pluses", () => {
       const state = createLexer("+ ++ +");
       expect(nextToken(state)[0]).toBe(TokenKind.Plus);
-      expect(nextToken(state)[0]).toBe(TokenKind.PlusPlus);
+      expect(nextToken(state)[0]).toBe(TokenKind.Plus);
+      expect(nextToken(state)[0]).toBe(TokenKind.Plus);
       expect(nextToken(state)[0]).toBe(TokenKind.Plus);
     });
 

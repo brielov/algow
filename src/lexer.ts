@@ -63,7 +63,7 @@ export enum TokenKind {
   ColonColon, // ::
   And, // &&
   Or, // ||
-  PlusPlus, // ++
+
   Colon, // :
 
   // Delimiters
@@ -343,10 +343,6 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
 
   switch (ch) {
     case PLUS:
-      if (peek(state) === PLUS) {
-        advance(state);
-        return [TokenKind.PlusPlus, start, state.pos];
-      }
       return [TokenKind.Plus, start, state.pos];
 
     case MINUS:

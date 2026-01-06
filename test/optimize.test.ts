@@ -123,11 +123,11 @@ describe("Optimizations", () => {
     });
 
     it("folds string concatenation", () => {
-      // let x = "hello" ++ " world" in x
+      // let x = "hello" + " world" in x
       const expr = ir.irLet(
         "x",
         ir.irBinOpBinding(
-          "++",
+          "+",
           ir.irLit("hello", strType),
           ir.irLit(" world", strType),
           strType,

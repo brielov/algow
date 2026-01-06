@@ -123,17 +123,17 @@ describe("Interpreter", () => {
       expect(evaluate(emptyEnv, ast.binOp("!=", ast.num(1), ast.num(1)))).toEqual(vbool(false));
     });
 
-    it("concatenates strings with ++", () => {
-      expect(evaluate(emptyEnv, ast.binOp("++", ast.str("hello"), ast.str(" world")))).toEqual(
+    it("concatenates strings with +", () => {
+      expect(evaluate(emptyEnv, ast.binOp("+", ast.str("hello"), ast.str(" world")))).toEqual(
         vstr("hello world"),
       );
     });
 
-    it("concatenates empty strings with ++", () => {
-      expect(evaluate(emptyEnv, ast.binOp("++", ast.str(""), ast.str("test")))).toEqual(
+    it("concatenates empty strings with +", () => {
+      expect(evaluate(emptyEnv, ast.binOp("+", ast.str(""), ast.str("test")))).toEqual(
         vstr("test"),
       );
-      expect(evaluate(emptyEnv, ast.binOp("++", ast.str("test"), ast.str("")))).toEqual(
+      expect(evaluate(emptyEnv, ast.binOp("+", ast.str("test"), ast.str("")))).toEqual(
         vstr("test"),
       );
     });

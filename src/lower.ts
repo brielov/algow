@@ -439,6 +439,9 @@ const lowerBinOp = (ctx: LowerContext, expr: ast.BinOp): ir.IRExpr => {
 
   switch (expr.op) {
     case "+":
+      // + works on both numbers and strings, result type matches operand
+      resultType = operandType;
+      break;
     case "-":
     case "*":
     case "/":
@@ -451,9 +454,6 @@ const lowerBinOp = (ctx: LowerContext, expr: ast.BinOp): ir.IRExpr => {
     case "==":
     case "!=":
       resultType = tBool;
-      break;
-    case "++":
-      resultType = tStr;
       break;
   }
 
