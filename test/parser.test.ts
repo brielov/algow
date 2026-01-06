@@ -1456,7 +1456,7 @@ describe("Parser", () => {
     });
 
     it("returns null for empty program", () => {
-      const program = { declarations: [], bindings: [], expr: null };
+      const program = { modules: [], uses: [], declarations: [], bindings: [], expr: null };
       expect(programToExpr(program)).toBeNull();
     });
 
@@ -1879,6 +1879,243 @@ describe("Parser", () => {
           expect(expr.value.body.paramType).toBeUndefined();
         }
       }
+    });
+  });
+
+  describe("module system", () => {
+    describe("module declarations", () => {
+      it("parses empty module", () => {
+        const result = parse("module Empty end");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.name).toBe("Empty");
+        expect(result.program.modules[0]?.declarations).toHaveLength(0);
+        expect(result.program.modules[0]?.bindings).toHaveLength(0);
+      });
+
+      it("parses module with data declaration", () => {
+        const result = parse(`
+          module Maybe
+            data Maybe a = Nothing | Just a
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.name).toBe("Maybe");
+        expect(result.program.modules[0]?.declarations).toHaveLength(1);
+        expect(result.program.modules[0]?.declarations[0]?.name).toBe("Maybe");
+      });
+
+      it("parses module with function binding", () => {
+        const result = parse(`
+          module Core
+            let id x = x
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.name).toBe("Core");
+        expect(result.program.modules[0]?.bindings).toHaveLength(1);
+        expect(result.program.modules[0]?.bindings[0]?.name).toBe("id");
+      });
+
+      it("parses module with multiple declarations and bindings", () => {
+        const result = parse(`
+          module List
+            data List a = Nil | Cons a (List a)
+            let rec map f xs = match xs with
+              | Nil => Nil
+              | Cons x rest => Cons (f x) (map f rest)
+            end
+            let isEmpty xs = match xs with
+              | Nil => true
+              | Cons _ _ => false
+            end
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.declarations).toHaveLength(1);
+        expect(result.program.modules[0]?.bindings).toHaveLength(2);
+      });
+    });
+
+    describe("use statements", () => {
+      it("parses simple use statement", () => {
+        const result = parse("use Maybe");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.uses).toHaveLength(1);
+        expect(result.program.uses[0]?.moduleName).toBe("Maybe");
+        expect(result.program.uses[0]?.imports).toBeNull();
+        expect(result.program.uses[0]?.alias).toBeUndefined();
+      });
+
+      it("parses use with import all", () => {
+        const result = parse("use Maybe (..)");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.uses).toHaveLength(1);
+        expect(result.program.uses[0]?.imports?.kind).toBe("All");
+      });
+
+      it("parses use with specific imports", () => {
+        const result = parse("use Maybe (Maybe, map)");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.uses).toHaveLength(1);
+        const imports = result.program.uses[0]?.imports;
+        expect(imports?.kind).toBe("Specific");
+        if (imports?.kind === "Specific") {
+          expect(imports.items).toHaveLength(2);
+          expect(imports.items[0]?.name).toBe("Maybe");
+          expect(imports.items[1]?.name).toBe("map");
+        }
+      });
+
+      it("parses use with constructor imports", () => {
+        const result = parse("use Maybe (Maybe(..))");
+        expect(result.diagnostics).toHaveLength(0);
+        const imports = result.program.uses[0]?.imports;
+        expect(imports?.kind).toBe("Specific");
+        if (imports?.kind === "Specific") {
+          expect(imports.items[0]?.name).toBe("Maybe");
+          expect(imports.items[0]?.constructors).toBe("all");
+        }
+      });
+
+      it("parses use with specific constructor imports", () => {
+        const result = parse("use Maybe (Maybe(Just, Nothing))");
+        expect(result.diagnostics).toHaveLength(0);
+        const imports = result.program.uses[0]?.imports;
+        if (imports?.kind === "Specific") {
+          expect(imports.items[0]?.constructors).toEqual(["Just", "Nothing"]);
+        }
+      });
+
+      it("parses use with alias", () => {
+        const result = parse("use Maybe as M");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.uses[0]?.alias).toBe("M");
+      });
+
+      it("parses use with imports and alias", () => {
+        const result = parse("use Maybe (Maybe(..)) as M");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.uses[0]?.imports?.kind).toBe("Specific");
+        expect(result.program.uses[0]?.alias).toBe("M");
+      });
+    });
+
+    describe("qualified access", () => {
+      it("parses qualified variable access", () => {
+        const result = parse("List.map");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.expr?.kind).toBe("QualifiedVar");
+        if (result.program.expr?.kind === "QualifiedVar") {
+          expect(result.program.expr.moduleName).toBe("List");
+          expect(result.program.expr.member).toBe("map");
+        }
+      });
+
+      it("parses qualified constructor access", () => {
+        const result = parse("Maybe.Just 42");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.expr?.kind).toBe("App");
+        if (result.program.expr?.kind === "App") {
+          expect(result.program.expr.func.kind).toBe("QualifiedVar");
+          if (result.program.expr.func.kind === "QualifiedVar") {
+            expect(result.program.expr.func.moduleName).toBe("Maybe");
+            expect(result.program.expr.func.member).toBe("Just");
+          }
+        }
+      });
+
+      it("parses qualified access in expressions", () => {
+        const result = parse("List.map (fn x => x + 1) xs");
+        expect(result.diagnostics).toHaveLength(0);
+        // This should parse as (List.map (fn x => x + 1)) xs
+        expect(result.program.expr?.kind).toBe("App");
+      });
+
+      it("parses field access after qualified var", () => {
+        const result = parse("Module.record.field");
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.expr?.kind).toBe("FieldAccess");
+        if (result.program.expr?.kind === "FieldAccess") {
+          expect(result.program.expr.field).toBe("field");
+          expect(result.program.expr.record.kind).toBe("QualifiedVar");
+        }
+      });
+    });
+
+    describe("qualified patterns", () => {
+      it("parses qualified constructor in pattern", () => {
+        const result = parse(`
+          match x with
+          | Maybe.Just y => y
+          | Maybe.Nothing => 0
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        const matchExpr = result.program.expr;
+        expect(matchExpr?.kind).toBe("Match");
+        if (matchExpr?.kind === "Match") {
+          expect(matchExpr.cases[0]?.pattern.kind).toBe("QualifiedPCon");
+          if (matchExpr.cases[0]?.pattern.kind === "QualifiedPCon") {
+            expect(matchExpr.cases[0].pattern.moduleName).toBe("Maybe");
+            expect(matchExpr.cases[0].pattern.constructor).toBe("Just");
+          }
+        }
+      });
+
+      it("parses qualified constructor with no args", () => {
+        const result = parse(`
+          match xs with
+          | List.Nil => 0
+          | List.Cons x _ => x
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        const matchExpr = result.program.expr;
+        if (matchExpr?.kind === "Match") {
+          expect(matchExpr.cases[0]?.pattern.kind).toBe("QualifiedPCon");
+          expect(matchExpr.cases[1]?.pattern.kind).toBe("QualifiedPCon");
+        }
+      });
+    });
+
+    describe("full module programs", () => {
+      it("parses module followed by use and expression", () => {
+        const result = parse(`
+          module Math
+            let add x y = x + y
+          end
+
+          use Math (..)
+
+          add 1 2
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.uses).toHaveLength(1);
+        expect(result.program.expr?.kind).toBe("App");
+      });
+
+      it("parses multiple modules", () => {
+        const result = parse(`
+          module A
+            let a = 1
+          end
+
+          module B
+            let b = 2
+          end
+
+          A.a + B.b
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(2);
+        expect(result.program.modules[0]?.name).toBe("A");
+        expect(result.program.modules[1]?.name).toBe("B");
+      });
     });
   });
 });

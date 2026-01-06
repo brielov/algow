@@ -205,6 +205,13 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
       return tuple.elements[expr.index]!;
     }
 
+    case "QualifiedVar":
+      // Modules are not supported in the interpreter yet
+      // Use the compiler instead
+      throw new RuntimeError(
+        `Qualified access (${expr.moduleName}.${expr.member}) is not supported in the interpreter. Use the compiler.`,
+      );
+
     case "Match":
       return evalMatch(env, expr);
   }
@@ -349,6 +356,27 @@ const matchPattern = (pattern: ast.Pattern, value: Value): MatchResult => {
 
     case "PCon": {
       if (value.kind !== "VCon" || value.name !== pattern.name) {
+        return { matched: false };
+      }
+      if (value.args.length !== pattern.args.length) {
+        return { matched: false };
+      }
+
+      const bindings = new Map<string, Value>();
+      for (let i = 0; i < pattern.args.length; i++) {
+        const result = matchPattern(pattern.args[i]!, value.args[i]!);
+        if (!result.matched) return { matched: false };
+        for (const [name, val] of result.bindings) {
+          bindings.set(name, val);
+        }
+      }
+      return { matched: true, bindings };
+    }
+
+    case "QualifiedPCon": {
+      // Qualified constructor pattern (Module.Constructor)
+      // Match against the constructor name only (module already resolved by type checker)
+      if (value.kind !== "VCon" || value.name !== pattern.constructor) {
         return { matched: false };
       }
       if (value.args.length !== pattern.args.length) {

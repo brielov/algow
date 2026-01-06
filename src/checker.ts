@@ -69,12 +69,18 @@ type CheckContext = {
   readonly types: Map<Definition, Type>;
   readonly symbols: SymbolTable;
   readonly definitionMap: ReadonlyMap<string, Definition>;
+  readonly moduleEnv: ModuleTypeEnv;
+  readonly moduleAliases: Map<string, string>; // alias -> real name
 };
 
 /**
  * Create a fresh check context.
  */
-const createContext = (symbols: SymbolTable): CheckContext => {
+const createContext = (
+  symbols: SymbolTable,
+  moduleEnv: ModuleTypeEnv = new Map(),
+  moduleAliases: Map<string, string> = new Map(),
+): CheckContext => {
   const definitionMap = new Map<string, Definition>();
   for (const def of symbols.definitions) {
     definitionMap.set(`${def.span.start}:${def.span.end}`, def);
@@ -85,6 +91,8 @@ const createContext = (symbols: SymbolTable): CheckContext => {
     types: new Map(),
     symbols,
     definitionMap,
+    moduleEnv,
+    moduleAliases,
   };
 };
 
@@ -386,6 +394,21 @@ type PatternBindings = Map<string, Type>;
  * its constructors ["Nothing", "Just"] to verify all cases are covered.
  */
 export type ConstructorRegistry = Map<string, readonly string[]>;
+
+/**
+ * Information about a module's exports.
+ */
+export type ModuleTypeInfo = {
+  readonly typeEnv: TypeEnv;
+  readonly registry: ConstructorRegistry;
+  readonly constructorNames: readonly string[];
+};
+
+/**
+ * Map from module names to their type information.
+ * Used for resolving qualified access like Module.name.
+ */
+export type ModuleTypeEnv = Map<string, ModuleTypeInfo>;
 
 // =============================================================================
 // SUBSTITUTION APPLICATION
@@ -1072,9 +1095,11 @@ export const check = (
   registry: ConstructorRegistry,
   expr: ast.Expr,
   symbols: SymbolTable,
+  moduleEnv: ModuleTypeEnv = new Map(),
+  moduleAliases: Map<string, string> = new Map(),
 ): CheckOutput => {
   typeVarCounter = 0;
-  const ctx = createContext(symbols);
+  const ctx = createContext(symbols, moduleEnv, moduleAliases);
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
   solveConstraints(ctx, finalConstraints);
@@ -1135,6 +1160,8 @@ const inferExpr = (
       return inferTuple(ctx, env, registry, expr);
     case "Var":
       return inferVar(ctx, env, expr);
+    case "QualifiedVar":
+      return inferQualifiedVar(ctx, expr);
     case "Match":
       return inferMatch(ctx, env, registry, expr);
     case "FieldAccess":
@@ -1655,6 +1682,34 @@ const inferVar = (ctx: CheckContext, env: TypeEnv, expr: ast.Var): InferResult =
   return [new Map(), instantiate(s), []];
 };
 
+/**
+ * Infer the type of a qualified variable reference (Module.name).
+ *
+ * Looks up the module in the module environment, then looks up the
+ * member within that module's type environment.
+ */
+const inferQualifiedVar = (ctx: CheckContext, expr: ast.QualifiedVar): InferResult => {
+  // Resolve module alias if present
+  const realModule = ctx.moduleAliases.get(expr.moduleName) ?? expr.moduleName;
+
+  // Look up module
+  const mod = ctx.moduleEnv.get(realModule);
+  if (!mod) {
+    addError(ctx, `Unknown module: ${expr.moduleName}`, expr.span);
+    return [new Map(), freshTypeVar(), []];
+  }
+
+  // Look up member in module
+  const s = mod.typeEnv.get(expr.member);
+  if (!s) {
+    addError(ctx, `Module '${expr.moduleName}' does not export '${expr.member}'`, expr.span);
+    return [new Map(), freshTypeVar(), []];
+  }
+
+  // Instantiate with fresh variables
+  return [new Map(), instantiate(s), []];
+};
+
 // =============================================================================
 // TUPLE INFERENCE
 // =============================================================================
@@ -1774,6 +1829,64 @@ const inferPattern = (
         addError(
           ctx,
           `Constructor ${pattern.name} expects ${argTypes.length} args, got ${pattern.args.length}`,
+        );
+        return [subst, new Map()];
+      }
+
+      // Unify constructor's result type with expected type
+      const s1 = unify(ctx, applySubst(subst, resultType), applySubst(subst, expectedType));
+      let currentSubst = composeSubst(subst, s1);
+
+      // Recursively infer patterns for constructor arguments
+      const allBindings: PatternBindings = new Map();
+      for (let i = 0; i < pattern.args.length; i++) {
+        const argType = applySubst(currentSubst, argTypes[i]!);
+        const [s, bindings] = inferPattern(ctx, env, pattern.args[i]!, argType, currentSubst);
+        currentSubst = s;
+        for (const [name, type] of bindings) {
+          allBindings.set(name, type);
+        }
+      }
+
+      return [currentSubst, allBindings];
+    }
+
+    case "QualifiedPCon": {
+      // Qualified constructor pattern: Module.Constructor
+      const realModule = ctx.moduleAliases.get(pattern.moduleName) ?? pattern.moduleName;
+      const mod = ctx.moduleEnv.get(realModule);
+
+      if (!mod) {
+        addError(ctx, `Unknown module: ${pattern.moduleName}`, pattern.span);
+        return [subst, new Map()];
+      }
+
+      const conScheme = mod.typeEnv.get(pattern.constructor);
+      if (!conScheme) {
+        addError(
+          ctx,
+          `Module '${pattern.moduleName}' does not export '${pattern.constructor}'`,
+          pattern.span,
+        );
+        return [subst, new Map()];
+      }
+
+      // Instantiate constructor type
+      const conType = instantiate(conScheme);
+
+      // Extract argument types from the constructor's function type
+      const argTypes: Type[] = [];
+      let resultType = conType;
+      while (resultType.kind === "TFun") {
+        argTypes.push(resultType.param);
+        resultType = resultType.ret;
+      }
+
+      // Verify arity
+      if (argTypes.length !== pattern.args.length) {
+        addError(
+          ctx,
+          `Constructor ${pattern.moduleName}.${pattern.constructor} expects ${argTypes.length} args, got ${pattern.args.length}`,
         );
         return [subst, new Map()];
       }
@@ -2335,6 +2448,13 @@ const toSimplePattern = (p: ast.Pattern): SimplePattern => {
       return { kind: "Wild" };
     case "PCon":
       return { kind: "Con", name: p.name, args: p.args.map(toSimplePattern) };
+    case "QualifiedPCon":
+      // For exhaustiveness, use module.constructor as the name
+      return {
+        kind: "Con",
+        name: `${p.moduleName}.${p.constructor}`,
+        args: p.args.map(toSimplePattern),
+      };
     case "PTuple":
       return { kind: "Tuple", elements: p.elements.map(toSimplePattern) };
     case "PLit":
@@ -2842,6 +2962,122 @@ export const processDeclarations = (
   }
 
   return { typeEnv, registry, constructorNames };
+};
+
+// =============================================================================
+// MODULE PROCESSING
+// =============================================================================
+
+/**
+ * Process a single module declaration.
+ * Returns the module's type information.
+ */
+export const processModule = (mod: ast.ModuleDecl): ModuleTypeInfo => {
+  // Process data declarations
+  const { typeEnv: dataEnv, registry, constructorNames } = processDeclarations(mod.declarations);
+
+  // For now, we just include the data declarations
+  // Module bindings would require type inference, which we'll add later
+  // For bindings, we'd need to run the full type checker
+
+  return { typeEnv: dataEnv, registry, constructorNames };
+};
+
+/**
+ * Process multiple module declarations.
+ * Returns a map from module names to their type information.
+ */
+export const processModules = (modules: readonly ast.ModuleDecl[]): ModuleTypeEnv => {
+  const result: ModuleTypeEnv = new Map();
+
+  for (const mod of modules) {
+    const info = processModule(mod);
+    result.set(mod.name, info);
+  }
+
+  return result;
+};
+
+/**
+ * Process use statements to build local type environment and aliases.
+ */
+export const processUseStatements = (
+  uses: readonly ast.UseDecl[],
+  moduleEnv: ModuleTypeEnv,
+): {
+  localEnv: TypeEnv;
+  localRegistry: ConstructorRegistry;
+  constructorNames: string[];
+  aliases: Map<string, string>;
+} => {
+  const localEnv: TypeEnv = new Map();
+  const localRegistry: ConstructorRegistry = new Map();
+  const constructorNames: string[] = [];
+  const aliases = new Map<string, string>();
+
+  for (const use of uses) {
+    // Track alias
+    if (use.alias) {
+      aliases.set(use.alias, use.moduleName);
+    }
+
+    // Get module info
+    const mod = moduleEnv.get(use.moduleName);
+    if (!mod) {
+      // Error will be reported during type checking
+      continue;
+    }
+
+    // Process imports
+    if (use.imports?.kind === "All") {
+      // Import everything unqualified
+      for (const [name, scheme] of mod.typeEnv) {
+        localEnv.set(name, scheme);
+      }
+      for (const [typeName, cons] of mod.registry) {
+        localRegistry.set(typeName, cons);
+      }
+      constructorNames.push(...mod.constructorNames);
+    } else if (use.imports?.kind === "Specific") {
+      // Import specific items
+      for (const item of use.imports.items) {
+        const scheme = mod.typeEnv.get(item.name);
+        if (scheme) {
+          localEnv.set(item.name, scheme);
+        }
+
+        // Handle constructor imports for types
+        if (item.constructors) {
+          const cons = mod.registry.get(item.name);
+          if (cons) {
+            if (item.constructors === "all") {
+              // Import all constructors
+              localRegistry.set(item.name, cons);
+              for (const conName of cons) {
+                const conScheme = mod.typeEnv.get(conName);
+                if (conScheme) {
+                  localEnv.set(conName, conScheme);
+                  constructorNames.push(conName);
+                }
+              }
+            } else {
+              // Import specific constructors
+              for (const conName of item.constructors) {
+                const conScheme = mod.typeEnv.get(conName);
+                if (conScheme) {
+                  localEnv.set(conName, conScheme);
+                  constructorNames.push(conName);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // If imports is null, only qualified access is available (no unqualified imports)
+  }
+
+  return { localEnv, localRegistry, constructorNames, aliases };
 };
 
 // =============================================================================

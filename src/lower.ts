@@ -316,6 +316,13 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
 
     case "Match":
       return lowerMatch(ctx, expr);
+
+    case "QualifiedVar":
+      // Modules are not supported in the lowering phase
+      // Qualified names should be resolved before lowering
+      throw new Error(
+        `Qualified access (${expr.moduleName}.${expr.member}) is not supported in lowering. Use the compiler with module support.`,
+      );
   }
 };
 
@@ -675,6 +682,16 @@ const lowerPattern = (pattern: ast.Pattern, type: Type): ir.IRPattern => {
       return ir.irPCon(pattern.name, args, type);
     }
 
+    case "QualifiedPCon": {
+      // Qualified constructor pattern (Module.Constructor)
+      // Lower using just the constructor name (module already resolved by type checker)
+      const args = pattern.args.map((arg, i) => {
+        const argType: Type = { kind: "TVar", name: `_arg${i}` };
+        return lowerPattern(arg, argType);
+      });
+      return ir.irPCon(pattern.constructor, args, type);
+    }
+
     case "PTuple": {
       const elementTypes = type.kind === "TTuple" ? type.elements : [];
       const elements = pattern.elements.map((elem, i) => {
@@ -723,6 +740,14 @@ const extendPatternBindings = (ctx: LowerContext, pattern: ast.Pattern, type: Ty
 
     case "PCon":
       // Extend with bindings from each argument
+      for (let i = 0; i < pattern.args.length; i++) {
+        const argType: Type = { kind: "TVar", name: `_arg${i}` };
+        extendPatternBindings(ctx, pattern.args[i]!, argType);
+      }
+      break;
+
+    case "QualifiedPCon":
+      // Qualified constructor pattern - extend with bindings from each argument
       for (let i = 0; i < pattern.args.length; i++) {
         const argType: Type = { kind: "TVar", name: `_arg${i}` };
         extendPatternBindings(ctx, pattern.args[i]!, argType);

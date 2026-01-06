@@ -27,6 +27,8 @@ export type ParseResult = {
 };
 
 export type Program = {
+  readonly modules: readonly ast.ModuleDecl[];
+  readonly uses: readonly ast.UseDecl[];
   readonly declarations: readonly ast.DataDecl[];
   readonly bindings: readonly TopLevelBinding[];
   readonly expr: ast.Expr | null;
@@ -140,10 +142,25 @@ const synchronize = (state: ParserState): void => {
 
 export const parse = (source: string): ParseResult => {
   const state = createParser(source);
+  const modules: ast.ModuleDecl[] = [];
+  const uses: ast.UseDecl[] = [];
   const declarations: ast.DataDecl[] = [];
   const bindings: TopLevelBinding[] = [];
   let expr: ast.Expr | null = null;
 
+  // Parse module declarations first
+  while (at(state, TokenKind.Module)) {
+    const mod = parseModuleDecl(state);
+    if (mod) modules.push(mod);
+  }
+
+  // Parse use statements
+  while (at(state, TokenKind.Use)) {
+    const use = parseUseDecl(state);
+    if (use) uses.push(use);
+  }
+
+  // Parse data declarations, bindings, and expression
   while (!at(state, TokenKind.Eof)) {
     if (at(state, TokenKind.Data)) {
       const decl = parseDataDecl(state);
@@ -163,7 +180,7 @@ export const parse = (source: string): ParseResult => {
   }
 
   return {
-    program: { declarations, bindings, expr },
+    program: { modules, uses, declarations, bindings, expr },
     diagnostics: state.diagnostics,
   };
 };
@@ -329,6 +346,211 @@ const parseConstructor = (state: ParserState): ast.ConDecl | null => {
   }
 
   return ast.conDecl(name, fields);
+};
+
+// =============================================================================
+// MODULE DECLARATIONS
+// =============================================================================
+
+const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
+  const start = state.current[1];
+  advance(state); // 'module'
+
+  const nameToken = expect(state, TokenKind.Upper, "expected module name");
+  if (!nameToken) {
+    synchronize(state);
+    return null;
+  }
+  const name = text(state, nameToken);
+  const nameSpan = tokenSpan(nameToken);
+
+  const declarations: ast.DataDecl[] = [];
+  const bindings: ast.RecBinding[] = [];
+
+  while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
+    if (at(state, TokenKind.Data)) {
+      const decl = parseDataDecl(state);
+      if (decl) declarations.push(decl);
+    } else if (at(state, TokenKind.Let)) {
+      const binding = parseModuleBinding(state);
+      if (binding) bindings.push(binding);
+    } else {
+      error(state, "expected 'data' or 'let' declaration in module");
+      advance(state);
+    }
+  }
+
+  const endToken = expect(state, TokenKind.End, "expected 'end' after module body");
+  const end = endToken ? endToken[2] : state.current[1];
+
+  return ast.moduleDecl(name, declarations, bindings, span(start, end), nameSpan);
+};
+
+/**
+ * Parse a binding inside a module: let name params = expr
+ * Unlike top-level bindings, these always produce a RecBinding.
+ */
+const parseModuleBinding = (state: ParserState): ast.RecBinding | null => {
+  advance(state); // 'let'
+
+  const recursive = at(state, TokenKind.Rec);
+  if (recursive) advance(state);
+
+  const nameToken = expect(state, TokenKind.Lower, "expected binding name");
+  if (!nameToken) {
+    synchronize(state);
+    return null;
+  }
+  const name = text(state, nameToken);
+  const nameSpan = tokenSpan(nameToken);
+
+  const params: { name: string; span: ast.Span; type?: ast.TypeExpr }[] = [];
+  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
+    if (at(state, TokenKind.LParen)) {
+      advance(state); // (
+      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
+      if (!paramToken) break;
+      const paramName = text(state, paramToken);
+      let paramType: ast.TypeExpr | undefined;
+
+      if (at(state, TokenKind.Colon)) {
+        advance(state); // :
+        paramType = parseType(state) ?? undefined;
+      }
+
+      expect(state, TokenKind.RParen, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      const paramToken = advance(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
+  }
+
+  let returnType: ast.TypeExpr | undefined;
+  if (at(state, TokenKind.Colon)) {
+    advance(state);
+    returnType = parseType(state) ?? undefined;
+  }
+
+  expect(state, TokenKind.Eq, "expected '=' after parameters");
+
+  let value = parseExpr(state);
+
+  for (let i = params.length - 1; i >= 0; i--) {
+    const p = params[i]!;
+    value = ast.abs(p.name, value, undefined, p.span, p.type);
+  }
+
+  return ast.recBinding(name, value, nameSpan, returnType);
+};
+
+// =============================================================================
+// USE DECLARATIONS
+// =============================================================================
+
+const parseUseDecl = (state: ParserState): ast.UseDecl | null => {
+  const start = state.current[1];
+  advance(state); // 'use'
+
+  const moduleToken = expect(state, TokenKind.Upper, "expected module name");
+  if (!moduleToken) {
+    synchronize(state);
+    return null;
+  }
+  const moduleName = text(state, moduleToken);
+  const moduleSpan = tokenSpan(moduleToken);
+
+  let imports: ast.ImportSpec | null = null;
+  let alias: string | undefined;
+  let aliasSpan: ast.Span | undefined;
+
+  // Check for import list: (..) or (items)
+  if (at(state, TokenKind.LParen)) {
+    advance(state); // (
+
+    if (at(state, TokenKind.Dot)) {
+      // Check for (..)
+      advance(state); // first .
+      if (at(state, TokenKind.Dot)) {
+        advance(state); // second .
+        imports = ast.importAll();
+      } else {
+        error(state, "expected '..' for import all");
+      }
+      expect(state, TokenKind.RParen, "expected ')' after '..'");
+    } else {
+      // Parse specific import items
+      const items = parseImportItems(state);
+      imports = ast.importSpecific(items);
+      expect(state, TokenKind.RParen, "expected ')' after import list");
+    }
+  }
+
+  // Check for 'as Alias'
+  if (at(state, TokenKind.As)) {
+    advance(state); // 'as'
+    const aliasToken = expect(state, TokenKind.Upper, "expected alias name");
+    if (aliasToken) {
+      alias = text(state, aliasToken);
+      aliasSpan = tokenSpan(aliasToken);
+    }
+  }
+
+  const end = state.current[1];
+  return ast.useDecl(moduleName, imports, alias, span(start, end), moduleSpan, aliasSpan);
+};
+
+/**
+ * Parse import items: Maybe, Maybe(..), Maybe(Just, Nothing), map, filter
+ */
+const parseImportItems = (state: ParserState): ast.ImportItem[] => {
+  const items: ast.ImportItem[] = [];
+
+  do {
+    if (at(state, TokenKind.Comma)) advance(state);
+
+    if (at(state, TokenKind.Upper)) {
+      // Type or Type(..) or Type(Con1, Con2)
+      const nameToken = advance(state);
+      const name = text(state, nameToken);
+      const nameSpan = tokenSpan(nameToken);
+      let constructors: readonly string[] | "all" | undefined;
+
+      if (at(state, TokenKind.LParen)) {
+        advance(state); // (
+        if (at(state, TokenKind.Dot)) {
+          // Type(..)
+          advance(state); // first .
+          if (at(state, TokenKind.Dot)) {
+            advance(state); // second .
+            constructors = "all";
+          } else {
+            error(state, "expected '..' for all constructors");
+          }
+        } else {
+          // Type(Con1, Con2)
+          const cons: string[] = [];
+          do {
+            if (at(state, TokenKind.Comma)) advance(state);
+            const conToken = expect(state, TokenKind.Upper, "expected constructor name");
+            if (conToken) cons.push(text(state, conToken));
+          } while (at(state, TokenKind.Comma));
+          constructors = cons;
+        }
+        expect(state, TokenKind.RParen, "expected ')' after constructors");
+      }
+
+      items.push(ast.importItem(name, constructors, nameSpan));
+    } else if (at(state, TokenKind.Lower)) {
+      // Value/function
+      const nameToken = advance(state);
+      items.push(ast.importItem(text(state, nameToken), undefined, tokenSpan(nameToken)));
+    } else {
+      break;
+    }
+  } while (at(state, TokenKind.Comma));
+
+  return items;
 };
 
 /**
@@ -569,6 +791,23 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
 
     case TokenKind.Dot: {
       advance(state);
+
+      // Check for qualified access: Module.name (left is uppercase Var)
+      if (
+        left.kind === "Var" &&
+        left.name.length > 0 &&
+        left.name[0]!.toUpperCase() === left.name[0]
+      ) {
+        // This could be Module.member
+        if (at(state, TokenKind.Lower) || at(state, TokenKind.Upper)) {
+          const memberToken = advance(state);
+          const member = text(state, memberToken);
+          const memberSpan = tokenSpan(memberToken);
+          const end = memberToken[2];
+          return ast.qualifiedVar(left.name, member, span(start, end), left.span, memberSpan);
+        }
+      }
+
       // Tuple indexing: tuple.0, tuple.1, etc.
       if (at(state, TokenKind.Number)) {
         const indexToken = state.current;
@@ -1065,6 +1304,29 @@ const parsePatternCore = (state: ParserState, allowArgs = true): ast.Pattern => 
       advance(state);
       const name = text(state, token);
       const nameSpan = tokenSpan(token);
+
+      // Check for qualified constructor: Module.Constructor
+      if (at(state, TokenKind.Dot)) {
+        advance(state); // .
+        const conToken = expect(state, TokenKind.Upper, "expected constructor name after '.'");
+        if (!conToken) return ast.pwildcard();
+        const conName = text(state, conToken);
+        const conSpan = tokenSpan(conToken);
+
+        if (!allowArgs) {
+          const end = conToken[2];
+          return ast.qualifiedPCon(name, conName, [], span(start, end), nameSpan, conSpan);
+        }
+
+        const args: ast.Pattern[] = [];
+        while (PATTERN_STARTS.has(state.current[0])) {
+          args.push(parsePatternCore(state, false));
+        }
+        const end = args[args.length - 1]?.span?.end ?? conToken[2];
+        return ast.qualifiedPCon(name, conName, args, span(start, end), nameSpan, conSpan);
+      }
+
+      // Regular constructor pattern
       if (!allowArgs) return ast.pcon(name, [], nameSpan, nameSpan);
 
       const args: ast.Pattern[] = [];

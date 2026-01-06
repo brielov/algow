@@ -225,6 +225,15 @@ const bindExpr = (ctx: BindContext, expr: ast.Expr): void => {
       bindExpr(ctx, expr.record);
       break;
 
+    case "TupleIndex":
+      bindExpr(ctx, expr.tuple);
+      break;
+
+    case "QualifiedVar":
+      // Qualified variables (Module.name) are resolved by the type checker
+      // No local scope resolution needed
+      break;
+
     case "Match":
       bindMatch(ctx, expr);
       break;
@@ -339,6 +348,16 @@ const bindPattern = (ctx: BindContext, pattern: ast.Pattern): string[] => {
       }
 
       // Bind nested patterns
+      const bindings: string[] = [];
+      for (const arg of pattern.args) {
+        bindings.push(...bindPattern(ctx, arg));
+      }
+      return bindings;
+    }
+
+    case "QualifiedPCon": {
+      // Qualified constructor patterns (Module.Constructor) are resolved by type checker
+      // Just bind the nested pattern arguments
       const bindings: string[] = [];
       for (const arg of pattern.args) {
         bindings.push(...bindPattern(ctx, arg));

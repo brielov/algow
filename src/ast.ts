@@ -60,6 +60,7 @@ export type Expr =
   | Let // Let bindings (with polymorphism)
   | LetRec // Recursive let bindings
   | Var // Variable references
+  | QualifiedVar // Qualified variable access: Module.name
   | Abs // Lambda abstractions (anonymous functions)
   | App // Function application
   | Tuple // Tuples: (a, b, c)
@@ -177,6 +178,23 @@ export interface LetRec extends Node {
 export interface Var extends Node {
   readonly kind: "Var";
   readonly name: string;
+}
+
+/**
+ * Qualified variable reference - looks up a name in a specific module.
+ *
+ * Syntax: Module.name
+ * Example: Maybe.map, List.filter, Either.Left
+ *
+ * The module name must be uppercase (capitalized). This distinguishes
+ * qualified access from record field access (which uses lowercase identifiers).
+ */
+export interface QualifiedVar extends Node {
+  readonly kind: "QualifiedVar";
+  readonly moduleName: string;
+  readonly moduleSpan?: Span;
+  readonly member: string;
+  readonly memberSpan?: Span;
 }
 
 /**
@@ -348,7 +366,7 @@ export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=";
  * Pattern matching is exhaustive: the type checker verifies that all possible
  * cases are covered for algebraic data types.
  */
-export type Pattern = PVar | PWildcard | PCon | PLit | PRecord | PTuple | PAs | POr;
+export type Pattern = PVar | PWildcard | PCon | QualifiedPCon | PLit | PRecord | PTuple | PAs | POr;
 
 /**
  * Variable pattern - binds the matched value to a name.
@@ -394,6 +412,24 @@ export interface PCon extends Node {
   readonly name: string;
   readonly args: readonly Pattern[];
   readonly nameSpan?: Span; // Precise span of constructor name for LSP
+}
+
+/**
+ * Qualified constructor pattern - matches a constructor from a specific module.
+ *
+ * Syntax: Module.Constructor args...
+ * Example: Maybe.Just x, List.Cons h t
+ *
+ * Used when you want to be explicit about which module a constructor comes from,
+ * or when the constructor name alone would be ambiguous.
+ */
+export interface QualifiedPCon extends Node {
+  readonly kind: "QualifiedPCon";
+  readonly moduleName: string;
+  readonly moduleSpan?: Span;
+  readonly constructor: string;
+  readonly constructorSpan?: Span;
+  readonly args: readonly Pattern[];
 }
 
 /**
@@ -614,6 +650,79 @@ export interface DataDecl extends Node {
   readonly name: string;
   readonly typeParams: readonly string[];
   readonly constructors: readonly ConDecl[];
+}
+
+// =============================================================================
+// MODULE DECLARATIONS
+// =============================================================================
+
+/**
+ * Module declaration - defines a named module containing data types and functions.
+ *
+ * Syntax: module Name ... end
+ * Example:
+ *   module Maybe
+ *     data Maybe a = Nothing | Just a
+ *     let map f mx = ...
+ *   end
+ *
+ * Everything defined in a module is public by default. Items can be accessed
+ * via qualified names (Module.name) or imported unqualified via use statements.
+ */
+export interface ModuleDecl extends Node {
+  readonly kind: "ModuleDecl";
+  readonly name: string;
+  readonly nameSpan?: Span;
+  readonly declarations: readonly DataDecl[];
+  readonly bindings: readonly RecBinding[];
+}
+
+/**
+ * Use declaration - imports items from a module into scope.
+ *
+ * Syntax variations:
+ *   use Module                    -- qualified access only
+ *   use Module (..)               -- import all unqualified
+ *   use Module (items)            -- import specific items
+ *   use Module as Alias           -- qualified with alias
+ *   use Module (items) as Alias   -- both
+ *
+ * Examples:
+ *   use Maybe                     -- allows Maybe.map, Maybe.Just
+ *   use Maybe (..)                -- allows map, Just, Nothing directly
+ *   use Maybe (Maybe(..), map)    -- imports type + constructors + map function
+ */
+export interface UseDecl extends Node {
+  readonly kind: "UseDecl";
+  readonly moduleName: string;
+  readonly moduleSpan?: Span;
+  readonly alias?: string;
+  readonly aliasSpan?: Span;
+  readonly imports: ImportSpec | null; // null = qualified only
+}
+
+/**
+ * Import specification - what to import from a module.
+ */
+export type ImportSpec =
+  | { readonly kind: "All" } // (..)
+  | { readonly kind: "Specific"; readonly items: readonly ImportItem[] };
+
+/**
+ * A single import item.
+ *
+ * For types:
+ *   - `Maybe` imports just the type name (opaque)
+ *   - `Maybe(..)` imports the type and all constructors
+ *   - `Maybe(Just, Nothing)` imports the type and specific constructors
+ *
+ * For values:
+ *   - `map` imports the function
+ */
+export interface ImportItem {
+  readonly name: string;
+  readonly span?: Span;
+  readonly constructors?: readonly string[] | "all"; // Type(..) or Type(A, B)
 }
 
 // =============================================================================
@@ -858,3 +967,88 @@ export const dataDecl = (
   constructors: ConDecl[],
   span?: Span,
 ): DataDecl => ({ kind: "DataDecl", name, typeParams, constructors, span });
+
+// --- Qualified Access ---
+
+export const qualifiedVar = (
+  moduleName: string,
+  member: string,
+  span?: Span,
+  moduleSpan?: Span,
+  memberSpan?: Span,
+): QualifiedVar => ({
+  kind: "QualifiedVar",
+  moduleName,
+  moduleSpan,
+  member,
+  memberSpan,
+  span,
+});
+
+export const qualifiedPCon = (
+  moduleName: string,
+  constructor: string,
+  args: readonly Pattern[],
+  span?: Span,
+  moduleSpan?: Span,
+  constructorSpan?: Span,
+): QualifiedPCon => ({
+  kind: "QualifiedPCon",
+  moduleName,
+  moduleSpan,
+  constructor,
+  constructorSpan,
+  args,
+  span,
+});
+
+// --- Modules ---
+
+export const moduleDecl = (
+  name: string,
+  declarations: readonly DataDecl[],
+  bindings: readonly RecBinding[],
+  span?: Span,
+  nameSpan?: Span,
+): ModuleDecl => ({
+  kind: "ModuleDecl",
+  name,
+  nameSpan,
+  declarations,
+  bindings,
+  span,
+});
+
+export const useDecl = (
+  moduleName: string,
+  imports: ImportSpec | null,
+  alias?: string,
+  span?: Span,
+  moduleSpan?: Span,
+  aliasSpan?: Span,
+): UseDecl => ({
+  kind: "UseDecl",
+  moduleName,
+  moduleSpan,
+  alias,
+  aliasSpan,
+  imports,
+  span,
+});
+
+export const importAll = (): ImportSpec => ({ kind: "All" });
+
+export const importSpecific = (items: readonly ImportItem[]): ImportSpec => ({
+  kind: "Specific",
+  items,
+});
+
+export const importItem = (
+  name: string,
+  constructors?: readonly string[] | "all",
+  span?: Span,
+): ImportItem => ({
+  name,
+  span,
+  constructors,
+});
