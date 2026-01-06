@@ -1105,6 +1105,108 @@ describe("Type Inference", () => {
         );
         expect(diagnostics.length).toBeGreaterThan(0);
       });
+
+      it("reports missing nested pattern (Just Nothing)", () => {
+        // Create Maybe (Maybe a) by using Maybe twice
+        const [maybeEnv, maybeReg] = createMaybeEnv();
+        const env = mergeEnvs(baseEnv, maybeEnv);
+
+        // match x with
+        // | Just (Just y) => y
+        // | Nothing => 0
+        // end
+        // Missing: Just Nothing
+        const { diagnostics } = infer(
+          env,
+          maybeReg,
+          ast.match(ast.var_("Nothing"), [
+            ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pvar("y")])]), ast.var_("y")),
+            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors.length).toBeGreaterThan(0);
+        expect(exhaustivenessErrors[0]!.message).toContain("Just Nothing");
+      });
+
+      it("accepts exhaustive nested patterns", () => {
+        const [maybeEnv, maybeReg] = createMaybeEnv();
+        const env = mergeEnvs(baseEnv, maybeEnv);
+
+        // match x with
+        // | Just (Just y) => y
+        // | Just Nothing => 0
+        // | Nothing => 0
+        // end
+        const { diagnostics } = infer(
+          env,
+          maybeReg,
+          ast.match(ast.var_("Nothing"), [
+            ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pvar("y")])]), ast.var_("y")),
+            ast.case_(ast.pcon("Just", [ast.pcon("Nothing", [])]), ast.num(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors).toHaveLength(0);
+      });
+
+      it("accepts nested wildcard as catch-all", () => {
+        const [maybeEnv, maybeReg] = createMaybeEnv();
+        const env = mergeEnvs(baseEnv, maybeEnv);
+
+        // match x with
+        // | Just (Just y) => y
+        // | Just _ => 0     -- catches Just Nothing
+        // | Nothing => 0
+        // end
+        const { diagnostics } = infer(
+          env,
+          maybeReg,
+          ast.match(ast.var_("Nothing"), [
+            ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pvar("y")])]), ast.var_("y")),
+            ast.case_(ast.pcon("Just", [ast.pwildcard()]), ast.num(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors).toHaveLength(0);
+      });
+
+      it("reports missing deeply nested pattern", () => {
+        const [maybeEnv, maybeReg] = createMaybeEnv();
+        const env = mergeEnvs(baseEnv, maybeEnv);
+
+        // match x with
+        // | Just (Just (Just z)) => z
+        // | Just (Just Nothing) => 0
+        // | Nothing => 0
+        // end
+        // Missing: Just Nothing (the middle layer)
+        const { diagnostics } = infer(
+          env,
+          maybeReg,
+          ast.match(ast.var_("Nothing"), [
+            ast.case_(
+              ast.pcon("Just", [ast.pcon("Just", [ast.pcon("Just", [ast.pvar("z")])])]),
+              ast.var_("z"),
+            ),
+            ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pcon("Nothing", [])])]), ast.num(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors.length).toBeGreaterThan(0);
+        expect(exhaustivenessErrors[0]!.message).toContain("Just Nothing");
+      });
     });
 
     describe("empty match", () => {

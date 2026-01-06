@@ -2092,7 +2092,7 @@ const inferMatch = (
   if (!isExhaustive) {
     // Fallback to checking constructors (only unguarded patterns count)
     const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
-    const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
+    const missing = checkExhaustiveness(env, registry, applySubst(subst, scrutineeType), patterns);
 
     if (missing.length > 0) {
       addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
@@ -2227,86 +2227,526 @@ const getTypeConName = (type: Type): string | null => {
 };
 
 /**
- * Collect constructor names matched by a set of patterns.
- * Wildcards and variable patterns match everything (represented as "*").
+ * Get the arity of a constructor from its type scheme.
+ * Counts the number of TFun arrows before reaching the result type.
  */
-const getPatternConstructors = (patterns: readonly ast.Pattern[]): Set<string> => {
-  const constructors = new Set<string>();
-  for (const pattern of patterns) {
-    switch (pattern.kind) {
-      case "PCon":
-        constructors.add(pattern.name);
-        break;
-      case "PWildcard":
-      case "PVar":
-        // Catches everything
-        return new Set(["*"]);
-      case "PLit":
-        // Literals don't cover all constructors
-        break;
-      case "PAs": {
-        // Unwrap as-pattern and check inner pattern
-        const inner = getPatternConstructors([pattern.pattern]);
-        for (const c of inner) {
-          constructors.add(c);
-        }
-        if (inner.has("*")) return new Set(["*"]);
-        break;
-      }
-      case "POr": {
-        // Or-pattern: collect constructors from all alternatives
-        const inner = getPatternConstructors(pattern.alternatives);
-        for (const c of inner) {
-          constructors.add(c);
-        }
-        if (inner.has("*")) return new Set(["*"]);
-        break;
-      }
-    }
+const getConstructorArity = (env: TypeEnv, conName: string): number => {
+  const scheme = env.get(conName);
+  if (!scheme) return 0;
+
+  let arity = 0;
+  let t = scheme.type;
+  while (t.kind === "TFun") {
+    arity++;
+    t = t.ret;
   }
-  return constructors;
+  return arity;
 };
 
 /**
- * Check if a set of patterns exhaustively covers all constructors of a type.
+ * Information about a constructor for exhaustiveness checking.
+ */
+type ConstructorInfo = {
+  readonly name: string;
+  readonly arity: number;
+};
+
+/**
+ * Get all constructors for a type with their arities.
+ */
+const getConstructorsWithArity = (
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  typeName: string,
+): readonly ConstructorInfo[] => {
+  const conNames = registry.get(typeName);
+  if (!conNames) return [];
+
+  return conNames.map((name) => ({
+    name,
+    arity: getConstructorArity(env, name),
+  }));
+};
+
+/**
+ * Extract type arguments from a type application.
+ * E.g., Maybe (Maybe a) -> [Maybe a]
+ *       List number -> [number]
+ */
+const extractTypeArgs = (type: Type): readonly Type[] => {
+  const args: Type[] = [];
+  let current = type;
+  while (current.kind === "TApp") {
+    args.unshift(current.arg);
+    current = current.con;
+  }
+  return args;
+};
+
+/**
+ * Get the argument types for a constructor when applied to a specific type.
+ * Uses the type arguments from the scrutinee type to instantiate the constructor's parameter types.
+ */
+const getConstructorArgTypes = (
+  env: TypeEnv,
+  conName: string,
+  scrutineeType: Type,
+): readonly Type[] => {
+  const scheme = env.get(conName);
+  if (!scheme) return [];
+
+  // Extract type arguments from the scrutinee type (e.g., Maybe (Maybe a) -> [Maybe a])
+  const typeArgs = extractTypeArgs(scrutineeType);
+
+  // Build a substitution from the scheme's type parameters to the type arguments
+  const subst: Subst = new Map();
+  for (let i = 0; i < scheme.vars.length && i < typeArgs.length; i++) {
+    subst.set(scheme.vars[i]!, typeArgs[i]!);
+  }
+
+  // Extract argument types from the constructor type and apply the substitution
+  const argTypes: Type[] = [];
+  let t = scheme.type;
+  while (t.kind === "TFun") {
+    argTypes.push(applySubst(subst, t.param));
+    t = t.ret;
+  }
+  return argTypes;
+};
+
+/**
+ * A simplified pattern representation for the exhaustiveness algorithm.
+ * We only care about the structure, not the bindings.
+ */
+type SimplePattern =
+  | { kind: "Wild" }
+  | { kind: "Con"; name: string; args: readonly SimplePattern[] }
+  | { kind: "Tuple"; elements: readonly SimplePattern[] }
+  | { kind: "Lit"; value: unknown }
+  | { kind: "Or"; alternatives: readonly SimplePattern[] };
+
+/**
+ * Convert an AST pattern to a simple pattern for exhaustiveness checking.
+ */
+const toSimplePattern = (p: ast.Pattern): SimplePattern => {
+  switch (p.kind) {
+    case "PWildcard":
+    case "PVar":
+      return { kind: "Wild" };
+    case "PCon":
+      return { kind: "Con", name: p.name, args: p.args.map(toSimplePattern) };
+    case "PTuple":
+      return { kind: "Tuple", elements: p.elements.map(toSimplePattern) };
+    case "PLit":
+      return { kind: "Lit", value: p.value };
+    case "PAs":
+      return toSimplePattern(p.pattern);
+    case "POr":
+      return { kind: "Or", alternatives: p.alternatives.map(toSimplePattern) };
+    case "PRecord":
+      // Records are structural, treat as wildcard for exhaustiveness
+      return { kind: "Wild" };
+  }
+};
+
+/**
+ * Convert a simple pattern back to a string for error messages.
+ */
+const simplePatternToString = (p: SimplePattern): string => {
+  switch (p.kind) {
+    case "Wild":
+      return "_";
+    case "Con":
+      if (p.args.length === 0) return p.name;
+      return `${p.name} ${p.args.map((a) => {
+        const s = simplePatternToString(a);
+        return a.kind === "Con" && a.args.length > 0 ? `(${s})` : s;
+      }).join(" ")}`;
+    case "Tuple":
+      return `(${p.elements.map(simplePatternToString).join(", ")})`;
+    case "Lit":
+      return typeof p.value === "string" ? `"${p.value}"` : String(p.value);
+    case "Or":
+      return p.alternatives.map(simplePatternToString).join(" | ");
+  }
+};
+
+/**
+ * A pattern matrix row - a vector of simple patterns.
+ */
+type PatternRow = readonly SimplePattern[];
+
+/**
+ * A pattern matrix - multiple rows of patterns.
+ */
+type PatternMatrix = readonly PatternRow[];
+
+/**
+ * Specialize a pattern matrix for a specific constructor.
  *
- * Returns the list of missing constructors (empty if exhaustive).
+ * For each row in the matrix:
+ * - If it starts with the same constructor c(p1...pn), replace with p1...pn followed by the rest
+ * - If it starts with a wildcard, expand to n wildcards followed by the rest
+ * - If it starts with a different constructor, remove the row
+ * - If it starts with an or-pattern, expand and recurse
+ */
+const specialize = (
+  matrix: PatternMatrix,
+  conName: string,
+  arity: number,
+): PatternMatrix => {
+  const result: PatternRow[] = [];
+
+  for (const row of matrix) {
+    if (row.length === 0) continue;
+
+    const first = row[0]!;
+    const rest = row.slice(1);
+
+    switch (first.kind) {
+      case "Con":
+        if (first.name === conName) {
+          // Same constructor: expand arguments
+          result.push([...first.args, ...rest]);
+        }
+        // Different constructor: row doesn't match, skip it
+        break;
+
+      case "Wild":
+        // Wildcard matches any constructor: expand to n wildcards
+        result.push([...Array(arity).fill({ kind: "Wild" } as SimplePattern), ...rest]);
+        break;
+
+      case "Or":
+        // Or-pattern: expand each alternative and specialize
+        for (const alt of first.alternatives) {
+          const expanded = specialize([[alt, ...rest]], conName, arity);
+          result.push(...expanded);
+        }
+        break;
+
+      case "Tuple":
+      case "Lit":
+        // These don't match constructors, skip
+        break;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Specialize a pattern matrix for tuples of a given arity.
+ */
+const specializeTuple = (matrix: PatternMatrix, arity: number): PatternMatrix => {
+  const result: PatternRow[] = [];
+
+  for (const row of matrix) {
+    if (row.length === 0) continue;
+
+    const first = row[0]!;
+    const rest = row.slice(1);
+
+    switch (first.kind) {
+      case "Tuple":
+        if (first.elements.length === arity) {
+          result.push([...first.elements, ...rest]);
+        }
+        break;
+
+      case "Wild":
+        result.push([...Array(arity).fill({ kind: "Wild" } as SimplePattern), ...rest]);
+        break;
+
+      case "Or":
+        for (const alt of first.alternatives) {
+          const expanded = specializeTuple([[alt, ...rest]], arity);
+          result.push(...expanded);
+        }
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Compute the default matrix - rows that match when no constructor matches.
+ * This handles the "wildcard" cases.
+ */
+const defaultMatrix = (matrix: PatternMatrix): PatternMatrix => {
+  const result: PatternRow[] = [];
+
+  for (const row of matrix) {
+    if (row.length === 0) continue;
+
+    const first = row[0]!;
+    const rest = row.slice(1);
+
+    switch (first.kind) {
+      case "Wild":
+        result.push(rest);
+        break;
+
+      case "Or":
+        for (const alt of first.alternatives) {
+          const expanded = defaultMatrix([[alt, ...rest]]);
+          result.push(...expanded);
+        }
+        break;
+
+      default:
+        // Constructor/Tuple/Lit patterns don't contribute to default
+        break;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Check if a pattern vector is useful with respect to a pattern matrix.
  *
- * This is a simplified exhaustiveness check that only handles:
- * - Flat constructor patterns
- * - Wildcard/variable patterns as catch-alls
+ * A pattern vector q is useful if there exists a value that:
+ * 1. Matches q
+ * 2. Does not match any row in the matrix
  *
- * A full implementation would handle nested patterns and guards.
+ * This is the core of the exhaustiveness algorithm.
+ * Currently unused but kept for future redundancy checking.
+ */
+const _isUseful = (
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  matrix: PatternMatrix,
+  pattern: PatternRow,
+  types: readonly Type[],
+): boolean => {
+  // Base case: empty pattern vector
+  if (pattern.length === 0) {
+    // Useful iff the matrix has no rows (nothing covers the empty case)
+    return matrix.length === 0;
+  }
+
+  const firstPattern = pattern[0]!;
+  const restPattern = pattern.slice(1);
+  const firstType = types[0];
+  const restTypes = types.slice(1);
+
+  switch (firstPattern.kind) {
+    case "Con": {
+      // Specialize for this constructor
+      const arity = firstPattern.args.length;
+      const specialized = specialize(matrix, firstPattern.name, arity);
+      const newPattern = [...firstPattern.args, ...restPattern];
+      // Get the actual argument types from the constructor and scrutinee type
+      const argTypes = firstType ? getConstructorArgTypes(env, firstPattern.name, firstType) : [];
+      const finalArgTypes = argTypes.length > 0 ? argTypes : Array(arity).fill({ kind: "TVar", name: "_" } as Type);
+      return _isUseful(env, registry, specialized, newPattern, [...finalArgTypes, ...restTypes]);
+    }
+
+    case "Tuple": {
+      const arity = firstPattern.elements.length;
+      const specialized = specializeTuple(matrix, arity);
+      const newPattern = [...firstPattern.elements, ...restPattern];
+      const elemTypes =
+        firstType?.kind === "TTuple"
+          ? firstType.elements
+          : Array(arity).fill({ kind: "TVar", name: "_" } as Type);
+      return _isUseful(env, registry, specialized, newPattern, [...elemTypes, ...restTypes]);
+    }
+
+    case "Or": {
+      // Or-pattern is useful if any alternative is useful
+      return firstPattern.alternatives.some((alt) =>
+        _isUseful(env, registry, matrix, [alt, ...restPattern], types),
+      );
+    }
+
+    case "Lit": {
+      // Literals: check if this specific literal is useful
+      // For simplicity, we treat literals as always potentially useful
+      // (proper handling would require tracking covered literals)
+      const specialized = matrix.filter((row) => {
+        const first = row[0];
+        return (
+          first?.kind === "Wild" || (first?.kind === "Lit" && first.value === firstPattern.value)
+        );
+      });
+      return _isUseful(
+        env,
+        registry,
+        specialized.map((row) => row.slice(1)),
+        restPattern,
+        restTypes,
+      );
+    }
+
+    case "Wild": {
+      // Wildcard: check if complete for the type
+      if (!firstType) {
+        // No type info, check default matrix
+        return _isUseful(env, registry, defaultMatrix(matrix), restPattern, restTypes);
+      }
+
+      const typeName = getTypeConName(firstType);
+
+      // Handle tuples
+      if (firstType.kind === "TTuple") {
+        const arity = firstType.elements.length;
+        const specialized = specializeTuple(matrix, arity);
+        const wildcards: SimplePattern[] = Array(arity).fill({ kind: "Wild" });
+        return _isUseful(env, registry, specialized, [...wildcards, ...restPattern], [
+          ...firstType.elements,
+          ...restTypes,
+        ]);
+      }
+
+      // Handle ADTs
+      if (typeName) {
+        const constructors = getConstructorsWithArity(env, registry, typeName);
+
+        if (constructors.length === 0) {
+          // Unknown type or no constructors, check default
+          return _isUseful(env, registry, defaultMatrix(matrix), restPattern, restTypes);
+        }
+
+        // Check if any constructor makes the wildcard useful
+        for (const con of constructors) {
+          const specialized = specialize(matrix, con.name, con.arity);
+          const wildcards: SimplePattern[] = Array(con.arity).fill({ kind: "Wild" });
+          // Get the actual argument types from the constructor and scrutinee type
+          const argTypes = getConstructorArgTypes(env, con.name, firstType);
+          const finalArgTypes = argTypes.length > 0 ? argTypes : Array(con.arity).fill({ kind: "TVar", name: "_" } as Type);
+          if (_isUseful(env, registry, specialized, [...wildcards, ...restPattern], [...finalArgTypes, ...restTypes])) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // Primitive types or unknown: check default matrix
+      return _isUseful(env, registry, defaultMatrix(matrix), restPattern, restTypes);
+    }
+  }
+};
+
+/**
+ * Find a witness pattern that is not covered by the matrix.
+ * Returns null if all patterns are covered (exhaustive).
+ *
+ * Uses depth limiting to handle recursive types (List, Tree, etc.)
+ * gracefully - after a certain depth, we use wildcards.
+ */
+const findWitness = (
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  matrix: PatternMatrix,
+  types: readonly Type[],
+  depth: number = 0,
+): SimplePattern[] | null => {
+  // Depth limit to prevent infinite recursion on recursive types
+  const MAX_DEPTH = 10;
+  if (depth > MAX_DEPTH) {
+    // At max depth, if matrix is empty, there's a missing case
+    // Use wildcard as the witness
+    if (matrix.length === 0 && types.length > 0) {
+      return types.map(() => ({ kind: "Wild" }) as SimplePattern);
+    }
+    return null;
+  }
+
+  // Base case: empty pattern vector
+  if (types.length === 0) {
+    return matrix.length === 0 ? [] : null;
+  }
+
+  const firstType = types[0]!;
+  const restTypes = types.slice(1);
+  const typeName = getTypeConName(firstType);
+
+  // Handle tuples
+  if (firstType.kind === "TTuple") {
+    const arity = firstType.elements.length;
+    const specialized = specializeTuple(matrix, arity);
+    const witness = findWitness(env, registry, specialized, [...firstType.elements, ...restTypes], depth + 1);
+    if (witness) {
+      const tupleElements = witness.slice(0, arity);
+      const rest = witness.slice(arity);
+      return [{ kind: "Tuple", elements: tupleElements }, ...rest];
+    }
+    return null;
+  }
+
+  // Handle ADTs
+  if (typeName) {
+    const constructors = getConstructorsWithArity(env, registry, typeName);
+
+    if (constructors.length === 0) {
+      // No constructors known, check if wildcard is useful
+      const def = defaultMatrix(matrix);
+      const witness = findWitness(env, registry, def, restTypes, depth);
+      if (witness) {
+        return [{ kind: "Wild" }, ...witness];
+      }
+      return null;
+    }
+
+    // Try each constructor
+    for (const con of constructors) {
+      const specialized = specialize(matrix, con.name, con.arity);
+      // Get the actual argument types from the constructor and scrutinee type
+      const argTypes = getConstructorArgTypes(env, con.name, firstType);
+      const finalArgTypes = argTypes.length > 0 ? argTypes : Array(con.arity).fill({ kind: "TVar", name: "_" } as Type);
+      const witness = findWitness(env, registry, specialized, [...finalArgTypes, ...restTypes], depth + 1);
+      if (witness) {
+        const args = witness.slice(0, con.arity);
+        const rest = witness.slice(con.arity);
+        return [{ kind: "Con", name: con.name, args }, ...rest];
+      }
+    }
+    return null;
+  }
+
+  // Primitive or unknown type: check default
+  const def = defaultMatrix(matrix);
+  const witness = findWitness(env, registry, def, restTypes, depth);
+  if (witness) {
+    return [{ kind: "Wild" }, ...witness];
+  }
+  return null;
+};
+
+/**
+ * Check if a set of patterns exhaustively covers all values of a type.
+ *
+ * Uses the pattern matrix algorithm for proper handling of:
+ * - Nested constructor patterns
+ * - Tuple patterns
+ * - Or-patterns
+ * - Wildcards and variable patterns
+ *
+ * Returns a list of missing pattern examples (empty if exhaustive).
  */
 const checkExhaustiveness = (
+  env: TypeEnv,
   registry: ConstructorRegistry,
   scrutineeType: Type,
   patterns: readonly ast.Pattern[],
 ): readonly string[] => {
-  const typeName = getTypeConName(scrutineeType);
-  if (!typeName) return [];
+  // Convert patterns to simple patterns and create the matrix
+  const matrix: PatternMatrix = patterns.map((p) => [toSimplePattern(p)]);
 
-  const allConstructors = registry.get(typeName);
-  if (!allConstructors) {
-    return []; // Unknown type, skip check
+  // Find a witness (uncovered pattern)
+  const witness = findWitness(env, registry, matrix, [scrutineeType]);
+
+  if (witness && witness.length > 0) {
+    return [simplePatternToString(witness[0]!)];
   }
 
-  const matchedConstructors = getPatternConstructors(patterns);
-
-  // Wildcard catches everything
-  if (matchedConstructors.has("*")) {
-    return [];
-  }
-
-  // Find unmatched constructors
-  const missing: string[] = [];
-  for (const con of allConstructors) {
-    if (!matchedConstructors.has(con)) {
-      missing.push(con);
-    }
-  }
-
-  return missing;
+  return [];
 };
 
 // =============================================================================
