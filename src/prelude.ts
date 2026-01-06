@@ -266,59 +266,45 @@ export const coreModule = ast.moduleDecl(
 export const preludeModules = [maybeModule, eitherModule, listModule, coreModule] as const;
 
 // =============================================================================
-// Implicit Use Statements (for backward compatibility)
+// Prelude Function Names (for LSP completion)
 // =============================================================================
 
-/** Import all constructors from Maybe */
-const useMaybe = ast.useDecl("Maybe", ast.importSpecific([ast.importItem("Maybe", "all")]));
-
-/** Import all constructors from Either */
-const useEither = ast.useDecl("Either", ast.importSpecific([ast.importItem("Either", "all")]));
-
-/** Import all constructors from List */
-const useList = ast.useDecl("List", ast.importSpecific([ast.importItem("List", "all")]));
-
-/** Import all from Core (id, const, compose, flip) */
-const useCore = ast.useDecl("Core", ast.importAll());
-
-/** Implicit use statements for backward compatibility */
-export const implicitUses = [useMaybe, useEither, useList, useCore] as const;
+export const preludeFunctionNames = [
+  "map",
+  "filter",
+  "head",
+  "tail",
+  "isEmpty",
+  "length",
+  "foldr",
+  "foldl",
+  "reverse",
+  "concat",
+  "id",
+  "const",
+  "compose",
+  "flip",
+] as const;
 
 // =============================================================================
-// Backwards Compatibility Exports
+// Function Expressions (for testing)
 // =============================================================================
 
-// Export the old-style letRec wrappers for code that still uses them
-export const map = ast.letRec([ast.recBinding("map", mapExpr)], ast.var_("map"));
-export const filter = ast.letRec([ast.recBinding("filter", filterExpr)], ast.var_("filter"));
-export const head = headExpr;
-export const tail = tailExpr;
-export const isEmpty = isEmptyExpr;
-export const length = ast.letRec([ast.recBinding("length", lengthExpr)], ast.var_("length"));
-export const foldr = ast.letRec([ast.recBinding("foldr", foldrExpr)], ast.var_("foldr"));
-export const foldl = ast.letRec([ast.recBinding("foldl", foldlExpr)], ast.var_("foldl"));
-export const reverse = reverseExpr;
-export const concat = concatExpr;
-export const id = idExpr;
-export const const_ = constExpr;
-export const compose = composeExpr;
-export const flip = flipExpr;
-
-export const functions = {
-  map,
-  filter,
-  head,
-  tail,
-  isEmpty,
-  length,
-  foldr,
-  foldl,
-  reverse,
-  concat,
-  id,
-  const: const_,
-  compose,
-  flip,
+export const preludeFunctionExprs = {
+  map: ast.letRec([ast.recBinding("map", mapExpr)], ast.var_("map")),
+  filter: ast.letRec([ast.recBinding("filter", filterExpr)], ast.var_("filter")),
+  head: headExpr,
+  tail: tailExpr,
+  isEmpty: isEmptyExpr,
+  length: ast.letRec([ast.recBinding("length", lengthExpr)], ast.var_("length")),
+  foldr: ast.letRec([ast.recBinding("foldr", foldrExpr)], ast.var_("foldr")),
+  foldl: ast.letRec([ast.recBinding("foldl", foldlExpr)], ast.var_("foldl")),
+  reverse: reverseExpr,
+  concat: concatExpr,
+  id: idExpr,
+  const: constExpr,
+  compose: composeExpr,
+  flip: flipExpr,
 } as const;
 
 /**

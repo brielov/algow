@@ -59,7 +59,7 @@ import { createConstructorEnv, evaluate, RuntimeError, valueToString } from "../
 import { parse, programToExpr, type Program } from "../parser";
 import {
   declarations as preludeDeclarations,
-  functions as preludeFunctions,
+  preludeFunctionNames,
   wrapWithPrelude,
 } from "../prelude";
 
@@ -523,19 +523,12 @@ export const createServer = (transport: Transport): void => {
   /**
    * Get completions for prelude functions.
    */
-  const getPreludeFunctionCompletions = (): CompletionItem[] => {
-    const items: CompletionItem[] = [];
-
-    for (const name of Object.keys(preludeFunctions)) {
-      items.push({
-        label: name,
-        kind: COMPLETION_KIND_FUNCTION,
-        detail: "prelude",
-      });
-    }
-
-    return items;
-  };
+  const getPreludeFunctionCompletions = (): CompletionItem[] =>
+    preludeFunctionNames.map((name) => ({
+      label: name,
+      kind: COMPLETION_KIND_FUNCTION,
+      detail: "prelude",
+    }));
 
   /**
    * Get keyword completions.

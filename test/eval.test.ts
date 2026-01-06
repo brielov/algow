@@ -13,7 +13,7 @@ import {
   RuntimeError,
   type Env,
 } from "../src/eval";
-import { functions } from "../src/prelude";
+import { preludeFunctionExprs } from "../src/prelude";
 
 // Helper to build a list AST
 const list = (...items: ast.Expr[]): ast.Expr => {
@@ -385,18 +385,18 @@ describe("Interpreter", () => {
   describe("prelude functions", () => {
     // Load prelude into environment
     let env = baseEnv;
-    env = evalPreludeFunction(env, "id", functions.id);
-    env = evalPreludeFunction(env, "const", functions.const);
-    env = evalPreludeFunction(env, "head", functions.head);
-    env = evalPreludeFunction(env, "tail", functions.tail);
-    env = evalPreludeFunction(env, "isEmpty", functions.isEmpty);
-    env = evalPreludeFunction(env, "length", functions.length);
-    env = evalPreludeFunction(env, "map", functions.map);
-    env = evalPreludeFunction(env, "filter", functions.filter);
-    env = evalPreludeFunction(env, "foldr", functions.foldr);
-    env = evalPreludeFunction(env, "foldl", functions.foldl);
-    env = evalPreludeFunction(env, "reverse", functions.reverse);
-    env = evalPreludeFunction(env, "concat", functions.concat);
+    env = evalPreludeFunction(env, "id", preludeFunctionExprs.id);
+    env = evalPreludeFunction(env, "const", preludeFunctionExprs.const);
+    env = evalPreludeFunction(env, "head", preludeFunctionExprs.head);
+    env = evalPreludeFunction(env, "tail", preludeFunctionExprs.tail);
+    env = evalPreludeFunction(env, "isEmpty", preludeFunctionExprs.isEmpty);
+    env = evalPreludeFunction(env, "length", preludeFunctionExprs.length);
+    env = evalPreludeFunction(env, "map", preludeFunctionExprs.map);
+    env = evalPreludeFunction(env, "filter", preludeFunctionExprs.filter);
+    env = evalPreludeFunction(env, "foldr", preludeFunctionExprs.foldr);
+    env = evalPreludeFunction(env, "foldl", preludeFunctionExprs.foldl);
+    env = evalPreludeFunction(env, "reverse", preludeFunctionExprs.reverse);
+    env = evalPreludeFunction(env, "concat", preludeFunctionExprs.concat);
 
     const myList = list(ast.num(1), ast.num(2), ast.num(3));
 
