@@ -80,8 +80,8 @@ func NewCon(tag string, args ...Value) Value {
 	return Con{Tag: tag, Args: args}
 }
 
-// Eq performs deep structural equality
-func Eq(a, b Value) bool {
+// eqInternal performs deep structural equality (returns bool for internal use)
+func eqInternal(a, b Value) bool {
 	// Same reference
 	if a == b {
 		return true
@@ -102,7 +102,7 @@ func Eq(a, b Value) bool {
 				return false
 			}
 			for i := range ca.Args {
-				if !Eq(ca.Args[i], cb.Args[i]) {
+				if !eqInternal(ca.Args[i], cb.Args[i]) {
 					return false
 				}
 			}
@@ -118,7 +118,7 @@ func Eq(a, b Value) bool {
 				return false
 			}
 			for i := range sa {
-				if !Eq(sa[i], sb[i]) {
+				if !eqInternal(sa[i], sb[i]) {
 					return false
 				}
 			}
@@ -134,7 +134,7 @@ func Eq(a, b Value) bool {
 				return false
 			}
 			for k, v := range ma {
-				if bv, ok := mb[k]; !ok || !Eq(v, bv) {
+				if bv, ok := mb[k]; !ok || !eqInternal(v, bv) {
 					return false
 				}
 			}
@@ -145,6 +145,11 @@ func Eq(a, b Value) bool {
 
 	// Use reflect for other types
 	return reflect.DeepEqual(a, b)
+}
+
+// Eq performs deep structural equality (returns Value for use in generated code)
+func Eq(a, b Value) Value {
+	return eqInternal(a, b)
 }
 
 // Helper to convert bool to int for comparisons

@@ -114,7 +114,8 @@ const genExpr = (ctx: CodeGenContext, expr: ir.IRExpr): string => {
     case "IRLet": {
       const binding = genBinding(ctx, expr.binding);
       const goName = toGoId(expr.name);
-      emit(ctx, `${goName} := ${binding}`);
+      // Use var + assignment to allow shadowing of prelude variables
+      emit(ctx, `var ${goName} Value = ${binding}`);
       return genExpr(ctx, expr.body);
     }
 
@@ -193,12 +194,12 @@ const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
 
     case "IRTupleBinding": {
       const elements = binding.elements.map((e) => genAtom(ctx, e));
-      return `[]Value{${elements.join(", ")}}`;
+      return `Value([]Value{${elements.join(", ")}})`;
     }
 
     case "IRRecordBinding": {
       const fields = binding.fields.map((f) => `"${f.name}": ${genAtom(ctx, f.value)}`);
-      return `map[string]Value{${fields.join(", ")}}`;
+      return `Value(map[string]Value{${fields.join(", ")}})`;
     }
 
     case "IRFieldAccessBinding": {
@@ -385,11 +386,28 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
   lines.push(`func() Value {`);
   lines.push(`\t_s := ${scrutinee}`);
 
-  // Check if all cases are constructor patterns - use switch
-  const allConstructors = binding.cases.every((c) => c.pattern.kind === "IRPCon");
+  // Check if all cases are simple constructor patterns - use switch
+  // Simple means: no nested constructor patterns and unique tags
+  const isSimpleConstructorPattern = (p: ir.IRPattern): boolean => {
+    if (p.kind !== "IRPCon") return false;
+    // Check that all args are simple (var, wildcard, literal, or tuple of simples)
+    return p.args.every(
+      (arg) =>
+        arg.kind === "IRPVar" ||
+        arg.kind === "IRPWildcard" ||
+        arg.kind === "IRPLit",
+    );
+  };
+  const allSimpleConstructors = binding.cases.every((c) =>
+    isSimpleConstructorPattern(c.pattern),
+  );
+  const tags = binding.cases
+    .filter((c) => c.pattern.kind === "IRPCon")
+    .map((c) => (c.pattern as ir.IRPCon).name);
+  const hasUniqueTags = new Set(tags).size === tags.length;
   const hasGuards = binding.cases.some((c) => c.guard !== undefined);
 
-  if (allConstructors && !hasGuards) {
+  if (allSimpleConstructors && hasUniqueTags && !hasGuards) {
     lines.push(`\tswitch _s.(Con).Tag {`);
 
     for (const case_ of binding.cases) {
@@ -399,7 +417,9 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
       // Generate bindings for constructor arguments
       const bindings = genPatternBindings("_s.(Con).Args", pattern);
       for (const [name, expr] of bindings) {
-        lines.push(`\t\t${toGoId(name)} := ${expr}`);
+        const goName = toGoId(name);
+        lines.push(`\t\t${goName} := ${expr}`);
+        lines.push(`\t\t_ = ${goName}`); // Suppress unused variable error
       }
 
       // Generate body
@@ -429,7 +449,9 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
 
       // Emit bindings
       for (const [name, expr] of bindings) {
-        lines.push(`\t\t${toGoId(name)} := ${expr}`);
+        const goName = toGoId(name);
+        lines.push(`\t\t${goName} := ${expr}`);
+        lines.push(`\t\t_ = ${goName}`); // Suppress unused variable error
       }
 
       // Generate guard if present
