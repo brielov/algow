@@ -368,8 +368,10 @@ const lowerLetRec = (ctx: LowerContext, expr: ast.LetRec): ir.IRExpr => {
 const lowerAbs = (ctx: LowerContext, expr: ast.Abs): ir.IRExpr => {
   // Get parameter type from the type checker's span mapping
   // Fall back to placeholder if not available (shouldn't happen for well-typed code)
-  const paramType: Type =
-    lookupSpanType(ctx, expr.paramSpan) ?? { kind: "TVar", name: `_param${ctx.varCounter++}` };
+  const paramType: Type = lookupSpanType(ctx, expr.paramSpan) ?? {
+    kind: "TVar",
+    name: `_param${ctx.varCounter++}`,
+  };
 
   // Extend environment with parameter
   const savedEnv = new Map(ctx.typeEnv);

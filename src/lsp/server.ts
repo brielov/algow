@@ -89,7 +89,10 @@ const preludeUses: ast.UseDecl[] = preludeModules.map((mod) =>
  */
 const preludeCache = (() => {
   const moduleEnv = processModules(preludeModules);
-  const { localEnv, localRegistry, constructorNames } = processUseStatements(preludeUses, moduleEnv);
+  const { localEnv, localRegistry, constructorNames } = processUseStatements(
+    preludeUses,
+    moduleEnv,
+  );
   return {
     moduleEnv,
     typeEnv: localEnv,

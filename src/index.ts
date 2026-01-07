@@ -2,6 +2,7 @@ import { bindWithConstructors } from "./binder";
 import { check, processModules, processUseStatements, typeToString } from "./checker";
 import { createConstructorEnv, evaluate, valueToString, type Env } from "./eval";
 import { generateJS } from "./backend/js";
+import { generateGo } from "./backend/go";
 import { lowerToIR } from "./lower";
 import { offsetToLineCol } from "./lsp/positions";
 import { optimize } from "./optimize";
@@ -253,6 +254,46 @@ const compile = (source: string, filename: string): void => {
   console.log(output.code);
 };
 
+const compileToGo = (source: string, filename: string): void => {
+  const parseResult = parse(source);
+
+  if (parseResult.diagnostics.length > 0) {
+    printDiagnostics(parseResult.diagnostics, source, filename);
+    process.exit(1);
+  }
+
+  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
+    processProgram(parseResult);
+
+  const expr = programToExpr(parseResult.program, allModules, allUses);
+  if (!expr) {
+    console.error(`${filename}: No expression to compile`);
+    process.exit(1);
+  }
+
+  // Bind and type check
+  const bindResult = bindWithConstructors(constructorNames, expr);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+
+  const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
+  if (allDiagnostics.length > 0) {
+    printDiagnostics(allDiagnostics, source, filename);
+    process.exit(1);
+  }
+
+  // Lower to IR, optimize, and generate Go
+  let ir = lowerToIR(expr, typeEnv, checkResult);
+  ir = optimize(ir);
+  const output = generateGo(ir, constructorNames);
+
+  // Print any warnings
+  for (const warning of output.warnings) {
+    console.warn(`Warning: ${warning}`);
+  }
+
+  console.log(output.code);
+};
+
 const main = async (): Promise<void> => {
   const args = process.argv.slice(2);
 
@@ -261,6 +302,7 @@ const main = async (): Promise<void> => {
     console.error("       algow -e <expression>");
     console.error("       algow -t <file.alg>       (type check only)");
     console.error("       algow -c <file.alg>       (compile to JS)");
+    console.error("       algow --go <file.alg>     (compile to Go)");
     console.error("       algow --emit-ir <file.alg> (emit IR)");
     process.exit(1);
   }
@@ -274,6 +316,9 @@ const main = async (): Promise<void> => {
     } else if (args[0] === "-c" && args[1]) {
       const source = await Bun.file(args[1]).text();
       compile(source, args[1]);
+    } else if (args[0] === "--go" && args[1]) {
+      const source = await Bun.file(args[1]).text();
+      compileToGo(source, args[1]);
     } else if (args[0] === "--emit-ir" && args[1]) {
       const source = await Bun.file(args[1]).text();
       emitIR(source, args[1]);
