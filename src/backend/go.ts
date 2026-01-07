@@ -150,9 +150,7 @@ const genAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
         return atom.value ? "true" : "false";
       }
       // Numbers - wrap in Value() to make them interface{}
-      if (Number.isInteger(atom.value)) {
-        return `Value(int64(${atom.value}))`;
-      }
+      // Use float64 for all numbers to match JS semantics
       return `Value(float64(${atom.value}))`;
 
     case "IRVar": {
@@ -240,7 +238,8 @@ const genBinOp = (_ctx: CodeGenContext, binding: ir.IRBinOpBinding): string => {
   const isString = isStringType(binding.operandType);
 
   // Helper to extract typed value from interface{}
-  const asInt = (v: string) => `${v}.(int64)`;
+  // Use float64 for all numbers to match JS semantics
+  const asNum = (v: string) => `${v}.(float64)`;
   const asStr = (v: string) => `${v}.(string)`;
 
   switch (binding.op) {
@@ -248,28 +247,28 @@ const genBinOp = (_ctx: CodeGenContext, binding: ir.IRBinOpBinding): string => {
       if (isString) {
         return `Value(${asStr(left)} + ${asStr(right)})`;
       }
-      return `Value(${asInt(left)} + ${asInt(right)})`;
+      return `Value(${asNum(left)} + ${asNum(right)})`;
 
     case "-":
-      return `Value(${asInt(left)} - ${asInt(right)})`;
+      return `Value(${asNum(left)} - ${asNum(right)})`;
 
     case "*":
-      return `Value(${asInt(left)} * ${asInt(right)})`;
+      return `Value(${asNum(left)} * ${asNum(right)})`;
 
     case "/":
-      return `Value(${asInt(left)} / ${asInt(right)})`;
+      return `Value(${asNum(left)} / ${asNum(right)})`;
 
     case "<":
-      return `Value(${asInt(left)} < ${asInt(right)})`;
+      return `Value(${asNum(left)} < ${asNum(right)})`;
 
     case ">":
-      return `Value(${asInt(left)} > ${asInt(right)})`;
+      return `Value(${asNum(left)} > ${asNum(right)})`;
 
     case "<=":
-      return `Value(${asInt(left)} <= ${asInt(right)})`;
+      return `Value(${asNum(left)} <= ${asNum(right)})`;
 
     case ">=":
-      return `Value(${asInt(left)} >= ${asInt(right)})`;
+      return `Value(${asNum(left)} >= ${asNum(right)})`;
 
     case "==":
       if (isComplexType(binding.operandType)) {
@@ -519,7 +518,7 @@ const genPatternMatch = (
           ? JSON.stringify(pattern.value)
           : typeof pattern.value === "boolean"
             ? pattern.value.toString()
-            : `int64(${pattern.value})`;
+            : `float64(${pattern.value})`;
       return { condition: `${scrutinee} == ${value}`, bindings: [] };
     }
 
