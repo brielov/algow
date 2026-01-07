@@ -458,7 +458,9 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", numType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, ["Just", "Nothing"]);
-      expect(result.code).toContain('_s.$tag === "Just"');
+      // Uses switch-based dispatch for unique constructor tags
+      expect(result.code).toContain("switch (_s.$tag)");
+      expect(result.code).toContain('case "Just"');
       expect(result.code).toContain("const n = _s.$args[0]");
     });
 
@@ -524,7 +526,9 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", numType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, ["Just", "Nothing"]);
-      expect(result.code).toContain('_s.$tag === "Just"');
+      // Uses switch-based dispatch; nested literal check inside case
+      expect(result.code).toContain("switch (_s.$tag)");
+      expect(result.code).toContain('case "Just"');
       expect(result.code).toContain("_s.$args[0] === 42");
     });
 

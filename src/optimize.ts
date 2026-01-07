@@ -501,20 +501,29 @@ const checkTailCalls = (expr: ir.IRExpr, funcName: string, paramCount: number): 
 };
 
 /**
- * Extract tail call information if expr ends with a tail call to funcName.
- * Handles interleaved argument computations like:
- *   let _t1 = n - 1 in
- *   let _t2 = f _t1 in
- *   let _t3 = n * acc in
- *   let _t4 = _t2 _t3 in
- *   _t4
+ * Extract tail call arguments if expr ends with a tail call to funcName.
+ *
+ * In ANF, a curried tail call like `f (n-1) (n*acc)` becomes:
+ *   let _t1 = n - 1 in      // arg 1 computation
+ *   let _t2 = f _t1 in      // partial application f arg1
+ *   let _t3 = n * acc in    // arg 2 computation
+ *   let _t4 = _t2 _t3 in    // final application
+ *   _t4                     // result
+ *
+ * This function traces back from the result variable to find the
+ * complete application chain and extract all arguments.
+ *
+ * @param expr The expression to analyze
+ * @param funcName The recursive function name to look for
+ * @param paramCount Expected number of parameters
+ * @returns Array of argument atoms if valid tail call, null otherwise
  */
 const extractTailCall = (
   expr: ir.IRExpr,
   funcName: string,
   paramCount: number,
 ): ir.IRAtom[] | null => {
-  // Collect all let bindings first
+  // Step 1: Flatten let bindings into an array
   const bindings: Array<{ name: string; binding: ir.IRBinding }> = [];
   let current: ir.IRExpr = expr;
 
@@ -523,14 +532,16 @@ const extractTailCall = (
     current = current.body;
   }
 
-  // Final expression should be a variable
+  // Step 2: Final expression must be a variable (the tail call result)
   if (current.kind !== "IRAtomExpr" || current.atom.kind !== "IRVar") {
     return null;
   }
 
   const resultVar = current.atom.name;
 
-  // Work backwards from the result to find the application chain
+  // Step 3: Trace back through application chain
+  // Start from the result variable and follow the application bindings
+  // backwards to find all arguments and the original function call
   const args: ir.IRAtom[] = [];
   let targetVar = resultVar;
 
@@ -538,32 +549,35 @@ const extractTailCall = (
     const { name, binding } = bindings[i]!;
 
     if (name === targetVar && binding.kind === "IRAppBinding") {
-      // This is part of the application chain
+      // Found an application in the chain - collect the argument
       args.unshift(binding.arg);
 
-      // Check what the function is
       if (binding.func.kind === "IRVar") {
         if (binding.func.name === funcName) {
-          // Found the start of the tail call!
-          if (args.length === paramCount) {
-            return args;
-          }
-          return null; // Wrong arity
+          // Reached the recursive call - verify arity
+          return args.length === paramCount ? args : null;
         }
-        // Continue searching - this is a partial application
+        // Continue tracing - this is an intermediate partial application
         targetVar = binding.func.name;
       } else {
-        return null; // Function is not a variable
+        return null; // Function must be a variable
       }
     }
-    // Skip non-matching bindings (argument computations)
+    // Non-matching bindings are argument computations - skip them
   }
 
   return null;
 };
 
 /**
- * Check if a binding contains any call to funcName (non-tail position).
+ * Check if a binding contains any reference to funcName in non-tail position.
+ *
+ * This is used to detect recursive calls that are NOT in tail position.
+ * For example, in `n * f(n-1)`, the call to f is not in tail position
+ * because the result is used as input to multiplication.
+ *
+ * Special handling for if/match: their branches ARE tail positions,
+ * so we recursively check those with checkTailCalls instead.
  */
 const hasRecursiveCall = (binding: ir.IRBinding, funcName: string): boolean => {
   const checkAtom = (atom: ir.IRAtom): boolean => atom.kind === "IRVar" && atom.name === funcName;
@@ -857,19 +871,42 @@ const defaultPasses: readonly OptPass[] = [
 ];
 
 /**
- * Run all optimization passes on an IR expression.
+ * Check if two IR expressions are structurally identical.
+ * Used to detect when optimization reaches a fixpoint.
+ */
+const irEqual = (a: ir.IRExpr, b: ir.IRExpr): boolean => {
+  // Use JSON serialization for simple structural comparison
+  // This is efficient enough for typical program sizes
+  return JSON.stringify(a) === JSON.stringify(b);
+};
+
+/**
+ * Run all optimization passes on an IR expression until no more changes occur.
+ *
+ * Iterates to fixpoint: keeps running passes until the IR stabilizes.
+ * This allows optimizations to enable further optimizations (e.g., constant
+ * folding may enable dead code elimination, which may enable more folding).
  *
  * @param expr The IR expression to optimize
  * @param passes Optional custom passes (defaults to standard optimizations)
+ * @param maxIterations Maximum iterations to prevent infinite loops (default: 10)
  * @returns The optimized IR expression
  */
 export const optimize = (
   expr: ir.IRExpr,
   passes: readonly OptPass[] = defaultPasses,
+  maxIterations = 10,
 ): ir.IRExpr => {
   let result = expr;
-  for (const pass of passes) {
-    result = pass.run(result);
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const before = result;
+    for (const pass of passes) {
+      result = pass.run(result);
+    }
+    // Fixpoint reached - no more changes
+    if (irEqual(before, result)) {
+      break;
+    }
   }
   return result;
 };

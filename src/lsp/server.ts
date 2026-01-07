@@ -75,7 +75,7 @@ import {
 } from "./transport";
 
 // =============================================================================
-// PRELUDE
+// PRELUDE CACHING
 // =============================================================================
 
 /** Implicit use statements for prelude modules (import everything) */
@@ -83,13 +83,52 @@ const preludeUses: ast.UseDecl[] = preludeModules.map((mod) =>
   ast.useDecl(mod.name, ast.importAll()),
 );
 
-/** Process a program with prelude */
+/**
+ * Cached prelude environment.
+ * Computed once at module load time to avoid reprocessing on every keystroke.
+ */
+const preludeCache = (() => {
+  const moduleEnv = processModules(preludeModules);
+  const { localEnv, localRegistry, constructorNames } = processUseStatements(preludeUses, moduleEnv);
+  return {
+    moduleEnv,
+    typeEnv: localEnv,
+    registry: localRegistry,
+    constructorNames: [...constructorNames],
+  };
+})();
+
+/** Process a program, reusing cached prelude environment */
 const processProgram = (program: Program) => {
+  // Start with cached prelude
   const allModules = [...preludeModules, ...program.modules];
   const allUses = [...preludeUses, ...program.uses];
-  const moduleEnv = processModules(allModules);
-  const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
-  return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+
+  // Only process user modules (prelude already processed)
+  if (program.modules.length > 0) {
+    // User has custom modules - need to reprocess all
+    const moduleEnv = processModules(allModules);
+    const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
+    return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+  }
+
+  // No user modules - use cached prelude, only process user use statements
+  if (program.uses.length > 0) {
+    const { localEnv, localRegistry, constructorNames } = processUseStatements(
+      allUses,
+      preludeCache.moduleEnv,
+    );
+    return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+  }
+
+  // No user modules or uses - fully cached
+  return {
+    typeEnv: preludeCache.typeEnv,
+    registry: preludeCache.registry,
+    constructorNames: preludeCache.constructorNames,
+    allModules,
+    allUses,
+  };
 };
 
 // =============================================================================

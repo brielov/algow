@@ -19,7 +19,12 @@
 
 import * as ast from "./ast";
 import * as ir from "./ir";
-import type { CheckOutput, Type, TypeEnv } from "./checker";
+import { applySubst, type CheckOutput, type Subst, type Type, type TypeEnv } from "./checker";
+
+/** Helper for exhaustive switch checking - TypeScript will error if called with non-never */
+const assertNever = (x: never): never => {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+};
 
 // =============================================================================
 // LOWERING CONTEXT
@@ -31,13 +36,16 @@ type LowerContext = {
   /** Type environment - maps names to type schemes */
   typeEnv: TypeEnv;
   /** Substitution from type checker for resolving type variables */
-  subst: ReadonlyMap<string, Type>;
+  subst: Subst;
+  /** Direct span to type mapping from type checker */
+  spanTypes: ReadonlyMap<string, Type>;
 };
 
 const createContext = (typeEnv: TypeEnv, checkOutput: CheckOutput): LowerContext => ({
   varCounter: 0,
   typeEnv: new Map(typeEnv),
   subst: checkOutput.subst,
+  spanTypes: checkOutput.spanTypes,
 });
 
 /** Generate a fresh variable name */
@@ -54,42 +62,12 @@ const extendEnv = (ctx: LowerContext, name: string, type: Type): void => {
 // TYPE RESOLUTION
 // =============================================================================
 
-/** Apply substitution to resolve type variables */
-const applySubst = (subst: ReadonlyMap<string, Type>, type: Type): Type => {
-  switch (type.kind) {
-    case "TCon":
-      return type;
-    case "TVar":
-      return subst.get(type.name) ?? type;
-    case "TFun":
-      return {
-        kind: "TFun",
-        param: applySubst(subst, type.param),
-        ret: applySubst(subst, type.ret),
-      };
-    case "TApp":
-      return {
-        kind: "TApp",
-        con: applySubst(subst, type.con),
-        arg: applySubst(subst, type.arg),
-      };
-    case "TRecord": {
-      const fields = new Map<string, Type>();
-      for (const [name, fieldType] of type.fields) {
-        fields.set(name, applySubst(subst, fieldType));
-      }
-      return {
-        kind: "TRecord",
-        fields,
-        row: type.row ? applySubst(subst, type.row) : null,
-      };
-    }
-    case "TTuple":
-      return {
-        kind: "TTuple",
-        elements: type.elements.map((t) => applySubst(subst, t)),
-      };
-  }
+/** Look up a type by span from the type checker's output */
+const lookupSpanType = (ctx: LowerContext, span: ast.Span | undefined): Type | null => {
+  if (!span) return null;
+  const key = `${span.start}:${span.end}`;
+  const type = ctx.spanTypes.get(key);
+  return type ? applySubst(ctx.subst, type) : null;
 };
 
 /** Look up a variable's type in the environment */
@@ -324,6 +302,9 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
         `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
           `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
       );
+
+    default:
+      return assertNever(expr);
   }
 };
 
@@ -385,13 +366,10 @@ const lowerLetRec = (ctx: LowerContext, expr: ast.LetRec): ir.IRExpr => {
 };
 
 const lowerAbs = (ctx: LowerContext, expr: ast.Abs): ir.IRExpr => {
-  // We need to determine the function type
-  // For now, we'll create a fresh type variable for the parameter
-  // and infer from context
-
-  // Create a placeholder type for the parameter
-  // In a full implementation, we'd get this from the type checker
-  const paramType: Type = { kind: "TVar", name: `_param${ctx.varCounter++}` };
+  // Get parameter type from the type checker's span mapping
+  // Fall back to placeholder if not available (shouldn't happen for well-typed code)
+  const paramType: Type =
+    lookupSpanType(ctx, expr.paramSpan) ?? { kind: "TVar", name: `_param${ctx.varCounter++}` };
 
   // Extend environment with parameter
   const savedEnv = new Map(ctx.typeEnv);

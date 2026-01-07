@@ -16,6 +16,11 @@ import type * as ir from "../ir";
 import type { Type } from "../checker";
 import { RUNTIME } from "./runtime";
 
+/** Helper for exhaustive switch checking - TypeScript will error if called with non-never */
+const assertNever = (x: never): never => {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+};
+
 // =============================================================================
 // CODE GENERATION CONTEXT
 // =============================================================================
@@ -94,6 +99,9 @@ const genExpr = (ctx: CodeGenContext, expr: ir.IRExpr): string => {
       }
       return genExpr(ctx, expr.body);
     }
+
+    default:
+      return assertNever(expr);
   }
 };
 
@@ -115,6 +123,9 @@ const genAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
       }
       return toJsId(atom.name);
     }
+
+    default:
+      return assertNever(atom);
   }
 };
 
@@ -169,6 +180,9 @@ const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
       const captures = binding.captures.map((c) => genAtom(ctx, c));
       return `{ $fn: ${binding.funcId}, $env: [${captures.join(", ")}] }`;
     }
+
+    default:
+      return assertNever(binding);
   }
 };
 
@@ -675,7 +689,107 @@ const genMatchTCO = (
 };
 
 /**
+ * Check if pattern matching can use switch-based dispatch.
+ * Requires: all patterns are constructor patterns with unique tags, no guards.
+ */
+const canUseSwitchDispatch = (cases: readonly ir.IRCase[]): boolean => {
+  if (cases.length === 0) return false;
+
+  const tags = new Set<string>();
+  for (const case_ of cases) {
+    if (case_.pattern.kind !== "IRPCon") {
+      return false; // Non-constructor pattern
+    }
+    if (tags.has(case_.pattern.name)) {
+      return false; // Duplicate tag - need if/else for disambiguation
+    }
+    tags.add(case_.pattern.name);
+  }
+  return true;
+};
+
+/**
+ * Generate nested pattern conditions (excluding the outer tag check).
+ * Used by switch-based dispatch where the tag is already matched.
+ */
+const genNestedPatternConditions = (
+  scrutineeVar: string,
+  pattern: ir.IRPCon,
+): { conditions: string[]; bindings: Array<[string, string]> } => {
+  const conditions: string[] = [];
+  const bindings: Array<[string, string]> = [];
+
+  for (let i = 0; i < pattern.args.length; i++) {
+    const argScrutinee = `${scrutineeVar}.$args[${i}]`;
+    const result = genPatternMatch(argScrutinee, pattern.args[i]!);
+    if (result.condition !== "true") {
+      conditions.push(result.condition);
+    }
+    bindings.push(...result.bindings);
+  }
+
+  return { conditions, bindings };
+};
+
+/**
+ * Generate switch-based pattern matching for constructor patterns.
+ * O(1) dispatch on the constructor tag.
+ */
+const genMatchSwitch = (
+  ctx: CodeGenContext,
+  scrutineeVar: string,
+  scrutinee: string,
+  cases: readonly ir.IRCase[],
+): string => {
+  const lines: string[] = [];
+  lines.push(`((${scrutineeVar}) => {`);
+  lines.push(`  switch (${scrutineeVar}.$tag) {`);
+
+  for (const case_ of cases) {
+    const pattern = case_.pattern as ir.IRPCon;
+    lines.push(`    case "${pattern.name}": {`);
+
+    // Generate bindings for constructor arguments
+    const { conditions, bindings } = genNestedPatternConditions(scrutineeVar, pattern);
+
+    // Emit bindings
+    for (const [name, expr] of bindings) {
+      lines.push(`      const ${toJsId(name)} = ${expr};`);
+    }
+
+    // Generate body
+    ctx.indent += 3;
+    const bodyLines: string[] = [];
+    const savedLines = ctx.lines;
+    ctx.lines = bodyLines;
+    const bodyResult = genExpr(ctx, case_.body);
+    ctx.lines = savedLines;
+    ctx.indent -= 3;
+
+    for (const line of bodyLines) {
+      lines.push("      " + line.trimStart());
+    }
+
+    // If nested patterns have conditions, wrap return in a check
+    if (conditions.length > 0) {
+      lines.push(`      if (${conditions.join(" && ")}) return ${bodyResult};`);
+      lines.push(`      break;`);
+    } else {
+      lines.push(`      return ${bodyResult};`);
+    }
+
+    lines.push(`    }`);
+  }
+
+  lines.push(`  }`);
+  lines.push(`})(${scrutinee})`);
+
+  return lines.join("\n" + "  ".repeat(ctx.indent));
+};
+
+/**
  * Generate JavaScript for pattern matching.
+ * Uses switch-based dispatch when possible for O(1) constructor matching.
  */
 const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
   const scrutinee = genAtom(ctx, binding.scrutinee);
@@ -684,6 +798,12 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
   // Check if any case has a guard
   const hasGuards = binding.cases.some((c) => c.guard !== undefined);
 
+  // Use switch-based dispatch for constructor patterns with unique tags
+  if (!hasGuards && canUseSwitchDispatch(binding.cases)) {
+    return genMatchSwitch(ctx, scrutineeVar, scrutinee, binding.cases);
+  }
+
+  // Fall back to if/else chain for guards or mixed patterns
   const lines: string[] = [];
   lines.push(`((${scrutineeVar}) => {`);
 

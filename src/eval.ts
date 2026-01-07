@@ -6,6 +6,11 @@
 
 import type * as ast from "./ast";
 
+/** Helper for exhaustive switch checking - TypeScript will error if called with non-never */
+const assertNever = (x: never): never => {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+};
+
 // =============================================================================
 // Runtime Values
 // =============================================================================
@@ -128,7 +133,10 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
       return vbool(expr.value);
 
     case "Var": {
-      const value = env.get(expr.name)!;
+      const value = env.get(expr.name);
+      if (!value) {
+        throw new RuntimeError(`Undefined variable: ${expr.name}`);
+      }
       // Dereference if it's a ref cell (from letrec)
       if (value.kind === "VRef") {
         if (value.value === null) {
@@ -197,12 +205,20 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
 
     case "FieldAccess": {
       const record = evaluate(env, expr.record) as VRecord;
-      return record.fields.get(expr.field)!;
+      const value = record.fields.get(expr.field);
+      if (value === undefined) {
+        throw new RuntimeError(`Record has no field '${expr.field}'`);
+      }
+      return value;
     }
 
     case "TupleIndex": {
       const tuple = evaluate(env, expr.tuple) as VTuple;
-      return tuple.elements[expr.index]!;
+      const value = tuple.elements[expr.index];
+      if (value === undefined) {
+        throw new RuntimeError(`Tuple index ${expr.index} out of bounds`);
+      }
+      return value;
     }
 
     case "QualifiedVar":
@@ -215,6 +231,9 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
 
     case "Match":
       return evalMatch(env, expr);
+
+    default:
+      return assertNever(expr);
   }
 };
 
@@ -296,12 +315,18 @@ const valuesEqual = (a: Value, b: Value): boolean => {
     case "VCon": {
       const bCon = b as VCon;
       if (a.name !== bCon.name || a.args.length !== bCon.args.length) return false;
-      return a.args.every((arg, i) => valuesEqual(arg, bCon.args[i]!));
+      for (let i = 0; i < a.args.length; i++) {
+        if (!valuesEqual(a.args[i]!, bCon.args[i]!)) return false;
+      }
+      return true;
     }
     case "VTuple": {
       const bTuple = b as VTuple;
       if (a.elements.length !== bTuple.elements.length) return false;
-      return a.elements.every((elem, i) => valuesEqual(elem, bTuple.elements[i]!));
+      for (let i = 0; i < a.elements.length; i++) {
+        if (!valuesEqual(a.elements[i]!, bTuple.elements[i]!)) return false;
+      }
+      return true;
     }
     case "VRecord": {
       const bRecord = b as VRecord;
@@ -445,6 +470,9 @@ const matchPattern = (pattern: ast.Pattern, value: Value): MatchResult => {
       }
       return { matched: false };
     }
+
+    default:
+      return assertNever(pattern);
   }
 };
 

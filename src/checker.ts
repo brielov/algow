@@ -71,6 +71,10 @@ type CheckContext = {
   readonly definitionMap: ReadonlyMap<string, Definition>;
   readonly moduleEnv: ModuleTypeEnv;
   readonly moduleAliases: Map<string, string>; // alias -> real name
+  /** Counter for generating unique type variable names */
+  typeVarCounter: number;
+  /** Direct span to type mapping for lowering */
+  readonly spanTypes: Map<string, Type>;
 };
 
 /**
@@ -93,6 +97,8 @@ const createContext = (
     definitionMap,
     moduleEnv,
     moduleAliases,
+    typeVarCounter: 0,
+    spanTypes: new Map(),
   };
 };
 
@@ -109,13 +115,17 @@ const addError = (ctx: CheckContext, message: string, span?: ast.Span): void => 
 /**
  * Record the type for a definition.
  * Looks up the definition by span in the symbol table.
+ * Also records in spanTypes for direct lookup during lowering.
  */
 const recordType = (ctx: CheckContext, span: ast.Span, type: Type): void => {
   const key = `${span.start}:${span.end}`;
+  // Record for LSP (Definition-keyed)
   const def = ctx.definitionMap.get(key);
   if (def) {
     ctx.types.set(def, type);
   }
+  // Record for lowering (span-keyed)
+  ctx.spanTypes.set(key, type);
 };
 
 // =============================================================================
@@ -379,7 +389,7 @@ export type TypeEnv = Map<string, Scheme>;
  * Substitutions are applied to types to resolve variables to their known values.
  * They compose: if s1 says t0=number and s2 says t1=t0, then s1∘s2 gives t1=number.
  */
-type Subst = Map<string, Type>;
+export type Subst = Map<string, Type>;
 
 /**
  * Maps variable names to types during pattern matching.
@@ -427,7 +437,7 @@ export type ModuleTypeEnv = Map<string, ModuleTypeInfo>;
  * @param type The type to transform
  * @returns The type with all substitutions applied
  */
-const applySubst = (subst: Subst, type: Type): Type => {
+export const applySubst = (subst: Subst, type: Type): Type => {
   switch (type.kind) {
     // Type constructors have no variables to substitute
     case "TCon":
@@ -678,21 +688,17 @@ const bindVar = (ctx: CheckContext, name: string, type: Type): Subst => {
 // =============================================================================
 
 /**
- * Counter for generating unique type variable names.
- * Reset at the start of each inference to give consistent output.
- */
-let typeVarCounter = 0;
-
-/**
  * Generate a fresh type variable with a unique name.
  *
  * Fresh variables are used when we need to represent an unknown type:
  * - Function parameter types (before we know how they're used)
  * - Return types (before we analyze the function body)
  * - Instantiating polymorphic types
+ *
+ * @param ctx The check context containing the type variable counter
  */
-const freshTypeVar = (): Type => {
-  return tvar(`t${typeVarCounter++}`);
+const freshTypeVar = (ctx: CheckContext): Type => {
+  return tvar(`t${ctx.typeVarCounter++}`);
 };
 
 // =============================================================================
@@ -802,7 +808,7 @@ const unifyRecords = (ctx: CheckContext, t1: TRecord, t2: TRecord): Subst => {
   }
 
   // Both records contribute unique fields - create a shared tail
-  const freshRow = freshTypeVar();
+  const freshRow = freshTypeVar(ctx);
   // row1 = { t2's extra fields | freshRow }
   const s1 = unify(ctx, row1, trecord(extraFields2, freshRow));
   currentSubst = composeSubst(currentSubst, s1);
@@ -824,14 +830,15 @@ const unifyRecords = (ctx: CheckContext, t1: TRecord, t2: TRecord): Subst => {
  * Example: Using `id : ∀a. a -> a` creates a fresh instance like `t5 -> t5`.
  * Each use of `id` gets its own fresh variables, allowing different types.
  *
+ * @param ctx The check context for generating fresh variables
  * @param s The scheme to instantiate
  * @returns A fresh monomorphic type
  */
-const instantiate = (s: Scheme): Type => {
+const instantiate = (ctx: CheckContext, s: Scheme): Type => {
   // Create fresh variables for each quantified variable
   const freshVars = new Map<string, Type>();
   for (const name of s.vars) {
-    freshVars.set(name, freshTypeVar());
+    freshVars.set(name, freshTypeVar(ctx));
   }
   // Apply the fresh variable substitution to the type
   return applySubst(freshVars, s.type);
@@ -1072,6 +1079,8 @@ export type CheckOutput = {
   readonly constraints: readonly Constraint[];
   readonly diagnostics: readonly Diagnostic[];
   readonly types: TypeMap;
+  /** Direct span to type mapping for lowering */
+  readonly spanTypes: ReadonlyMap<string, Type>;
 };
 
 /**
@@ -1098,7 +1107,6 @@ export const check = (
   moduleEnv: ModuleTypeEnv = new Map(),
   moduleAliases: Map<string, string> = new Map(),
 ): CheckOutput => {
-  typeVarCounter = 0;
   const ctx = createContext(symbols, moduleEnv, moduleAliases);
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
@@ -1109,6 +1117,7 @@ export const check = (
     constraints: finalConstraints,
     diagnostics: ctx.diagnostics,
     types: ctx.types,
+    spanTypes: ctx.spanTypes,
   };
 };
 
@@ -1201,8 +1210,8 @@ const inferFieldAccess = (
 
   // Case 1: Type variable - constrain to open record with the field
   if (resolvedType.kind === "TVar") {
-    const fieldType = freshTypeVar();
-    const rowVar = freshTypeVar();
+    const fieldType = freshTypeVar(ctx);
+    const rowVar = freshTypeVar(ctx);
     const openRecord = trecord([[expr.field, fieldType]], rowVar);
     const s2 = unify(ctx, resolvedType, openRecord);
     return [composeSubst(s1, s2), applySubst(s2, fieldType), constraints];
@@ -1214,7 +1223,7 @@ const inferFieldAccess = (
       ctx,
       `Cannot access field '${expr.field}' on non-record type: ${typeToString(resolvedType)}`,
     );
-    return [s1, freshTypeVar(), constraints];
+    return [s1, freshTypeVar(ctx), constraints];
   }
 
   // Case 2: Field exists in known fields
@@ -1225,8 +1234,8 @@ const inferFieldAccess = (
 
   // Case 3: Field not in known fields but record is open - constrain the row
   if (resolvedType.row) {
-    const newFieldType = freshTypeVar();
-    const newRowVar = freshTypeVar();
+    const newFieldType = freshTypeVar(ctx);
+    const newRowVar = freshTypeVar(ctx);
     const s2 = unify(ctx, resolvedType.row, trecord([[expr.field, newFieldType]], newRowVar));
     return [composeSubst(s1, s2), applySubst(s2, newFieldType), constraints];
   }
@@ -1236,7 +1245,7 @@ const inferFieldAccess = (
     ctx,
     `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`,
   );
-  return [s1, freshTypeVar(), constraints];
+  return [s1, freshTypeVar(ctx), constraints];
 };
 
 /**
@@ -1258,7 +1267,7 @@ const inferTupleIndex = (
   if (resolvedType.kind === "TVar") {
     // We don't know the tuple arity yet, so create a fresh type for the element
     // and let later unification resolve it
-    const elementType = freshTypeVar();
+    const elementType = freshTypeVar(ctx);
     // We can't fully constrain this without knowing the arity, so just return
     // the fresh type and let pattern matching or other operations constrain it
     return [s1, elementType, constraints];
@@ -1267,7 +1276,7 @@ const inferTupleIndex = (
   // Must be a tuple type
   if (resolvedType.kind !== "TTuple") {
     addError(ctx, `Cannot index into non-tuple type: ${typeToString(resolvedType)}`);
-    return [s1, freshTypeVar(), constraints];
+    return [s1, freshTypeVar(ctx), constraints];
   }
 
   // Check bounds
@@ -1276,7 +1285,7 @@ const inferTupleIndex = (
       ctx,
       `Tuple index ${expr.index} out of bounds for tuple of ${resolvedType.elements.length} element(s)`,
     );
-    return [s1, freshTypeVar(), constraints];
+    return [s1, freshTypeVar(ctx), constraints];
   }
 
   // Return the type at the specified index (bounds already checked above)
@@ -1339,11 +1348,11 @@ const inferAbs = (
 
   if (expr.paramType) {
     // Convert annotation to type, replacing type variables with fresh ones
-    const annotatedType = instantiateTypeExpr(expr.paramType);
+    const annotatedType = instantiateTypeExpr(ctx, expr.paramType);
     paramType = annotatedType;
   } else {
     // No annotation - use fresh type variable
-    paramType = freshTypeVar();
+    paramType = freshTypeVar(ctx);
   }
 
   // Add parameter to environment (monomorphic - empty quantifier list)
@@ -1387,7 +1396,7 @@ const inferApp = (
   const [s2, paramType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.param);
 
   // Fresh variable for result
-  const returnType = freshTypeVar();
+  const returnType = freshTypeVar(ctx);
 
   // The function must have type: argType -> returnType
   const s3 = unify(ctx, applySubst(s2, funcType), tfun(paramType, returnType));
@@ -1533,7 +1542,7 @@ const inferLet = (
   // If there's a return type annotation, unify with the innermost return type
   // (after peeling off all function parameter types)
   if (expr.returnType) {
-    const annotatedType = instantiateTypeExpr(expr.returnType);
+    const annotatedType = instantiateTypeExpr(ctx, expr.returnType);
     // Peel off function types to get to the return type
     let currentType = applySubst(s1, valueType);
     while (currentType.kind === "TFun") {
@@ -1591,7 +1600,7 @@ const inferLetRec = (
   const envWithPlaceholders = new Map(env);
 
   for (const binding of expr.bindings) {
-    const placeholder = freshTypeVar();
+    const placeholder = freshTypeVar(ctx);
     placeholders.set(binding.name, placeholder);
     envWithPlaceholders.set(binding.name, scheme([], placeholder));
   }
@@ -1612,7 +1621,7 @@ const inferLetRec = (
 
     // If there's a return type annotation, unify with the innermost return type
     if (binding.returnType) {
-      const annotatedType = instantiateTypeExpr(binding.returnType);
+      const annotatedType = instantiateTypeExpr(ctx, binding.returnType);
       // Peel off function types to get to the return type
       let currentType = applySubst(subst, valueType);
       while (currentType.kind === "TFun") {
@@ -1676,10 +1685,10 @@ const inferVar = (ctx: CheckContext, env: TypeEnv, expr: ast.Var): InferResult =
   if (!s) {
     // Don't duplicate error if binder already reported it
     // Just return a fresh type variable to continue checking
-    return [new Map(), freshTypeVar(), []];
+    return [new Map(), freshTypeVar(ctx), []];
   }
   // Instantiate with fresh variables
-  return [new Map(), instantiate(s), []];
+  return [new Map(), instantiate(ctx, s), []];
 };
 
 /**
@@ -1696,18 +1705,18 @@ const inferQualifiedVar = (ctx: CheckContext, expr: ast.QualifiedVar): InferResu
   const mod = ctx.moduleEnv.get(realModule);
   if (!mod) {
     addError(ctx, `Unknown module: ${expr.moduleName}`, expr.span);
-    return [new Map(), freshTypeVar(), []];
+    return [new Map(), freshTypeVar(ctx), []];
   }
 
   // Look up member in module
   const s = mod.typeEnv.get(expr.member);
   if (!s) {
     addError(ctx, `Module '${expr.moduleName}' does not export '${expr.member}'`, expr.span);
-    return [new Map(), freshTypeVar(), []];
+    return [new Map(), freshTypeVar(ctx), []];
   }
 
   // Instantiate with fresh variables
-  return [new Map(), instantiate(s), []];
+  return [new Map(), instantiate(ctx, s), []];
 };
 
 // =============================================================================
@@ -1813,7 +1822,7 @@ const inferPattern = (
       }
 
       // Instantiate constructor type
-      const conType = instantiate(conScheme);
+      const conType = instantiate(ctx, conScheme);
 
       // Extract argument types from the constructor's function type
       // Con a (Con b c) has type: a -> b -> c -> Result
@@ -1872,7 +1881,7 @@ const inferPattern = (
       }
 
       // Instantiate constructor type
-      const conType = instantiate(conScheme);
+      const conType = instantiate(ctx, conScheme);
 
       // Extract argument types from the constructor's function type
       const argTypes: Type[] = [];
@@ -1919,7 +1928,7 @@ const inferPattern = (
         const allBindings: PatternBindings = new Map();
 
         for (const field of pattern.fields) {
-          const fieldType = freshTypeVar();
+          const fieldType = freshTypeVar(ctx);
           fieldTypes.set(field.name, fieldType);
           const [s, bindings] = inferPattern(ctx, env, field.pattern, fieldType, currentSubst);
           currentSubst = s;
@@ -1929,7 +1938,7 @@ const inferPattern = (
         }
 
         // Create open record (may have more fields)
-        const rowVar = freshTypeVar();
+        const rowVar = freshTypeVar(ctx);
         const recordType = trecord([...fieldTypes.entries()], rowVar);
         const s = unify(ctx, applySubst(currentSubst, expectedType), recordType);
         return [composeSubst(currentSubst, s), allBindings];
@@ -1949,8 +1958,8 @@ const inferPattern = (
 
         // Field not in known fields but record is open
         if (!fieldType && expectedResolved.row) {
-          const newFieldType = freshTypeVar();
-          const newRowVar = freshTypeVar();
+          const newFieldType = freshTypeVar(ctx);
+          const newRowVar = freshTypeVar(ctx);
           const s = unify(
             ctx,
             applySubst(currentSubst, expectedResolved.row),
@@ -1988,7 +1997,7 @@ const inferPattern = (
         const allBindings: PatternBindings = new Map();
 
         for (const elem of pattern.elements) {
-          const elemType = freshTypeVar();
+          const elemType = freshTypeVar(ctx);
           elemTypes.push(elemType);
           const [s, bindings] = inferPattern(ctx, env, elem, elemType, currentSubst);
           currentSubst = s;
@@ -2125,7 +2134,7 @@ const inferMatch = (
 ): InferResult => {
   if (expr.cases.length === 0) {
     addError(ctx, "Match expression must have at least one case");
-    return [new Map(), freshTypeVar(), []];
+    return [new Map(), freshTypeVar(ctx), []];
   }
 
   // Infer scrutinee type
@@ -2250,7 +2259,7 @@ const PRIMITIVE_TYPES = new Set(["number", "string", "boolean"]);
  *
  * Returns the instantiated type and a substitution mapping the fresh variables.
  */
-const instantiateTypeExpr = (texpr: ast.TypeExpr): Type => {
+const instantiateTypeExpr = (ctx: CheckContext, texpr: ast.TypeExpr): Type => {
   const varMapping = new Map<string, Type>();
 
   const convert = (t: ast.TypeExpr): Type => {
@@ -2269,7 +2278,7 @@ const instantiateTypeExpr = (texpr: ast.TypeExpr): Type => {
         // Replace type variable with a fresh one (cached for consistency)
         let fresh = varMapping.get(t.name);
         if (!fresh) {
-          fresh = freshTypeVar();
+          fresh = freshTypeVar(ctx);
           varMapping.set(t.name, fresh);
         }
         return fresh;

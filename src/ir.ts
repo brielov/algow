@@ -10,7 +10,12 @@
  * The IR is typed - every node carries its inferred type from the type checker.
  * This enables type-directed code generation and optimizations.
  *
- * Pipeline: AST → (lower) → IR → (closureConvert) → IRProgram → (backend) → JS/WASM
+ * Pipelines:
+ * - JavaScript: AST → lower → IR → optimize → backend/js → JavaScript
+ *   (uses native closures directly via IRLambdaBinding)
+ *
+ * - Go/WASM: AST → lower → IR → optimize → closureConvert → IRProgram → backend → code
+ *   (requires explicit closure conversion to IRClosureBinding + IRFunction)
  */
 
 import type { Op } from "./ast";
@@ -239,6 +244,7 @@ export type IRLambdaBinding = {
 /**
  * Explicit closure (after closure conversion).
  * Pairs a lifted function name with its captured environment.
+ * Used by backends that don't support native closures (e.g., Go, WASM).
  */
 export type IRClosureBinding = {
   readonly kind: "IRClosureBinding";
@@ -328,12 +334,13 @@ export type IRPOr = {
 };
 
 // =============================================================================
-// IR PROGRAM (after closure conversion)
+// IR PROGRAM (for backends requiring closure conversion)
 // =============================================================================
 
 /**
  * A lifted function (after closure conversion).
  * Top-level function with explicit environment parameter.
+ * Used by backends that don't support native closures (e.g., Go, WASM).
  */
 export type IRFunction = {
   readonly id: string; // Unique function identifier
@@ -347,6 +354,7 @@ export type IRFunction = {
 
 /**
  * Complete IR program ready for code generation.
+ * Contains lifted top-level functions and the main expression.
  */
 export type IRProgram = {
   readonly functions: readonly IRFunction[]; // Lifted functions

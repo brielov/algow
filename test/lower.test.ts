@@ -10,6 +10,7 @@ const makeCheckOutput = (subst: Map<string, Type> = new Map()): CheckOutput => (
   diagnostics: [],
   constraints: [],
   types: new Map(),
+  spanTypes: new Map(),
 });
 
 // Create type environment with common bindings
