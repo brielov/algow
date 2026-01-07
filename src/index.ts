@@ -1,5 +1,11 @@
 import { bindWithConstructors } from "./binder";
-import { check, processModules, processUseStatements, typeToString } from "./checker";
+import {
+  check,
+  processDeclarations,
+  processModules,
+  processUseStatements,
+  typeToString,
+} from "./checker";
 import { createConstructorEnv, evaluate, valueToString, type Env } from "./eval";
 import { generateJS } from "./backend/js";
 import { generateGo } from "./backend/go";
@@ -110,10 +116,26 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
     moduleEnv,
   );
 
+  // Process top-level type declarations
+  const {
+    typeEnv: declEnv,
+    registry: declRegistry,
+    constructorNames: declConstructors,
+  } = processDeclarations(parseResult.program.declarations);
+
+  // Merge type declarations into the environment
+  const typeEnv = new Map(localEnv);
+  for (const [k, v] of declEnv) typeEnv.set(k, v);
+
+  const registry = new Map(localRegistry);
+  for (const [k, v] of declRegistry) registry.set(k, v);
+
+  const allConstructorNames = [...constructorNames, ...declConstructors];
+
   return {
-    typeEnv: localEnv,
-    registry: localRegistry,
-    constructorNames,
+    typeEnv,
+    registry,
+    constructorNames: allConstructorNames,
     allModules,
     allUses,
     moduleEnv,

@@ -419,7 +419,9 @@ const parseConstructor = (state: ParserState): ast.ConDecl | null => {
     atAny(state, TokenKind.Lower, TokenKind.Upper, TokenKind.LParen) &&
     !atNewStatement(state)
   ) {
-    const field = parseTypeAtom(state);
+    // Use parseTypeAtomSimple to get individual types without type application
+    // This ensures `Bin Expr Expr` is parsed as two Expr fields, not one `Expr Expr` field
+    const field = parseTypeAtomSimple(state);
     if (field) fields.push(field);
     else break;
   }
