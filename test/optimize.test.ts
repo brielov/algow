@@ -200,7 +200,10 @@ describe("Optimizations", () => {
         if (result.body.kind === "IRLet") {
           expect(result.body.name).toBe("y");
           expect(result.body.binding.kind).toBe("IRAtomBinding");
-          if (result.body.binding.kind === "IRAtomBinding" && result.body.binding.atom.kind === "IRLit") {
+          if (
+            result.body.binding.kind === "IRAtomBinding" &&
+            result.body.binding.atom.kind === "IRLit"
+          ) {
             expect(result.body.binding.atom.value).toBe(5);
           }
         }
@@ -228,7 +231,11 @@ describe("Optimizations", () => {
 
       // Navigate to z's binding
       expect(result.kind).toBe("IRLet");
-      if (result.kind === "IRLet" && result.body.kind === "IRLet" && result.body.body.kind === "IRLet") {
+      if (
+        result.kind === "IRLet" &&
+        result.body.kind === "IRLet" &&
+        result.body.body.kind === "IRLet"
+      ) {
         const zBinding = result.body.body.binding;
         expect(zBinding.kind).toBe("IRAtomBinding");
         if (zBinding.kind === "IRAtomBinding" && zBinding.atom.kind === "IRLit") {

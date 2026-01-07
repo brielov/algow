@@ -487,6 +487,212 @@ export const constantFolding: OptPass = {
 };
 
 // =============================================================================
+// COPY PROPAGATION AND ANF SIMPLIFICATION
+// =============================================================================
+
+/**
+ * Environment mapping variable names to their replacement atoms.
+ * Used for copy propagation.
+ */
+type CopyEnv = Map<string, ir.IRAtom>;
+
+/**
+ * Replace an atom using the copy environment.
+ */
+const copyAtom = (atom: ir.IRAtom, env: CopyEnv): ir.IRAtom => {
+  if (atom.kind === "IRVar") {
+    const replacement = env.get(atom.name);
+    if (replacement) {
+      // Recursively resolve chains: x -> y -> z
+      return copyAtom(replacement, env);
+    }
+  }
+  return atom;
+};
+
+/**
+ * Simplify an expression by propagating copies and eliminating trivial lets.
+ */
+const simplifyExpr = (expr: ir.IRExpr, env: CopyEnv): ir.IRExpr => {
+  switch (expr.kind) {
+    case "IRAtomExpr": {
+      const newAtom = copyAtom(expr.atom, env);
+      if (newAtom !== expr.atom) {
+        return ir.irAtomExpr(newAtom);
+      }
+      return expr;
+    }
+
+    case "IRLet": {
+      const simplifiedBinding = simplifyBinding(expr.binding, env);
+
+      // Check for trivial binding: let x = y in body
+      // If binding is just an atom, we can propagate it
+      if (simplifiedBinding.kind === "IRAtomBinding") {
+        const newEnv = new Map(env);
+        newEnv.set(expr.name, simplifiedBinding.atom);
+        const simplifiedBody = simplifyExpr(expr.body, newEnv);
+
+        // Check if body is just the variable we bound: let x = y in x => y
+        if (
+          simplifiedBody.kind === "IRAtomExpr" &&
+          simplifiedBody.atom.kind === "IRVar" &&
+          simplifiedBody.atom.name === expr.name
+        ) {
+          return ir.irAtomExpr(simplifiedBinding.atom);
+        }
+
+        // Keep the let but with simplified body (DCE will remove if unused)
+        return ir.irLet(expr.name, simplifiedBinding, simplifiedBody);
+      }
+
+      // Non-trivial binding - just simplify the body
+      const simplifiedBody = simplifyExpr(expr.body, env);
+      return ir.irLet(expr.name, simplifiedBinding, simplifiedBody);
+    }
+
+    case "IRLetRec": {
+      const newBindings = expr.bindings.map((b) => ({
+        name: b.name,
+        binding: simplifyBinding(b.binding, env),
+      }));
+      const simplifiedBody = simplifyExpr(expr.body, env);
+      return ir.irLetRec(newBindings, simplifiedBody);
+    }
+  }
+};
+
+/**
+ * Simplify atoms within a binding.
+ */
+const simplifyBinding = (binding: ir.IRBinding, env: CopyEnv): ir.IRBinding => {
+  switch (binding.kind) {
+    case "IRAtomBinding": {
+      const newAtom = copyAtom(binding.atom, env);
+      if (newAtom !== binding.atom) {
+        return ir.irAtomBinding(newAtom);
+      }
+      return binding;
+    }
+
+    case "IRAppBinding": {
+      const func = copyAtom(binding.func, env);
+      const arg = copyAtom(binding.arg, env);
+      if (func !== binding.func || arg !== binding.arg) {
+        return ir.irAppBinding(func, arg, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRBinOpBinding": {
+      const left = copyAtom(binding.left, env);
+      const right = copyAtom(binding.right, env);
+      if (left !== binding.left || right !== binding.right) {
+        return ir.irBinOpBinding(binding.op, left, right, binding.operandType, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRIfBinding": {
+      const cond = copyAtom(binding.cond, env);
+      const thenBranch = simplifyExpr(binding.thenBranch, env);
+      const elseBranch = simplifyExpr(binding.elseBranch, env);
+      if (
+        cond !== binding.cond ||
+        thenBranch !== binding.thenBranch ||
+        elseBranch !== binding.elseBranch
+      ) {
+        return ir.irIfBinding(cond, thenBranch, elseBranch, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRTupleBinding": {
+      const elements = binding.elements.map((e) => copyAtom(e, env));
+      const changed = elements.some((e, i) => e !== binding.elements[i]);
+      if (changed) {
+        return ir.irTupleBinding(elements, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRRecordBinding": {
+      const fields = binding.fields.map((f) => ({
+        name: f.name,
+        value: copyAtom(f.value, env),
+      }));
+      const changed = fields.some((f, i) => f.value !== binding.fields[i]?.value);
+      if (changed) {
+        return ir.irRecordBinding(fields, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRFieldAccessBinding": {
+      const record = copyAtom(binding.record, env);
+      if (record !== binding.record) {
+        return ir.irFieldAccessBinding(record, binding.field, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRTupleIndexBinding": {
+      const tuple = copyAtom(binding.tuple, env);
+      if (tuple !== binding.tuple) {
+        return ir.irTupleIndexBinding(tuple, binding.index, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRMatchBinding": {
+      const scrutinee = copyAtom(binding.scrutinee, env);
+      const cases = binding.cases.map((c) => ({
+        pattern: c.pattern,
+        guard: c.guard ? simplifyExpr(c.guard, env) : undefined,
+        body: simplifyExpr(c.body, env),
+      }));
+      return ir.irMatchBinding(scrutinee, cases, binding.type);
+    }
+
+    case "IRLambdaBinding": {
+      // Don't propagate into lambda bodies - they have their own scope
+      // But we do simplify the body
+      return ir.irLambdaBinding(
+        binding.param,
+        binding.paramType,
+        simplifyExpr(binding.body, new Map()),
+        binding.type,
+        binding.tailRecursive,
+      );
+    }
+
+    case "IRClosureBinding": {
+      const captures = binding.captures.map((c) => copyAtom(c, env));
+      const changed = captures.some((c, i) => c !== binding.captures[i]);
+      if (changed) {
+        return ir.irClosureBinding(binding.funcId, captures, binding.type);
+      }
+      return binding;
+    }
+  }
+};
+
+/**
+ * Copy Propagation and ANF Simplification Pass
+ *
+ * Simplifies the IR by:
+ * - Propagating variable copies: `let x = y in x + 1` → `y + 1`
+ * - Eliminating trivial lets: `let x = y in x` → `y`
+ * - Resolving copy chains: `let x = y in let z = x in z` → `y`
+ */
+export const copyPropagation: OptPass = {
+  name: "copy-propagation",
+  run(expr) {
+    return simplifyExpr(expr, new Map());
+  },
+};
+
+// =============================================================================
 // DEAD CODE ELIMINATION
 // =============================================================================
 
@@ -600,71 +806,105 @@ const isPure = (_binding: ir.IRBinding): boolean => {
  *
  * Removes bindings that are never used.
  * Only removes pure bindings (those without side effects).
+ *
+ * For recursive bindings (IRLetRec), we need special handling:
+ * - Self-references within a binding don't count as "uses"
+ * - Only references from the body or from OTHER bindings count
  */
 export const deadCodeElimination: OptPass = {
   name: "dead-code-elimination",
   run(expr) {
-    // Collect all variable uses
-    const uses = new Map<string, number>();
-    collectUses(expr, uses);
-
-    // Remove unused bindings
-    return removeUnused(expr, uses);
+    return removeUnusedExpr(expr);
   },
 };
 
 /**
- * Remove unused bindings from an expression.
+ * Remove unused bindings from an expression, computing uses locally.
+ * This properly handles recursive bindings by not counting self-references.
  */
-const removeUnused = (expr: ir.IRExpr, uses: Map<string, number>): ir.IRExpr => {
+const removeUnusedExpr = (expr: ir.IRExpr): ir.IRExpr => {
   switch (expr.kind) {
     case "IRAtomExpr":
       return expr;
 
     case "IRLet": {
-      const newBody = removeUnused(expr.body, uses);
+      const newBinding = removeUnusedInBinding(expr.binding);
+      const newBody = removeUnusedExpr(expr.body);
 
-      // Check if this binding is used
+      // Check if this binding is used in the body
+      const uses = new Map<string, number>();
+      collectUses(newBody, uses);
+
       const usageCount = uses.get(expr.name) ?? 0;
-
-      // If unused and pure, skip this let and return the body
-      if (usageCount === 0 && isPure(expr.binding)) {
+      if (usageCount === 0 && isPure(newBinding)) {
         return newBody;
       }
 
-      // Otherwise, keep the binding (with transformed body)
-      const newBinding = removeUnusedBinding(expr.binding, uses);
       return ir.irLet(expr.name, newBinding, newBody);
     }
 
     case "IRLetRec": {
-      const newBody = removeUnused(expr.body, uses);
+      // First, recursively process all binding bodies
+      const processedBindings = expr.bindings.map((b) => ({
+        name: b.name,
+        binding: removeUnusedInBinding(b.binding),
+      }));
+      const newBody = removeUnusedExpr(expr.body);
 
-      // Filter out unused bindings
-      const usedBindings = expr.bindings.filter((b) => {
-        const usageCount = uses.get(b.name) ?? 0;
-        return usageCount > 0 || !isPure(b.binding);
-      });
+      // Collect uses from the body only
+      const bodyUses = new Map<string, number>();
+      collectUses(newBody, bodyUses);
 
-      // If all bindings removed, return body
+      // Find which bindings are used (directly or transitively)
+      const usedSet = new Set<string>();
+
+      // Start with bindings directly used in the body
+      for (const b of processedBindings) {
+        if ((bodyUses.get(b.name) ?? 0) > 0) {
+          usedSet.add(b.name);
+        }
+      }
+
+      // Transitively find all bindings used by used bindings
+      // (e.g., if `length` uses `foldr`, and `length` is used, then `foldr` is used)
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const b of processedBindings) {
+          if (usedSet.has(b.name)) continue;
+
+          // Check if any used binding references this one
+          for (const usedName of usedSet) {
+            const usedBinding = processedBindings.find((x) => x.name === usedName);
+            if (usedBinding) {
+              const bindingUses = new Map<string, number>();
+              collectUsesBinding(usedBinding.binding, bindingUses);
+              if ((bindingUses.get(b.name) ?? 0) > 0) {
+                usedSet.add(b.name);
+                changed = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Filter to only used bindings
+      const usedBindings = processedBindings.filter((b) => usedSet.has(b.name));
+
       if (usedBindings.length === 0) {
         return newBody;
       }
 
-      const newBindings = usedBindings.map((b) => ({
-        name: b.name,
-        binding: removeUnusedBinding(b.binding, uses),
-      }));
-
-      return ir.irLetRec(newBindings, newBody);
+      return ir.irLetRec(usedBindings, newBody);
     }
   }
 };
 
 /**
- * Remove unused bindings from nested expressions within a binding.
+ * Remove unused bindings inside a binding (recurse into nested expressions).
  */
-const removeUnusedBinding = (binding: ir.IRBinding, uses: Map<string, number>): ir.IRBinding => {
+const removeUnusedInBinding = (binding: ir.IRBinding): ir.IRBinding => {
   switch (binding.kind) {
     case "IRAtomBinding":
     case "IRAppBinding":
@@ -679,8 +919,8 @@ const removeUnusedBinding = (binding: ir.IRBinding, uses: Map<string, number>): 
     case "IRIfBinding":
       return ir.irIfBinding(
         binding.cond,
-        removeUnused(binding.thenBranch, uses),
-        removeUnused(binding.elseBranch, uses),
+        removeUnusedExpr(binding.thenBranch),
+        removeUnusedExpr(binding.elseBranch),
         binding.type,
       );
 
@@ -689,8 +929,8 @@ const removeUnusedBinding = (binding: ir.IRBinding, uses: Map<string, number>): 
         binding.scrutinee,
         binding.cases.map((c) => ({
           pattern: c.pattern,
-          guard: c.guard ? removeUnused(c.guard, uses) : undefined,
-          body: removeUnused(c.body, uses),
+          guard: c.guard ? removeUnusedExpr(c.guard) : undefined,
+          body: removeUnusedExpr(c.body),
         })),
         binding.type,
       );
@@ -699,8 +939,9 @@ const removeUnusedBinding = (binding: ir.IRBinding, uses: Map<string, number>): 
       return ir.irLambdaBinding(
         binding.param,
         binding.paramType,
-        removeUnused(binding.body, uses),
+        removeUnusedExpr(binding.body),
         binding.type,
+        binding.tailRecursive,
       );
   }
 };
@@ -1141,6 +1382,7 @@ const transformBindingTCO = (binding: ir.IRBinding): ir.IRBinding => {
  */
 const defaultPasses: readonly OptPass[] = [
   constantFolding,
+  copyPropagation,
   deadCodeElimination,
   tailCallOptimization,
 ];

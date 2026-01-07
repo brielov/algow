@@ -276,7 +276,8 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", numType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("$apply(f, 1)");
+      // Direct call since f is a known function (not a constructor)
+      expect(result.code).toContain("f(1)");
     });
   });
 
