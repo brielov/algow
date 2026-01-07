@@ -1374,6 +1374,36 @@ describe("Parser", () => {
         ast.dataDecl("Wrapper", [], [ast.conDecl("Wrap", [ast.tycon("Int")])]),
       );
     });
+
+    it("parses multiple same-type constructor fields as separate fields", () => {
+      // Regression test: `Bin Expr Expr` should be two Expr fields,
+      // not one field of type `Expr Expr` (type application)
+      const result = parse("type Expr = Lit number | Bin Expr Expr");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.declarations[0])).toEqual(
+        ast.dataDecl(
+          "Expr",
+          [],
+          [
+            ast.conDecl("Lit", [ast.tyvar("number")]),
+            ast.conDecl("Bin", [ast.tycon("Expr"), ast.tycon("Expr")]),
+          ],
+        ),
+      );
+    });
+
+    it("parses constructor with three same-type fields", () => {
+      // Further regression test for multiple same-type fields
+      const result = parse("type Triple = MkTriple Int Int Int");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.declarations[0])).toEqual(
+        ast.dataDecl(
+          "Triple",
+          [],
+          [ast.conDecl("MkTriple", [ast.tycon("Int"), ast.tycon("Int"), ast.tycon("Int")])],
+        ),
+      );
+    });
   });
 
   describe("top-level bindings", () => {

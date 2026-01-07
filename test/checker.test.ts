@@ -2095,6 +2095,55 @@ describe("Type Inference", () => {
       expect(result.constructorNames).toContain("Left");
       expect(result.constructorNames).toContain("Right");
     });
+
+    it("processes recursive type with multiple same-type fields", () => {
+      // Regression test: type Expr = Lit number | Bin Expr Expr
+      // Bin should have type: Expr -> Expr -> Expr (curried)
+      const exprDecl = ast.dataDecl(
+        "Expr",
+        [],
+        [
+          ast.conDecl("Lit", [ast.tyvar("number")]),
+          ast.conDecl("Bin", [ast.tycon("Expr"), ast.tycon("Expr")]),
+        ],
+      );
+
+      const result = processDeclarations([exprDecl]);
+      expect(result.typeEnv.has("Lit")).toBe(true);
+      expect(result.typeEnv.has("Bin")).toBe(true);
+      expect(result.constructorNames).toContain("Lit");
+      expect(result.constructorNames).toContain("Bin");
+
+      // Check that Bin has the correct type: Expr -> Expr -> Expr
+      const binScheme = result.typeEnv.get("Bin");
+      expect(binScheme).toBeDefined();
+      expect(typeToString(binScheme!.type)).toBe("Expr -> Expr -> Expr");
+    });
+
+    it("processes parameterized recursive type", () => {
+      // type Tree a = Leaf | Node a (Tree a) (Tree a)
+      const treeDecl = ast.dataDecl(
+        "Tree",
+        ["a"],
+        [
+          ast.conDecl("Leaf", []),
+          ast.conDecl("Node", [
+            ast.tyvar("a"),
+            ast.tyapp(ast.tycon("Tree"), ast.tyvar("a")),
+            ast.tyapp(ast.tycon("Tree"), ast.tyvar("a")),
+          ]),
+        ],
+      );
+
+      const result = processDeclarations([treeDecl]);
+      expect(result.typeEnv.has("Leaf")).toBe(true);
+      expect(result.typeEnv.has("Node")).toBe(true);
+
+      // Check that Node has the correct type: a -> Tree a -> Tree a -> Tree a
+      const nodeScheme = result.typeEnv.get("Node");
+      expect(nodeScheme).toBeDefined();
+      expect(typeToString(nodeScheme!.type)).toBe("a -> Tree a -> Tree a -> Tree a");
+    });
   });
 
   describe("type annotations", () => {
