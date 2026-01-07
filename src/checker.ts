@@ -2970,29 +2970,76 @@ export const processDeclarations = (
 
 /**
  * Process a single module declaration.
- * Returns the module's type information.
+ * Returns the module's type information including typed bindings.
  */
-export const processModule = (mod: ast.ModuleDecl): ModuleTypeInfo => {
+export const processModule = (
+  mod: ast.ModuleDecl,
+  baseEnv?: TypeEnv,
+  baseRegistry?: ConstructorRegistry,
+): ModuleTypeInfo => {
   // Process data declarations
   const { typeEnv: dataEnv, registry, constructorNames } = processDeclarations(mod.declarations);
 
-  // For now, we just include the data declarations
-  // Module bindings would require type inference, which we'll add later
-  // For bindings, we'd need to run the full type checker
+  // Merge with base environment (for prelude dependencies)
+  const env: TypeEnv = new Map(baseEnv);
+  for (const [k, v] of dataEnv) env.set(k, v);
 
-  return { typeEnv: dataEnv, registry, constructorNames };
+  const fullRegistry: ConstructorRegistry = new Map(baseRegistry);
+  for (const [k, v] of registry) fullRegistry.set(k, v);
+
+  // Type-check module bindings
+  if (mod.bindings.length > 0) {
+    // Build a LetRec expression from the bindings to type-check them together
+    const dummyBody = ast.num(0);
+    const letRec = ast.letRec(mod.bindings, dummyBody);
+
+    // Type-check with constructors in scope
+    const allConstructors = [...(baseRegistry?.values() ?? [])].flat();
+    allConstructors.push(...constructorNames);
+
+    // Use empty symbol table for module type-checking (no LSP features needed)
+    const emptySymbols: SymbolTable = { definitions: [], references: [] };
+    const checkResult = check(env, fullRegistry, letRec, emptySymbols);
+
+    // Extract the inferred types for each binding
+    if (letRec.kind === "LetRec") {
+      const subst = checkResult.subst;
+      for (const binding of letRec.bindings) {
+        const bindingScheme = env.get(binding.name);
+        if (bindingScheme) {
+          // Already in env from check
+        } else {
+          // Infer the type from the binding's value
+          const bindingResult = check(env, fullRegistry, binding.value, emptySymbols);
+          const resolvedType = applySubst(subst, bindingResult.type);
+          const scheme = generalize(env, resolvedType);
+          env.set(binding.name, scheme);
+        }
+      }
+    }
+  }
+
+  return { typeEnv: env, registry: fullRegistry, constructorNames };
 };
 
 /**
  * Process multiple module declarations.
- * Returns a map from module names to their type information.
+ * Modules are processed in order, allowing later modules to depend on earlier ones.
  */
 export const processModules = (modules: readonly ast.ModuleDecl[]): ModuleTypeEnv => {
   const result: ModuleTypeEnv = new Map();
 
+  // Accumulate environment as we process modules
+  let accEnv: TypeEnv = new Map();
+  let accRegistry: ConstructorRegistry = new Map();
+
   for (const mod of modules) {
-    const info = processModule(mod);
+    const info = processModule(mod, accEnv, accRegistry);
     result.set(mod.name, info);
+
+    // Accumulate for next module
+    for (const [k, v] of info.typeEnv) accEnv.set(k, v);
+    for (const [k, v] of info.registry) accRegistry.set(k, v);
   }
 
   return result;

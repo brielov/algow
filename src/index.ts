@@ -1,12 +1,13 @@
 import { bindWithConstructors } from "./binder";
-import { check, processDeclarations, typeToString } from "./checker";
-import { createConstructorEnv, evaluate, type Env } from "./eval";
+import { check, processModules, processUseStatements, typeToString } from "./checker";
+import { createConstructorEnv, evaluate, valueToString, type Env } from "./eval";
 import { generateJS } from "./backend/js";
 import { lowerToIR } from "./lower";
 import { offsetToLineCol } from "./lsp/positions";
 import { optimize } from "./optimize";
 import { type Diagnostic, parse, programToExpr } from "./parser";
-import { declarations as preludeDeclarations, wrapWithPrelude } from "./prelude";
+import { modules as preludeModules } from "./prelude";
+import * as ast from "./ast";
 
 // ANSI color codes
 const RED = "\x1b[31m";
@@ -90,31 +91,53 @@ const printDiagnostics = (
   }
 };
 
+/** Implicit use statements for prelude modules (import everything) */
+const preludeUses: ast.UseDecl[] = preludeModules.map((mod) =>
+  ast.useDecl(mod.name, ast.importAll()),
+);
+
+/** Process a program with prelude */
+const processProgram = (parseResult: ReturnType<typeof parse>) => {
+  // Combine prelude + user
+  const allModules = [...preludeModules, ...parseResult.program.modules];
+  const allUses = [...preludeUses, ...parseResult.program.uses];
+
+  // Process modules and use statements
+  const moduleEnv = processModules(allModules);
+  const { localEnv, localRegistry, constructorNames, aliases } = processUseStatements(
+    allUses,
+    moduleEnv,
+  );
+
+  return {
+    typeEnv: localEnv,
+    registry: localRegistry,
+    constructorNames,
+    allModules,
+    allUses,
+    moduleEnv,
+    aliases,
+  };
+};
+
 const run = (source: string, filename: string): void => {
   const diagnostics: Diagnostic[] = [];
   const parseResult = parse(source);
   diagnostics.push(...parseResult.diagnostics);
 
-  const expr = programToExpr(parseResult.program);
+  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
+    processProgram(parseResult);
+
+  const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
     console.error(`${filename}: No expression to evaluate`);
     process.exit(1);
   }
 
-  // Wrap expression with prelude functions
-  const wrappedExpr = wrapWithPrelude(expr);
-
-  // Process prelude + user data declarations
-  const prelude = processDeclarations(preludeDeclarations);
-  const { typeEnv, registry, constructorNames } = processDeclarations(
-    parseResult.program.declarations,
-    prelude,
-  );
-
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
+  const bindResult = bindWithConstructors(constructorNames, expr);
   diagnostics.push(...bindResult.diagnostics);
-  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
   diagnostics.push(...checkResult.diagnostics);
 
   if (diagnostics.length > 0) {
@@ -124,37 +147,30 @@ const run = (source: string, filename: string): void => {
 
   // Evaluate with constructor environment
   const evalEnv: Env = createConstructorEnv(constructorNames);
-  const result = evaluate(evalEnv, wrappedExpr);
-  console.log(result);
+  const result = evaluate(evalEnv, expr);
+  console.log(valueToString(result));
 };
 
 const typeCheck = (source: string, filename: string): void => {
   const parseResult = parse(source);
-  const expr = programToExpr(parseResult.program);
 
   if (parseResult.diagnostics.length > 0) {
     printDiagnostics(parseResult.diagnostics, source, filename);
     process.exit(1);
   }
 
+  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
+    processProgram(parseResult);
+
+  const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
     console.error(`${filename}: No expression to type check`);
     process.exit(1);
   }
 
-  // Wrap expression with prelude functions
-  const wrappedExpr = wrapWithPrelude(expr);
-
-  // Process prelude + user data declarations
-  const prelude = processDeclarations(preludeDeclarations);
-  const { typeEnv, registry, constructorNames } = processDeclarations(
-    parseResult.program.declarations,
-    prelude,
-  );
-
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
-  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
+  const bindResult = bindWithConstructors(constructorNames, expr);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -167,31 +183,24 @@ const typeCheck = (source: string, filename: string): void => {
 
 const emitIR = (source: string, filename: string): void => {
   const parseResult = parse(source);
-  const expr = programToExpr(parseResult.program);
 
   if (parseResult.diagnostics.length > 0) {
     printDiagnostics(parseResult.diagnostics, source, filename);
     process.exit(1);
   }
 
+  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
+    processProgram(parseResult);
+
+  const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
     console.error(`${filename}: No expression to lower`);
     process.exit(1);
   }
 
-  // Wrap expression with prelude functions
-  const wrappedExpr = wrapWithPrelude(expr);
-
-  // Process prelude + user data declarations
-  const prelude = processDeclarations(preludeDeclarations);
-  const { typeEnv, registry, constructorNames } = processDeclarations(
-    parseResult.program.declarations,
-    prelude,
-  );
-
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
-  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
+  const bindResult = bindWithConstructors(constructorNames, expr);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -200,37 +209,30 @@ const emitIR = (source: string, filename: string): void => {
   }
 
   // Lower to IR
-  const ir = lowerToIR(wrappedExpr, typeEnv, checkResult);
+  const ir = lowerToIR(expr, typeEnv, checkResult);
   console.log(JSON.stringify(ir, null, 2));
 };
 
 const compile = (source: string, filename: string): void => {
   const parseResult = parse(source);
-  const expr = programToExpr(parseResult.program);
 
   if (parseResult.diagnostics.length > 0) {
     printDiagnostics(parseResult.diagnostics, source, filename);
     process.exit(1);
   }
 
+  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
+    processProgram(parseResult);
+
+  const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
     console.error(`${filename}: No expression to compile`);
     process.exit(1);
   }
 
-  // Wrap expression with prelude functions
-  const wrappedExpr = wrapWithPrelude(expr);
-
-  // Process prelude + user data declarations
-  const prelude = processDeclarations(preludeDeclarations);
-  const { typeEnv, registry, constructorNames } = processDeclarations(
-    parseResult.program.declarations,
-    prelude,
-  );
-
   // Bind and type check
-  const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
-  const checkResult = check(typeEnv, registry, wrappedExpr, bindResult.symbols);
+  const bindResult = bindWithConstructors(constructorNames, expr);
+  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -239,7 +241,7 @@ const compile = (source: string, filename: string): void => {
   }
 
   // Lower to IR, optimize, and generate JS
-  let ir = lowerToIR(wrappedExpr, typeEnv, checkResult);
+  let ir = lowerToIR(expr, typeEnv, checkResult);
   ir = optimize(ir);
   const output = generateJS(ir, constructorNames);
 

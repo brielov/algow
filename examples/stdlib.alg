@@ -27,21 +27,21 @@ end
 -- Append two lists
 let rec append xs ys = match xs
   when Nil -> ys
-  when Cons x rest -> x :: append rest ys
+  when Cons x rest -> Cons x (append rest ys)
 end
 
 -- Reverse a list (tail-recursive)
 let rec reverse xs =
   let rec go acc xs = match xs
     when Nil -> acc
-    when Cons x rest -> go (x :: acc) rest
+    when Cons x rest -> go (Cons x acc) rest
   end
   in go Nil xs
 
 -- Map a function over a list
 let rec map f xs = match xs
   when Nil -> Nil
-  when Cons x rest -> f x :: map f rest
+  when Cons x rest -> Cons (f x) (map f rest)
 end
 
 -- Filter elements that satisfy a predicate
@@ -49,7 +49,7 @@ let rec filter p xs = match xs
   when Nil -> Nil
   when Cons x rest ->
     if p x
-    then x :: filter p rest
+    then Cons x (filter p rest)
     else filter p rest
 end
 
@@ -71,7 +71,7 @@ let rec take n xs =
   then Nil
   else match xs
     when Nil -> Nil
-    when Cons x rest -> x :: take (n - 1) rest
+    when Cons x rest -> Cons x (take (n - 1) rest)
   end
 
 -- Drop first n elements
@@ -88,7 +88,7 @@ let rec zip xs ys = match xs
   when Nil -> Nil
   when Cons x xrest -> match ys
     when Nil -> Nil
-    when Cons y yrest -> (x, y) :: zip xrest yrest
+    when Cons y yrest -> Cons (x, y) (zip xrest yrest)
   end
 end
 
@@ -138,16 +138,16 @@ let rec quicksort xs = match xs
   when Cons pivot rest ->
     let smaller = filter (x -> x < pivot) rest in
     let larger = filter (x -> x >= pivot) rest in
-    append (quicksort smaller) (pivot :: quicksort larger)
+    append (quicksort smaller) (Cons pivot (quicksort larger))
 end
 
 -- Insert into sorted list
 let rec insert x xs = match xs
-  when Nil -> x :: Nil
+  when Nil -> Cons x Nil
   when Cons y rest ->
     if x <= y
-    then x :: xs
-    else y :: insert x rest
+    then Cons x xs
+    else Cons y (insert x rest)
 end
 
 -- Insertion sort
@@ -235,20 +235,20 @@ let flip f a b = f b a
 let rec range start stop =
   if start >= stop
   then Nil
-  else start :: range (start + 1) stop
+  else Cons start (range (start + 1) stop)
 
 -- Replicate value n times
 let rec replicate n x =
   if n <= 0
   then Nil
-  else x :: replicate (n - 1) x
+  else Cons x (replicate (n - 1) x)
 
 -- =============================================================================
 -- DEMONSTRATION
 -- =============================================================================
 
 -- Sample data
-let nums = 5 :: 2 :: 8 :: 1 :: 9 :: 3 :: 7 :: 4 :: 6 :: Nil
+let nums = [5, 2, 8, 1, 9, 3, 7, 4, 6]
 
 -- Run all the functions and collect results
 let result = {
@@ -288,7 +288,7 @@ let result = {
   pow2_10 = pow 2 10,
 
   -- Zipping
-  zipped = zip (1 :: 2 :: 3 :: Nil) ("a" :: "b" :: "c" :: Nil)
+  zipped = zip (range 1 4) (Cons "a" (Cons "b" (Cons "c" Nil)))
 }
 
 in result

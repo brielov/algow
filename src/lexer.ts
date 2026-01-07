@@ -62,11 +62,11 @@ export enum TokenKind {
   Comma, // ,
   Dot, // .
   Underscore, // _
-  ColonColon, // ::
   And, // &&
   Or, // ||
 
   Colon, // :
+  ColonColon, // ::
 
   // Delimiters
   LParen, // (

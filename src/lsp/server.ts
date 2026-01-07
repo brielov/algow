@@ -38,6 +38,7 @@ type InitializeResult = {
 const SYNC_FULL: TextDocumentSyncKind = 1;
 const SEVERITY_ERROR = 1;
 
+import * as ast from "../ast";
 import {
   bindWithConstructors,
   findAllOccurrences,
@@ -49,19 +50,17 @@ import {
 import {
   check,
   type ConstructorRegistry,
-  processDeclarations,
+  processModules,
+  processUseStatements,
   type Type,
+  type TypeEnv,
   type TypeMap,
   typeToString,
 } from "../checker";
 import type { Diagnostic } from "../diagnostics";
 import { createConstructorEnv, evaluate, RuntimeError, valueToString } from "../eval";
 import { parse, programToExpr, type Program } from "../parser";
-import {
-  declarations as preludeDeclarations,
-  preludeFunctionNames,
-  wrapWithPrelude,
-} from "../prelude";
+import { modules as preludeModules } from "../prelude";
 
 import { positionToOffset, spanToRange } from "./positions";
 import {
@@ -76,6 +75,24 @@ import {
 } from "./transport";
 
 // =============================================================================
+// PRELUDE
+// =============================================================================
+
+/** Implicit use statements for prelude modules (import everything) */
+const preludeUses: ast.UseDecl[] = preludeModules.map((mod) =>
+  ast.useDecl(mod.name, ast.importAll()),
+);
+
+/** Process a program with prelude */
+const processProgram = (program: Program) => {
+  const allModules = [...preludeModules, ...program.modules];
+  const allUses = [...preludeUses, ...program.uses];
+  const moduleEnv = processModules(allModules);
+  const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
+  return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+};
+
+// =============================================================================
 // DOCUMENT STATE
 // =============================================================================
 
@@ -86,8 +103,12 @@ type DocumentState = {
   readonly diagnostics: readonly LspDiagnostic[];
   readonly symbols: SymbolTable | null;
   readonly types: TypeMap | null;
+  readonly typeEnv: TypeEnv;
   readonly program: Program | null;
   readonly registry: ConstructorRegistry;
+  readonly constructorNames: readonly string[];
+  readonly allModules: readonly ast.ModuleDecl[];
+  readonly allUses: readonly ast.UseDecl[];
 };
 
 // =============================================================================
@@ -383,7 +404,6 @@ export const createServer = (transport: Transport): void => {
   const COMPLETION_KIND_FUNCTION = 3 as CompletionItemKind;
   const COMPLETION_KIND_CONSTRUCTOR = 4 as CompletionItemKind;
   const COMPLETION_KIND_FIELD = 5 as CompletionItemKind;
-  const COMPLETION_KIND_VARIABLE = 6 as CompletionItemKind;
   const COMPLETION_KIND_KEYWORD = 14 as CompletionItemKind;
 
   const handleCompletion = (params: TextDocumentPositionParams): CompletionList | null => {
@@ -403,10 +423,9 @@ export const createServer = (transport: Transport): void => {
       const fieldItems = getRecordFieldCompletions(doc, varName);
       items.push(...fieldItems);
     } else {
-      // General completions: variables, constructors, prelude, keywords
-      items.push(...getVariableCompletions(doc, offset));
+      // General completions from typeEnv (includes prelude), constructors, keywords
+      items.push(...getTypeEnvCompletions(doc));
       items.push(...getConstructorCompletions(doc));
-      items.push(...getPreludeFunctionCompletions());
       items.push(...getKeywordCompletions());
     }
 
@@ -472,31 +491,17 @@ export const createServer = (transport: Transport): void => {
   };
 
   /**
-   * Get completions for in-scope variables.
+   * Get completions from typeEnv (all available functions including prelude).
    */
-  const getVariableCompletions = (doc: DocumentState, _offset: number): CompletionItem[] => {
-    if (!doc.symbols || !doc.types) return [];
-
+  const getTypeEnvCompletions = (doc: DocumentState): CompletionItem[] => {
     const items: CompletionItem[] = [];
-    const seen = new Set<string>();
-
-    for (const def of doc.symbols.definitions) {
-      if (seen.has(def.name)) continue;
-      seen.add(def.name);
-
-      // Skip constructors (handled separately)
-      if (def.kind === "constructor") continue;
-
-      const type = doc.types.get(def);
-      const detail = type ? typeToString(type) : undefined;
-
+    for (const [name, scheme] of doc.typeEnv) {
       items.push({
-        label: def.name,
-        kind: def.kind === "parameter" ? COMPLETION_KIND_VARIABLE : COMPLETION_KIND_FUNCTION,
-        detail,
+        label: name,
+        kind: COMPLETION_KIND_FUNCTION,
+        detail: typeToString(scheme.type),
       });
     }
-
     return items;
   };
 
@@ -505,8 +510,6 @@ export const createServer = (transport: Transport): void => {
    */
   const getConstructorCompletions = (doc: DocumentState): CompletionItem[] => {
     const items: CompletionItem[] = [];
-
-    // From registry
     for (const [typeName, constructors] of doc.registry) {
       for (const conName of constructors) {
         items.push({
@@ -516,19 +519,8 @@ export const createServer = (transport: Transport): void => {
         });
       }
     }
-
     return items;
   };
-
-  /**
-   * Get completions for prelude functions.
-   */
-  const getPreludeFunctionCompletions = (): CompletionItem[] =>
-    preludeFunctionNames.map((name) => ({
-      label: name,
-      kind: COMPLETION_KIND_FUNCTION,
-      detail: "prelude",
-    }));
 
   /**
    * Get keyword completions.
@@ -542,9 +534,9 @@ export const createServer = (transport: Transport): void => {
       "then",
       "else",
       "match",
-      "with",
+      "when",
       "end",
-      "data",
+      "type",
       "true",
       "false",
     ];
@@ -566,21 +558,14 @@ export const createServer = (transport: Transport): void => {
       return { success: false, error: "Cannot evaluate: document has errors" };
     }
 
-    const expr = programToExpr(doc.program);
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
     if (!expr) {
       return { success: false, error: "No expression to evaluate" };
     }
 
-    // Wrap expression with prelude functions
-    const wrappedExpr = wrapWithPrelude(expr);
-
     try {
-      // Get constructor names from prelude + user declarations
-      const prelude = processDeclarations(preludeDeclarations);
-      const { constructorNames } = processDeclarations(doc.program.declarations, prelude);
-
-      const constructorEnv = createConstructorEnv(constructorNames);
-      const result = evaluate(constructorEnv, wrappedExpr);
+      const constructorEnv = createConstructorEnv(doc.constructorNames);
+      const result = evaluate(constructorEnv, expr);
       return { success: true, value: valueToString(result) };
     } catch (err) {
       if (err instanceof RuntimeError) {
@@ -600,24 +585,19 @@ export const createServer = (transport: Transport): void => {
       lspDiagnostics.push(convertDiagnostic(text, diag));
     }
 
-    // Process prelude + user declarations
-    const prelude = processDeclarations(preludeDeclarations);
-    const { typeEnv, registry, constructorNames } = processDeclarations(
-      parseResult.program.declarations,
-      prelude,
+    // Process prelude + user modules
+    const { typeEnv, registry, constructorNames, allModules, allUses } = processProgram(
+      parseResult.program,
     );
 
-    // Bind and type check if we have an expression
-    const expr = programToExpr(parseResult.program);
+    // Convert to expression (includes module bindings)
+    const expr = programToExpr(parseResult.program, allModules, allUses);
     let symbols: SymbolTable | null = null;
     let types: TypeMap | null = null;
 
     if (expr) {
-      // Wrap expression with prelude functions
-      const wrappedExpr = wrapWithPrelude(expr);
-
       // Binding phase: resolve names and build symbol table
-      const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
+      const bindResult = bindWithConstructors(constructorNames, expr);
       symbols = bindResult.symbols;
 
       for (const diag of bindResult.diagnostics) {
@@ -625,7 +605,7 @@ export const createServer = (transport: Transport): void => {
       }
 
       // Type checking phase: infer types
-      const checkResult = check(typeEnv, registry, wrappedExpr, symbols);
+      const checkResult = check(typeEnv, registry, expr, symbols);
       types = checkResult.types;
 
       for (const diag of checkResult.diagnostics) {
@@ -640,8 +620,12 @@ export const createServer = (transport: Transport): void => {
       diagnostics: lspDiagnostics,
       symbols,
       types,
+      typeEnv,
       program: parseResult.program,
       registry,
+      constructorNames,
+      allModules,
+      allUses,
     };
   };
 

@@ -203,6 +203,7 @@ let apply (f : number -> number) (x : number) = f x
 -- Operators: +, -, *, /, <, <=, >, >=, ==, !=
 -- Pipe operator: x |> f  (desugars to f x)
 -- Cons operator: x :: xs (desugars to Cons x xs)
+-- List literals: [1, 2, 3] (desugars to Cons 1 (Cons 2 (Cons 3 Nil)))
 
 -- Records and tuples
 let point = { x = 1, y = 2 }

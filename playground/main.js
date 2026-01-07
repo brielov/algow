@@ -12,41 +12,38 @@ var defaultCode = `-- Algow Playground
 -- Ctrl/Cmd+Click to go to definitions.
 -- F2 to rename a symbol across all occurrences.
 
--- Standard data types are available from the prelude:
--- data Maybe a = Nothing | Just a
--- data Either a b = Left a | Right b
--- data List a = Nil | Cons a (List a)
+-- Standard types and functions from prelude:
+-- type Maybe a = Nothing | Just a
+-- type Either a b = Left a | Right b
+-- type List a = Nil | Cons a (List a)
+-- map, filter, foldr, foldl, head, tail, length, etc.
 
--- Define recursive functions with 'let rec'
-let rec map f xs = match xs with
-| Nil => Nil
-| Cons x rest => Cons (f x) (map f rest)
+-- Functions use 'let', recursive ones use 'let rec'
+let double = x -> x * 2
+let isPositive = x -> x > 0
+let add = x y -> x + y
+
+-- Lists use bracket notation
+let numbers = [1, 2, 3, 4, 5]
+
+-- Pattern matching uses 'match/when/end'
+let rec sum xs = match xs
+  when Nil -> 0
+  when Cons x rest -> x + sum rest
 end
 
-let rec filter p xs = match xs with
-| Nil => Nil
-| Cons x rest => if p x
-  then Cons x (filter p rest)
-  else filter p rest
+-- Or-patterns for multiple cases
+let describe n = match n
+  when 0 | 1 -> "small"
+  when _ -> "big"
 end
-
-let rec foldr f z xs = match xs with
-| Nil => z
-| Cons x rest => f x (foldr f z rest)
-end
-
--- Non-recursive functions use 'let'
-let double x = x * 2
-let isPositive x = x > 0
-let add x y = x + y
-
--- The :: operator is sugar for Cons
-let numbers = 1 :: 2 :: 3 :: 4 :: 5 :: Nil
 
 -- Try these expressions (change the last line):
 -- map double numbers
--- filter isPositive (0 :: 1 :: -2 :: 3 :: Nil)
+-- filter isPositive [0, 1, -2, 3]
 -- foldr add 0 numbers
+-- head numbers
+-- length numbers
 
 map double numbers
 `;
@@ -56,18 +53,19 @@ __require.config({
 __require(["vs/editor/editor.main"], () => {
   monaco.languages.register({ id: "algow", extensions: [".alg"] });
   monaco.languages.setMonarchTokensProvider("algow", {
-    keywords: ["let", "rec", "in", "if", "then", "else", "match", "with", "end", "data"],
+    keywords: ["let", "rec", "in", "if", "then", "else", "match", "when", "end", "type", "module", "use", "as", "and"],
     literals: ["true", "false"],
     tokenizer: {
       root: [
         [/--.*$/, "comment"],
         [/\{-/, "comment", "@blockComment"],
-        [/\b(let|rec|in|if|then|else|match|with|end|data)\b/, "keyword"],
+        [/\b(let|rec|in|if|then|else|match|when|end|type|module|use|as|and)\b/, "keyword"],
         [/\b(true|false)\b/, "constant"],
         [/\b[A-Z][a-zA-Z0-9_]*\b/, "type.identifier"],
         [/\b[a-z_][a-zA-Z0-9_]*\b/, "identifier"],
         [/\d+(\.\d+)?/, "number"],
         [/"[^"]*"/, "string"],
+        [/->/, "operator"],
         [/[+\-*/<>=!|:]+/, "operator"],
         [/[{}()[\],.]/, "delimiter"]
       ],

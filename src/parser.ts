@@ -60,9 +60,9 @@ type ParserState = {
 const enum Bp {
   None = 0,
   Pipe = 10, // |>
+  Cons = 11, // ::
   Or = 12, // ||
   And = 14, // &&
-  Cons = 15, // :: (right-associative)
   Equality = 20, // == !=
   Comparison = 30, // < <= > >=
   Additive = 40, // + -
@@ -826,13 +826,14 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
       return ast.app(right, left, span(start, end));
     }
 
+    // Cons operator: x :: xs  →  Cons x xs (right-associative)
     case TokenKind.ColonColon: {
-      // :: is right-associative, so use bp - 1 for right side
       advance(state);
+      // Use bp - 1 for right-associativity: a :: b :: c  →  a :: (b :: c)
       const right = parsePrecedence(state, bp - 1);
       const end = right.span?.end ?? state.current[1];
-      // Desugar a :: b to Cons a b
-      return ast.app(ast.app(ast.var_("Cons"), left), right, span(start, end));
+      const cons = ast.var_("Cons");
+      return ast.app(ast.app(cons, left), right, span(start, end));
     }
 
     case TokenKind.Dot: {
@@ -893,14 +894,14 @@ const infixBindingPower = (state: ParserState): number => {
     case TokenKind.Pipe:
       return Bp.Pipe;
 
+    case TokenKind.ColonColon:
+      return Bp.Cons;
+
     case TokenKind.Or:
       return Bp.Or;
 
     case TokenKind.And:
       return Bp.And;
-
-    case TokenKind.ColonColon:
-      return Bp.Cons;
 
     case TokenKind.EqEq:
     case TokenKind.Ne:
@@ -1465,16 +1466,21 @@ const parseStringContent = (state: ParserState, quoted: string, tokenStart: numb
 // =============================================================================
 
 /**
- * Convert top-level bindings to a single expression for type inference.
- * Wraps bindings in nested let/letrec expressions.
+ * Convert a program to a single expression for type inference and evaluation.
+ * Wraps with imported module bindings, then user's top-level bindings.
  */
-export const programToExpr = (program: Program): ast.Expr | null => {
+export const programToExpr = (
+  program: Program,
+  modules: readonly ast.ModuleDecl[] = [],
+  uses: readonly ast.UseDecl[] = [],
+): ast.Expr | null => {
   if (!program.expr && program.bindings.length === 0) {
     return null;
   }
 
   let expr = program.expr ?? ast.num(0);
 
+  // Wrap with user's top-level bindings
   for (let i = program.bindings.length - 1; i >= 0; i--) {
     const binding = program.bindings[i]!;
 
@@ -1492,6 +1498,31 @@ export const programToExpr = (program: Program): ast.Expr | null => {
     } else {
       expr = ast.let_(binding.name, value, expr, undefined, binding.nameSpan, binding.returnType);
     }
+  }
+
+  // Wrap with imported module bindings
+  const importedBindings: ast.RecBinding[] = [];
+  for (const use of uses) {
+    const mod = modules.find((m) => m.name === use.moduleName);
+    if (!mod) continue;
+
+    if (use.imports?.kind === "All") {
+      // Import all bindings from the module
+      importedBindings.push(...mod.bindings);
+    } else if (use.imports?.kind === "Specific") {
+      // Import only the specified items
+      for (const item of use.imports.items) {
+        // Find matching binding by name (for functions)
+        const binding = mod.bindings.find((b) => b.name === item.name);
+        if (binding) {
+          importedBindings.push(binding);
+        }
+      }
+    }
+  }
+
+  if (importedBindings.length > 0) {
+    expr = ast.letRec(importedBindings, expr);
   }
 
   return expr;

@@ -1,3 +1,202 @@
+// src/ast.ts
+var num = (value, span) => ({ kind: "Num", value, span });
+var bool = (value, span) => ({ kind: "Bool", value, span });
+var str = (value, span) => ({ kind: "Str", value, span });
+var if_ = (cond, then, else_, span) => ({
+  kind: "If",
+  cond,
+  then,
+  else: else_,
+  span
+});
+var let_ = (name, value, body, span, nameSpan, returnType) => ({
+  kind: "Let",
+  name,
+  nameSpan,
+  returnType,
+  value,
+  body,
+  span
+});
+var recBinding = (name, value, nameSpan, returnType) => ({
+  name,
+  nameSpan,
+  returnType,
+  value
+});
+var letRec = (bindings, body, span) => ({
+  kind: "LetRec",
+  bindings,
+  body,
+  span
+});
+var var_ = (name, span) => ({ kind: "Var", name, span });
+var abs = (param, body, span, paramSpan, paramType) => ({
+  kind: "Abs",
+  param,
+  paramSpan,
+  paramType,
+  body,
+  span
+});
+var app = (func, param, span) => ({
+  kind: "App",
+  func,
+  param,
+  span
+});
+var tuple = (elements, span) => ({
+  kind: "Tuple",
+  elements,
+  span
+});
+var record = (fields, span) => ({
+  kind: "Record",
+  fields,
+  span
+});
+var field = (name, value, span) => ({
+  name,
+  value,
+  span
+});
+var fieldAccess = (record2, field2, span) => ({
+  kind: "FieldAccess",
+  record: record2,
+  field: field2,
+  span
+});
+var tupleIndex = (tuple2, index, span) => ({
+  kind: "TupleIndex",
+  tuple: tuple2,
+  index,
+  span
+});
+var binOp = (op, left, right, span) => ({
+  kind: "BinOp",
+  op,
+  left,
+  right,
+  span
+});
+var pwildcard = (span) => ({ kind: "PWildcard", span });
+var pvar = (name, span) => ({ kind: "PVar", name, span });
+var pcon = (name, args, span, nameSpan) => ({
+  kind: "PCon",
+  name,
+  args,
+  span,
+  nameSpan
+});
+var plit = (value, span) => ({
+  kind: "PLit",
+  value,
+  span
+});
+var precord = (fields, span) => ({
+  kind: "PRecord",
+  fields,
+  span
+});
+var pfield = (name, pattern, span) => ({
+  name,
+  pattern,
+  span
+});
+var ptuple = (elements, span) => ({
+  kind: "PTuple",
+  elements,
+  span
+});
+var pas = (pattern, name, span, nameSpan) => ({
+  kind: "PAs",
+  pattern,
+  name,
+  span,
+  nameSpan
+});
+var por = (alternatives, span) => ({
+  kind: "POr",
+  alternatives,
+  span
+});
+var case_ = (pattern, body, guard, span) => ({
+  pattern,
+  guard,
+  body,
+  span
+});
+var match = (expr, cases, span) => ({
+  kind: "Match",
+  expr,
+  cases,
+  span
+});
+var tyvar = (name, span) => ({ kind: "TyVar", name, span });
+var tycon = (name, span) => ({ kind: "TyCon", name, span });
+var tyapp = (con, arg, span) => ({
+  kind: "TyApp",
+  con,
+  arg,
+  span
+});
+var tyfun = (param, ret, span) => ({
+  kind: "TyFun",
+  param,
+  ret,
+  span
+});
+var conDecl = (name, fields, span) => ({
+  name,
+  fields,
+  span
+});
+var dataDecl = (name, typeParams, constructors, span) => ({ kind: "DataDecl", name, typeParams, constructors, span });
+var qualifiedVar = (moduleName, member, span, moduleSpan, memberSpan) => ({
+  kind: "QualifiedVar",
+  moduleName,
+  moduleSpan,
+  member,
+  memberSpan,
+  span
+});
+var qualifiedPCon = (moduleName, constructor, args, span, moduleSpan, constructorSpan) => ({
+  kind: "QualifiedPCon",
+  moduleName,
+  moduleSpan,
+  constructor,
+  constructorSpan,
+  args,
+  span
+});
+var moduleDecl = (name, declarations, bindings, span, nameSpan) => ({
+  kind: "ModuleDecl",
+  name,
+  nameSpan,
+  declarations,
+  bindings,
+  span
+});
+var useDecl = (moduleName, imports, alias, span, moduleSpan, aliasSpan) => ({
+  kind: "UseDecl",
+  moduleName,
+  moduleSpan,
+  alias,
+  aliasSpan,
+  imports,
+  span
+});
+var importAll = () => ({ kind: "All" });
+var importSpecific = (items) => ({
+  kind: "Specific",
+  items
+});
+var importItem = (name, constructors, span) => ({
+  name,
+  span,
+  constructors
+});
+
 // src/diagnostics.ts
 var error = (start, end, message) => ({
   start,
@@ -142,12 +341,17 @@ var bindExpr = (ctx, expr) => {
       }
       break;
     case "Record":
-      for (const field of expr.fields) {
-        bindExpr(ctx, field.value);
+      for (const field2 of expr.fields) {
+        bindExpr(ctx, field2.value);
       }
       break;
     case "FieldAccess":
       bindExpr(ctx, expr.record);
+      break;
+    case "TupleIndex":
+      bindExpr(ctx, expr.tuple);
+      break;
+    case "QualifiedVar":
       break;
     case "Match":
       bindMatch(ctx, expr);
@@ -186,9 +390,9 @@ var bindAbs = (ctx, expr) => {
 };
 var bindMatch = (ctx, expr) => {
   bindExpr(ctx, expr.expr);
-  for (const case_ of expr.cases) {
-    const bindings = bindPattern(ctx, case_.pattern);
-    bindExpr(ctx, case_.body);
+  for (const case_2 of expr.cases) {
+    const bindings = bindPattern(ctx, case_2.pattern);
+    bindExpr(ctx, case_2.body);
     for (const name of bindings) {
       popScope(ctx, name);
     }
@@ -217,6 +421,13 @@ var bindPattern = (ctx, pattern) => {
       }
       return bindings;
     }
+    case "QualifiedPCon": {
+      const bindings = [];
+      for (const arg of pattern.args) {
+        bindings.push(...bindPattern(ctx, arg));
+      }
+      return bindings;
+    }
     case "PLit":
       return [];
     case "PTuple": {
@@ -228,8 +439,8 @@ var bindPattern = (ctx, pattern) => {
     }
     case "PRecord": {
       const bindings = [];
-      for (const field of pattern.fields) {
-        bindings.push(...bindPattern(ctx, field.pattern));
+      for (const field2 of pattern.fields) {
+        bindings.push(...bindPattern(ctx, field2.pattern));
       }
       return bindings;
     }
@@ -286,22 +497,30 @@ var findAllOccurrences = (table, position) => {
 };
 
 // src/checker.ts
-var createContext2 = (symbols) => ({
-  diagnostics: [],
-  types: new Map,
-  symbols
-});
+var createContext2 = (symbols, moduleEnv = new Map, moduleAliases = new Map) => {
+  const definitionMap = new Map;
+  for (const def of symbols.definitions) {
+    definitionMap.set(`${def.span.start}:${def.span.end}`, def);
+  }
+  return {
+    diagnostics: [],
+    types: new Map,
+    symbols,
+    definitionMap,
+    moduleEnv,
+    moduleAliases
+  };
+};
 var addError = (ctx, message, span) => {
   const start = span?.start ?? 0;
   const end = span?.end ?? start;
   ctx.diagnostics.push(error(start, end, message));
 };
 var recordType = (ctx, span, type) => {
-  for (const def of ctx.symbols.definitions) {
-    if (def.span.start === span.start && def.span.end === span.end) {
-      ctx.types.set(def, type);
-      return;
-    }
+  const key = `${span.start}:${span.end}`;
+  const def = ctx.definitionMap.get(key);
+  if (def) {
+    ctx.types.set(def, type);
   }
 };
 var tvar = (name) => ({ kind: "TVar", name });
@@ -596,24 +815,46 @@ var typeToString = (type) => {
   }
 };
 var solveConstraints = (ctx, constraints) => {
-  for (const c of constraints) {
-    if (c.type.kind === "TVar") {
-      continue;
-    }
-    if (c.type.kind === "TCon") {
-      const classInstances = instances.get(c.className);
-      if (!classInstances?.has(c.type.name)) {
-        addError(ctx, `Type '${c.type.name}' does not satisfy ${c.className}`);
+  const solve = (c) => {
+    const { className, type } = c;
+    switch (type.kind) {
+      case "TVar":
+        return;
+      case "TCon": {
+        const classInstances = instances.get(className);
+        if (!classInstances?.has(type.name)) {
+          addError(ctx, `Type '${type.name}' does not satisfy ${className}`);
+        }
+        return;
       }
+      case "TFun":
+        addError(ctx, `Function types do not satisfy ${className}`);
+        return;
+      case "TTuple": {
+        if (className === "Eq" || className === "Ord") {
+          for (const elemType of type.elements) {
+            solve({ className, type: elemType });
+          }
+          return;
+        }
+        addError(ctx, `Tuples do not satisfy ${className}`);
+        return;
+      }
+      case "TApp":
+        addError(ctx, `Type '${typeToString(type)}' does not satisfy ${className}`);
+        return;
+      case "TRecord":
+        addError(ctx, `Record types do not satisfy ${className}`);
+        return;
     }
-    if (c.type.kind === "TFun") {
-      addError(ctx, `Function types do not satisfy ${c.className}`);
-    }
+  };
+  for (const c of constraints) {
+    solve(c);
   }
 };
-var check = (env, registry, expr, symbols) => {
+var check = (env, registry, expr, symbols, moduleEnv = new Map, moduleAliases = new Map) => {
   typeVarCounter = 0;
-  const ctx = createContext2(symbols);
+  const ctx = createContext2(symbols, moduleEnv, moduleAliases);
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
   solveConstraints(ctx, finalConstraints);
@@ -649,6 +890,8 @@ var inferExpr = (ctx, env, registry, expr) => {
       return inferTuple(ctx, env, registry, expr);
     case "Var":
       return inferVar(ctx, env, expr);
+    case "QualifiedVar":
+      return inferQualifiedVar(ctx, expr);
     case "Match":
       return inferMatch(ctx, env, registry, expr);
     case "FieldAccess":
@@ -707,11 +950,11 @@ var inferRecord = (ctx, env, registry, expr) => {
   let subst = new Map;
   let constraints = [];
   const fieldTypes = new Map;
-  for (const field of expr.fields) {
-    const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), registry, field.value);
+  for (const field2 of expr.fields) {
+    const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), registry, field2.value);
     subst = composeSubst(subst, s);
     constraints = [...applySubstConstraints(subst, constraints), ...c];
-    fieldTypes.set(field.name, applySubst(subst, t));
+    fieldTypes.set(field2.name, applySubst(subst, t));
   }
   return [subst, trecord([...fieldTypes.entries()]), constraints];
 };
@@ -719,9 +962,8 @@ var inferAbs = (ctx, env, registry, expr) => {
   let paramType;
   let subst = new Map;
   if (expr.paramType) {
-    const [annotatedType, tvSubst] = instantiateTypeExpr(expr.paramType);
+    const annotatedType = instantiateTypeExpr(expr.paramType);
     paramType = annotatedType;
-    subst = tvSubst;
   } else {
     paramType = freshTypeVar();
   }
@@ -774,10 +1016,6 @@ var inferBinOp = (ctx, env, registry, expr) => {
       constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }
-    case "++": {
-      const s4 = unify(ctx, operandType, tStr, expr.span);
-      return [composeSubst(subst, s4), tStr, constraints];
-    }
   }
 };
 var inferIf = (ctx, env, registry, expr) => {
@@ -796,7 +1034,7 @@ var inferIf = (ctx, env, registry, expr) => {
 var inferLet = (ctx, env, registry, expr) => {
   let [s1, valueType, c1] = inferExpr(ctx, env, registry, expr.value);
   if (expr.returnType) {
-    const [annotatedType] = instantiateTypeExpr(expr.returnType);
+    const annotatedType = instantiateTypeExpr(expr.returnType);
     let currentType = applySubst(s1, valueType);
     while (currentType.kind === "TFun") {
       currentType = currentType.ret;
@@ -833,7 +1071,7 @@ var inferLetRec = (ctx, env, registry, expr) => {
     let [s, valueType, c] = inferExpr(ctx, applySubstEnv(subst, envWithPlaceholders), registry, binding.value);
     subst = composeSubst(subst, s);
     if (binding.returnType) {
-      const [annotatedType] = instantiateTypeExpr(binding.returnType);
+      const annotatedType = instantiateTypeExpr(binding.returnType);
       let currentType = applySubst(subst, valueType);
       while (currentType.kind === "TFun") {
         currentType = currentType.ret;
@@ -867,6 +1105,20 @@ var inferLetRec = (ctx, env, registry, expr) => {
 var inferVar = (ctx, env, expr) => {
   const s = env.get(expr.name);
   if (!s) {
+    return [new Map, freshTypeVar(), []];
+  }
+  return [new Map, instantiate(s), []];
+};
+var inferQualifiedVar = (ctx, expr) => {
+  const realModule = ctx.moduleAliases.get(expr.moduleName) ?? expr.moduleName;
+  const mod = ctx.moduleEnv.get(realModule);
+  if (!mod) {
+    addError(ctx, `Unknown module: ${expr.moduleName}`, expr.span);
+    return [new Map, freshTypeVar(), []];
+  }
+  const s = mod.typeEnv.get(expr.member);
+  if (!s) {
+    addError(ctx, `Module '${expr.moduleName}' does not export '${expr.member}'`, expr.span);
     return [new Map, freshTypeVar(), []];
   }
   return [new Map, instantiate(s), []];
@@ -937,16 +1189,52 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
       }
       return [currentSubst, allBindings];
     }
+    case "QualifiedPCon": {
+      const realModule = ctx.moduleAliases.get(pattern.moduleName) ?? pattern.moduleName;
+      const mod = ctx.moduleEnv.get(realModule);
+      if (!mod) {
+        addError(ctx, `Unknown module: ${pattern.moduleName}`, pattern.span);
+        return [subst, new Map];
+      }
+      const conScheme = mod.typeEnv.get(pattern.constructor);
+      if (!conScheme) {
+        addError(ctx, `Module '${pattern.moduleName}' does not export '${pattern.constructor}'`, pattern.span);
+        return [subst, new Map];
+      }
+      const conType = instantiate(conScheme);
+      const argTypes = [];
+      let resultType = conType;
+      while (resultType.kind === "TFun") {
+        argTypes.push(resultType.param);
+        resultType = resultType.ret;
+      }
+      if (argTypes.length !== pattern.args.length) {
+        addError(ctx, `Constructor ${pattern.moduleName}.${pattern.constructor} expects ${argTypes.length} args, got ${pattern.args.length}`);
+        return [subst, new Map];
+      }
+      const s1 = unify(ctx, applySubst(subst, resultType), applySubst(subst, expectedType));
+      let currentSubst = composeSubst(subst, s1);
+      const allBindings = new Map;
+      for (let i = 0;i < pattern.args.length; i++) {
+        const argType = applySubst(currentSubst, argTypes[i]);
+        const [s, bindings] = inferPattern(ctx, env, pattern.args[i], argType, currentSubst);
+        currentSubst = s;
+        for (const [name, type] of bindings) {
+          allBindings.set(name, type);
+        }
+      }
+      return [currentSubst, allBindings];
+    }
     case "PRecord": {
       const expectedResolved = applySubst(subst, expectedType);
       if (expectedResolved.kind === "TVar") {
         const fieldTypes = new Map;
         let currentSubst2 = subst;
         const allBindings2 = new Map;
-        for (const field of pattern.fields) {
+        for (const field2 of pattern.fields) {
           const fieldType = freshTypeVar();
-          fieldTypes.set(field.name, fieldType);
-          const [s2, bindings] = inferPattern(ctx, env, field.pattern, fieldType, currentSubst2);
+          fieldTypes.set(field2.name, fieldType);
+          const [s2, bindings] = inferPattern(ctx, env, field2.pattern, fieldType, currentSubst2);
           currentSubst2 = s2;
           for (const [name, type] of bindings) {
             allBindings2.set(name, type);
@@ -963,20 +1251,20 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
       }
       let currentSubst = subst;
       const allBindings = new Map;
-      for (const field of pattern.fields) {
-        let fieldType = expectedResolved.fields.get(field.name);
+      for (const field2 of pattern.fields) {
+        let fieldType = expectedResolved.fields.get(field2.name);
         if (!fieldType && expectedResolved.row) {
           const newFieldType = freshTypeVar();
           const newRowVar = freshTypeVar();
-          const s2 = unify(ctx, applySubst(currentSubst, expectedResolved.row), trecord([[field.name, newFieldType]], newRowVar));
+          const s2 = unify(ctx, applySubst(currentSubst, expectedResolved.row), trecord([[field2.name, newFieldType]], newRowVar));
           currentSubst = composeSubst(currentSubst, s2);
           fieldType = applySubst(currentSubst, newFieldType);
         }
         if (!fieldType) {
-          addError(ctx, `Record has no field '${field.name}'. Available: ${[...expectedResolved.fields.keys()].join(", ")}`);
+          addError(ctx, `Record has no field '${field2.name}'. Available: ${[...expectedResolved.fields.keys()].join(", ")}`);
           continue;
         }
-        const [s, bindings] = inferPattern(ctx, env, field.pattern, fieldType, currentSubst);
+        const [s, bindings] = inferPattern(ctx, env, field2.pattern, fieldType, currentSubst);
         currentSubst = s;
         for (const [name, type] of bindings) {
           allBindings.set(name, type);
@@ -1043,18 +1331,21 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
       for (let i = 1;i < pattern.alternatives.length; i++) {
         const [s2, altBindings] = inferPattern(ctx, env, pattern.alternatives[i], applySubst(currentSubst, expectedType), currentSubst);
         currentSubst = s2;
-        if (firstBindings.size !== altBindings.size) {
-          addError(ctx, `Or-pattern alternatives must bind the same variables (alternative ${i + 1} binds different variables)`);
+        const keys1 = new Set(firstBindings.keys());
+        const keys2 = new Set(altBindings.keys());
+        const diff1 = [...keys1].filter((k) => !keys2.has(k));
+        const diff2 = [...keys2].filter((k) => !keys1.has(k));
+        if (diff1.length > 0 || diff2.length > 0) {
+          const missing = diff1.length > 0 ? `missing ${diff1.join(", ")}` : "";
+          const extra = diff2.length > 0 ? `extra ${diff2.join(", ")}` : "";
+          const message = [`Or-pattern alternatives must bind the same variables.`, missing, extra].filter(Boolean).join(" ");
+          addError(ctx, message);
           continue;
         }
         for (const [name, type1] of firstBindings) {
           const type2 = altBindings.get(name);
-          if (!type2) {
-            addError(ctx, `Or-pattern alternative ${i + 1} is missing binding for '${name}'`);
-          } else {
-            const s3 = unify(ctx, applySubst(currentSubst, type1), applySubst(currentSubst, type2));
-            currentSubst = composeSubst(currentSubst, s3);
-          }
+          const s3 = unify(ctx, applySubst(currentSubst, type1), applySubst(currentSubst, type2));
+          currentSubst = composeSubst(currentSubst, s3);
         }
       }
       return [currentSubst, firstBindings];
@@ -1070,21 +1361,21 @@ var inferMatch = (ctx, env, registry, expr) => {
   let subst = s1;
   let constraints = [...c1];
   let resultType = null;
-  for (const case_ of expr.cases) {
-    const [s2, bindings] = inferPattern(ctx, applySubstEnv(subst, env), case_.pattern, applySubst(subst, scrutineeType), subst);
+  for (const case_2 of expr.cases) {
+    const [s2, bindings] = inferPattern(ctx, applySubstEnv(subst, env), case_2.pattern, applySubst(subst, scrutineeType), subst);
     subst = s2;
     const caseEnv = new Map(applySubstEnv(subst, env));
     for (const [name, type] of bindings) {
       caseEnv.set(name, scheme([], applySubst(subst, type)));
     }
-    if (case_.guard) {
-      const [sg, guardType, cg] = inferExpr(ctx, caseEnv, registry, case_.guard);
+    if (case_2.guard) {
+      const [sg, guardType, cg] = inferExpr(ctx, caseEnv, registry, case_2.guard);
       subst = composeSubst(subst, sg);
       constraints = [...applySubstConstraints(subst, constraints), ...cg];
       const s4 = unify(ctx, applySubst(subst, guardType), tBool);
       subst = composeSubst(subst, s4);
     }
-    const [s3, bodyType, c2] = inferExpr(ctx, caseEnv, registry, case_.body);
+    const [s3, bodyType, c2] = inferExpr(ctx, caseEnv, registry, case_2.body);
     subst = composeSubst(subst, s3);
     constraints = [...applySubstConstraints(subst, constraints), ...c2];
     if (resultType === null) {
@@ -1095,10 +1386,29 @@ var inferMatch = (ctx, env, registry, expr) => {
       resultType = applySubst(s4, bodyType);
     }
   }
-  const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
-  const missing = checkExhaustiveness(registry, applySubst(subst, scrutineeType), patterns);
-  if (missing.length > 0) {
-    addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+  const lastCase = expr.cases[expr.cases.length - 1];
+  let isExhaustive = false;
+  if (lastCase) {
+    const isWildcardPattern = (p) => {
+      if (p.kind === "PVar" || p.kind === "PWildcard")
+        return true;
+      if (p.kind === "PAs")
+        return isWildcardPattern(p.pattern);
+      return false;
+    };
+    if (isWildcardPattern(lastCase.pattern) && !lastCase.guard) {
+      isExhaustive = true;
+    }
+    if (isWildcardPattern(lastCase.pattern) && lastCase.guard?.kind === "Bool" && lastCase.guard.value === true) {
+      isExhaustive = true;
+    }
+  }
+  if (!isExhaustive) {
+    const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
+    const missing = checkExhaustiveness(env, registry, applySubst(subst, scrutineeType), patterns);
+    if (missing.length > 0) {
+      addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+    }
   }
   return [subst, applySubst(subst, resultType), constraints];
 };
@@ -1138,9 +1448,7 @@ var instantiateTypeExpr = (texpr) => {
       }
     }
   };
-  const result = convert(texpr);
-  const subst = new Map;
-  return [result, subst];
+  return convert(texpr);
 };
 var processDataDecl = (decl) => {
   const env = new Map;
@@ -1171,59 +1479,239 @@ var getTypeConName = (type) => {
       return null;
   }
 };
-var getPatternConstructors = (patterns) => {
-  const constructors = new Set;
-  for (const pattern of patterns) {
-    switch (pattern.kind) {
-      case "PCon":
-        constructors.add(pattern.name);
-        break;
-      case "PWildcard":
-      case "PVar":
-        return new Set(["*"]);
-      case "PLit":
-        break;
-      case "PAs": {
-        const inner = getPatternConstructors([pattern.pattern]);
-        for (const c of inner) {
-          constructors.add(c);
-        }
-        if (inner.has("*"))
-          return new Set(["*"]);
-        break;
-      }
-      case "POr": {
-        const inner = getPatternConstructors(pattern.alternatives);
-        for (const c of inner) {
-          constructors.add(c);
-        }
-        if (inner.has("*"))
-          return new Set(["*"]);
-        break;
-      }
-    }
+var getConstructorArity = (env, conName) => {
+  const scheme2 = env.get(conName);
+  if (!scheme2)
+    return 0;
+  let arity = 0;
+  let t = scheme2.type;
+  while (t.kind === "TFun") {
+    arity++;
+    t = t.ret;
   }
-  return constructors;
+  return arity;
 };
-var checkExhaustiveness = (registry, scrutineeType, patterns) => {
-  const typeName = getTypeConName(scrutineeType);
-  if (!typeName)
+var getConstructorsWithArity = (env, registry, typeName) => {
+  const conNames = registry.get(typeName);
+  if (!conNames)
     return [];
-  const allConstructors = registry.get(typeName);
-  if (!allConstructors) {
-    return [];
+  return conNames.map((name) => ({
+    name,
+    arity: getConstructorArity(env, name)
+  }));
+};
+var extractTypeArgs = (type) => {
+  const args = [];
+  let current = type;
+  while (current.kind === "TApp") {
+    args.unshift(current.arg);
+    current = current.con;
   }
-  const matchedConstructors = getPatternConstructors(patterns);
-  if (matchedConstructors.has("*")) {
+  return args;
+};
+var getConstructorArgTypes = (env, conName, scrutineeType) => {
+  const scheme2 = env.get(conName);
+  if (!scheme2)
     return [];
+  const typeArgs = extractTypeArgs(scrutineeType);
+  const subst = new Map;
+  for (let i = 0;i < scheme2.vars.length && i < typeArgs.length; i++) {
+    subst.set(scheme2.vars[i], typeArgs[i]);
   }
-  const missing = [];
-  for (const con of allConstructors) {
-    if (!matchedConstructors.has(con)) {
-      missing.push(con);
+  const argTypes = [];
+  let t = scheme2.type;
+  while (t.kind === "TFun") {
+    argTypes.push(applySubst(subst, t.param));
+    t = t.ret;
+  }
+  return argTypes;
+};
+var toSimplePattern = (p) => {
+  switch (p.kind) {
+    case "PWildcard":
+    case "PVar":
+      return { kind: "Wild" };
+    case "PCon":
+      return { kind: "Con", name: p.name, args: p.args.map(toSimplePattern) };
+    case "QualifiedPCon":
+      return {
+        kind: "Con",
+        name: `${p.moduleName}.${p.constructor}`,
+        args: p.args.map(toSimplePattern)
+      };
+    case "PTuple":
+      return { kind: "Tuple", elements: p.elements.map(toSimplePattern) };
+    case "PLit":
+      return { kind: "Lit", value: p.value };
+    case "PAs":
+      return toSimplePattern(p.pattern);
+    case "POr":
+      return { kind: "Or", alternatives: p.alternatives.map(toSimplePattern) };
+    case "PRecord":
+      return { kind: "Wild" };
+  }
+};
+var simplePatternToString = (p) => {
+  switch (p.kind) {
+    case "Wild":
+      return "_";
+    case "Con":
+      if (p.args.length === 0)
+        return p.name;
+      return `${p.name} ${p.args.map((a) => {
+        const s = simplePatternToString(a);
+        return a.kind === "Con" && a.args.length > 0 ? `(${s})` : s;
+      }).join(" ")}`;
+    case "Tuple":
+      return `(${p.elements.map(simplePatternToString).join(", ")})`;
+    case "Lit":
+      return typeof p.value === "string" ? `"${p.value}"` : String(p.value);
+    case "Or":
+      return p.alternatives.map(simplePatternToString).join(" | ");
+  }
+};
+var specialize = (matrix, conName, arity) => {
+  const result = [];
+  for (const row of matrix) {
+    if (row.length === 0)
+      continue;
+    const first = row[0];
+    const rest = row.slice(1);
+    switch (first.kind) {
+      case "Con":
+        if (first.name === conName) {
+          result.push([...first.args, ...rest]);
+        }
+        break;
+      case "Wild":
+        result.push([...Array(arity).fill({ kind: "Wild" }), ...rest]);
+        break;
+      case "Or":
+        for (const alt of first.alternatives) {
+          const expanded = specialize([[alt, ...rest]], conName, arity);
+          result.push(...expanded);
+        }
+        break;
+      case "Tuple":
+      case "Lit":
+        break;
     }
   }
-  return missing;
+  return result;
+};
+var specializeTuple = (matrix, arity) => {
+  const result = [];
+  for (const row of matrix) {
+    if (row.length === 0)
+      continue;
+    const first = row[0];
+    const rest = row.slice(1);
+    switch (first.kind) {
+      case "Tuple":
+        if (first.elements.length === arity) {
+          result.push([...first.elements, ...rest]);
+        }
+        break;
+      case "Wild":
+        result.push([...Array(arity).fill({ kind: "Wild" }), ...rest]);
+        break;
+      case "Or":
+        for (const alt of first.alternatives) {
+          const expanded = specializeTuple([[alt, ...rest]], arity);
+          result.push(...expanded);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return result;
+};
+var defaultMatrix = (matrix) => {
+  const result = [];
+  for (const row of matrix) {
+    if (row.length === 0)
+      continue;
+    const first = row[0];
+    const rest = row.slice(1);
+    switch (first.kind) {
+      case "Wild":
+        result.push(rest);
+        break;
+      case "Or":
+        for (const alt of first.alternatives) {
+          const expanded = defaultMatrix([[alt, ...rest]]);
+          result.push(...expanded);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return result;
+};
+var findWitness = (env, registry, matrix, types, depth = 0) => {
+  const MAX_DEPTH = 10;
+  if (depth > MAX_DEPTH) {
+    if (matrix.length === 0 && types.length > 0) {
+      return types.map(() => ({ kind: "Wild" }));
+    }
+    return null;
+  }
+  if (types.length === 0) {
+    return matrix.length === 0 ? [] : null;
+  }
+  const firstType = types[0];
+  const restTypes = types.slice(1);
+  const typeName = getTypeConName(firstType);
+  if (firstType.kind === "TTuple") {
+    const arity = firstType.elements.length;
+    const specialized = specializeTuple(matrix, arity);
+    const witness2 = findWitness(env, registry, specialized, [...firstType.elements, ...restTypes], depth + 1);
+    if (witness2) {
+      const tupleElements = witness2.slice(0, arity);
+      const rest = witness2.slice(arity);
+      return [{ kind: "Tuple", elements: tupleElements }, ...rest];
+    }
+    return null;
+  }
+  if (typeName) {
+    const constructors = getConstructorsWithArity(env, registry, typeName);
+    if (constructors.length === 0) {
+      const def2 = defaultMatrix(matrix);
+      const witness2 = findWitness(env, registry, def2, restTypes, depth);
+      if (witness2) {
+        return [{ kind: "Wild" }, ...witness2];
+      }
+      return null;
+    }
+    for (const con of constructors) {
+      const specialized = specialize(matrix, con.name, con.arity);
+      const argTypes = getConstructorArgTypes(env, con.name, firstType);
+      const finalArgTypes = argTypes.length > 0 ? argTypes : Array(con.arity).fill({ kind: "TVar", name: "_" });
+      const witness2 = findWitness(env, registry, specialized, [...finalArgTypes, ...restTypes], depth + 1);
+      if (witness2) {
+        const args = witness2.slice(0, con.arity);
+        const rest = witness2.slice(con.arity);
+        return [{ kind: "Con", name: con.name, args }, ...rest];
+      }
+    }
+    return null;
+  }
+  const def = defaultMatrix(matrix);
+  const witness = findWitness(env, registry, def, restTypes, depth);
+  if (witness) {
+    return [{ kind: "Wild" }, ...witness];
+  }
+  return null;
+};
+var checkExhaustiveness = (env, registry, scrutineeType, patterns) => {
+  const matrix = patterns.map((p) => [toSimplePattern(p)]);
+  const witness = findWitness(env, registry, matrix, [scrutineeType]);
+  if (witness && witness.length > 0) {
+    return [simplePatternToString(witness[0])];
+  }
+  return [];
 };
 var mergeEnvs = (...envs) => {
   const result = new Map;
@@ -1260,6 +1748,105 @@ var processDeclarations = (declarations, initial = {
     }
   }
   return { typeEnv, registry, constructorNames };
+};
+var processModule = (mod, baseEnv, baseRegistry) => {
+  const { typeEnv: dataEnv, registry, constructorNames } = processDeclarations(mod.declarations);
+  const env = new Map(baseEnv);
+  for (const [k, v] of dataEnv)
+    env.set(k, v);
+  const fullRegistry = new Map(baseRegistry);
+  for (const [k, v] of registry)
+    fullRegistry.set(k, v);
+  if (mod.bindings.length > 0) {
+    const dummyBody = num(0);
+    const letRec2 = letRec(mod.bindings, dummyBody);
+    const allConstructors = [...baseRegistry?.values() ?? []].flat();
+    allConstructors.push(...constructorNames);
+    const emptySymbols = { definitions: [], references: [] };
+    const checkResult = check(env, fullRegistry, letRec2, emptySymbols);
+    if (letRec2.kind === "LetRec") {
+      const subst = checkResult.subst;
+      for (const binding of letRec2.bindings) {
+        const bindingScheme = env.get(binding.name);
+        if (bindingScheme) {} else {
+          const bindingResult = check(env, fullRegistry, binding.value, emptySymbols);
+          const resolvedType = applySubst(subst, bindingResult.type);
+          const scheme2 = generalize(env, resolvedType);
+          env.set(binding.name, scheme2);
+        }
+      }
+    }
+  }
+  return { typeEnv: env, registry: fullRegistry, constructorNames };
+};
+var processModules = (modules) => {
+  const result = new Map;
+  let accEnv = new Map;
+  let accRegistry = new Map;
+  for (const mod of modules) {
+    const info = processModule(mod, accEnv, accRegistry);
+    result.set(mod.name, info);
+    for (const [k, v] of info.typeEnv)
+      accEnv.set(k, v);
+    for (const [k, v] of info.registry)
+      accRegistry.set(k, v);
+  }
+  return result;
+};
+var processUseStatements = (uses, moduleEnv) => {
+  const localEnv = new Map;
+  const localRegistry = new Map;
+  const constructorNames = [];
+  const aliases = new Map;
+  for (const use of uses) {
+    if (use.alias) {
+      aliases.set(use.alias, use.moduleName);
+    }
+    const mod = moduleEnv.get(use.moduleName);
+    if (!mod) {
+      continue;
+    }
+    if (use.imports?.kind === "All") {
+      for (const [name, scheme2] of mod.typeEnv) {
+        localEnv.set(name, scheme2);
+      }
+      for (const [typeName, cons] of mod.registry) {
+        localRegistry.set(typeName, cons);
+      }
+      constructorNames.push(...mod.constructorNames);
+    } else if (use.imports?.kind === "Specific") {
+      for (const item of use.imports.items) {
+        const scheme2 = mod.typeEnv.get(item.name);
+        if (scheme2) {
+          localEnv.set(item.name, scheme2);
+        }
+        if (item.constructors) {
+          const cons = mod.registry.get(item.name);
+          if (cons) {
+            if (item.constructors === "all") {
+              localRegistry.set(item.name, cons);
+              for (const conName of cons) {
+                const conScheme = mod.typeEnv.get(conName);
+                if (conScheme) {
+                  localEnv.set(conName, conScheme);
+                  constructorNames.push(conName);
+                }
+              }
+            } else {
+              for (const conName of item.constructors) {
+                const conScheme = mod.typeEnv.get(conName);
+                if (conScheme) {
+                  localEnv.set(conName, conScheme);
+                  constructorNames.push(conName);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return { localEnv, localRegistry, constructorNames, aliases };
 };
 var baseEnv = new Map;
 
@@ -1350,19 +1937,21 @@ var evaluate = (env, expr) => {
     }
     case "Record": {
       const fields = new Map;
-      for (const field of expr.fields) {
-        fields.set(field.name, evaluate(env, field.value));
+      for (const field2 of expr.fields) {
+        fields.set(field2.name, evaluate(env, field2.value));
       }
       return vrecord(fields);
     }
     case "FieldAccess": {
-      const record = evaluate(env, expr.record);
-      return record.fields.get(expr.field);
+      const record2 = evaluate(env, expr.record);
+      return record2.fields.get(expr.field);
     }
     case "TupleIndex": {
-      const tuple = evaluate(env, expr.tuple);
-      return tuple.elements[expr.index];
+      const tuple2 = evaluate(env, expr.tuple);
+      return tuple2.elements[expr.index];
     }
+    case "QualifiedVar":
+      throw new RuntimeError(`Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` + `Add 'use ${expr.moduleName} (..)' to import all bindings.`);
     case "Match":
       return evalMatch(env, expr);
   }
@@ -1413,8 +2002,6 @@ var evalBinOp = (env, expr) => {
       return vbool(valuesEqual(left, right));
     case "!=":
       return vbool(!valuesEqual(left, right));
-    case "++":
-      return vstr(left.value + right.value);
   }
 };
 var valuesEqual = (a, b) => {
@@ -1491,6 +2078,24 @@ var matchPattern = (pattern, value) => {
       }
       return { matched: true, bindings };
     }
+    case "QualifiedPCon": {
+      if (value.kind !== "VCon" || value.name !== pattern.constructor) {
+        return { matched: false };
+      }
+      if (value.args.length !== pattern.args.length) {
+        return { matched: false };
+      }
+      const bindings = new Map;
+      for (let i = 0;i < pattern.args.length; i++) {
+        const result = matchPattern(pattern.args[i], value.args[i]);
+        if (!result.matched)
+          return { matched: false };
+        for (const [name, val] of result.bindings) {
+          bindings.set(name, val);
+        }
+      }
+      return { matched: true, bindings };
+    }
     case "PTuple": {
       if (value.kind !== "VTuple" || value.elements.length !== pattern.elements.length) {
         return { matched: false };
@@ -1511,11 +2116,11 @@ var matchPattern = (pattern, value) => {
         return { matched: false };
       }
       const bindings = new Map;
-      for (const field of pattern.fields) {
-        const fieldValue = value.fields.get(field.name);
+      for (const field2 of pattern.fields) {
+        const fieldValue = value.fields.get(field2.name);
         if (fieldValue === undefined)
           return { matched: false };
-        const result = matchPattern(field.pattern, fieldValue);
+        const result = matchPattern(field2.pattern, fieldValue);
         if (!result.matched)
           return { matched: false };
         for (const [name, val] of result.bindings) {
@@ -1543,20 +2148,20 @@ var matchPattern = (pattern, value) => {
 };
 var evalMatch = (env, expr) => {
   const scrutinee = evaluate(env, expr.expr);
-  for (const case_ of expr.cases) {
-    const result = matchPattern(case_.pattern, scrutinee);
+  for (const case_2 of expr.cases) {
+    const result = matchPattern(case_2.pattern, scrutinee);
     if (result.matched) {
       let caseEnv = env;
       for (const [name, value] of result.bindings) {
         caseEnv = extendEnv(caseEnv, name, value);
       }
-      if (case_.guard) {
-        const guardResult = evaluate(caseEnv, case_.guard);
+      if (case_2.guard) {
+        const guardResult = evaluate(caseEnv, case_2.guard);
         if (!guardResult.value) {
           continue;
         }
       }
-      return evaluate(caseEnv, case_.body);
+      return evaluate(caseEnv, case_2.body);
     }
   }
   throw new Error("Unreachable: exhaustiveness check failed");
@@ -1593,161 +2198,6 @@ var createConstructorEnv = (constructorNames) => {
   return env;
 };
 
-// src/ast.ts
-var num = (value, span) => ({ kind: "Num", value, span });
-var bool = (value, span) => ({ kind: "Bool", value, span });
-var str = (value, span) => ({ kind: "Str", value, span });
-var if_ = (cond, then, else_, span) => ({
-  kind: "If",
-  cond,
-  then,
-  else: else_,
-  span
-});
-var let_ = (name, value, body, span, nameSpan, returnType) => ({
-  kind: "Let",
-  name,
-  nameSpan,
-  returnType,
-  value,
-  body,
-  span
-});
-var recBinding = (name, value, nameSpan, returnType) => ({
-  name,
-  nameSpan,
-  returnType,
-  value
-});
-var letRec = (bindings, body, span) => ({
-  kind: "LetRec",
-  bindings,
-  body,
-  span
-});
-var var_ = (name, span) => ({ kind: "Var", name, span });
-var abs = (param, body, span, paramSpan, paramType) => ({
-  kind: "Abs",
-  param,
-  paramSpan,
-  paramType,
-  body,
-  span
-});
-var app = (func, param, span) => ({
-  kind: "App",
-  func,
-  param,
-  span
-});
-var tuple = (elements, span) => ({
-  kind: "Tuple",
-  elements,
-  span
-});
-var record = (fields, span) => ({
-  kind: "Record",
-  fields,
-  span
-});
-var field = (name, value, span) => ({
-  name,
-  value,
-  span
-});
-var fieldAccess = (record2, field2, span) => ({
-  kind: "FieldAccess",
-  record: record2,
-  field: field2,
-  span
-});
-var tupleIndex = (tuple2, index, span) => ({
-  kind: "TupleIndex",
-  tuple: tuple2,
-  index,
-  span
-});
-var binOp = (op, left, right, span) => ({
-  kind: "BinOp",
-  op,
-  left,
-  right,
-  span
-});
-var pwildcard = (span) => ({ kind: "PWildcard", span });
-var pvar = (name, span) => ({ kind: "PVar", name, span });
-var pcon = (name, args, span, nameSpan) => ({
-  kind: "PCon",
-  name,
-  args,
-  span,
-  nameSpan
-});
-var plit = (value, span) => ({
-  kind: "PLit",
-  value,
-  span
-});
-var precord = (fields, span) => ({
-  kind: "PRecord",
-  fields,
-  span
-});
-var pfield = (name, pattern, span) => ({
-  name,
-  pattern,
-  span
-});
-var ptuple = (elements, span) => ({
-  kind: "PTuple",
-  elements,
-  span
-});
-var pas = (pattern, name, span, nameSpan) => ({
-  kind: "PAs",
-  pattern,
-  name,
-  span,
-  nameSpan
-});
-var por = (alternatives, span) => ({
-  kind: "POr",
-  alternatives,
-  span
-});
-var case_ = (pattern, body, guard, span) => ({
-  pattern,
-  guard,
-  body,
-  span
-});
-var match = (expr, cases, span) => ({
-  kind: "Match",
-  expr,
-  cases,
-  span
-});
-var tyvar = (name, span) => ({ kind: "TyVar", name, span });
-var tycon = (name, span) => ({ kind: "TyCon", name, span });
-var tyapp = (con, arg, span) => ({
-  kind: "TyApp",
-  con,
-  arg,
-  span
-});
-var tyfun = (param, ret, span) => ({
-  kind: "TyFun",
-  param,
-  ret,
-  span
-});
-var conDecl = (name, fields, span) => ({
-  name,
-  fields,
-  span
-});
-var dataDecl = (name, typeParams, constructors, span) => ({ kind: "DataDecl", name, typeParams, constructors, span });
-
 // src/lexer.ts
 var TokenKind;
 ((TokenKind2) => {
@@ -1763,42 +2213,43 @@ var TokenKind;
   TokenKind2[TokenKind2["Then"] = 9] = "Then";
   TokenKind2[TokenKind2["Else"] = 10] = "Else";
   TokenKind2[TokenKind2["Match"] = 11] = "Match";
-  TokenKind2[TokenKind2["With"] = 12] = "With";
-  TokenKind2[TokenKind2["End"] = 13] = "End";
-  TokenKind2[TokenKind2["Data"] = 14] = "Data";
+  TokenKind2[TokenKind2["End"] = 12] = "End";
+  TokenKind2[TokenKind2["Type"] = 13] = "Type";
+  TokenKind2[TokenKind2["When"] = 14] = "When";
   TokenKind2[TokenKind2["True"] = 15] = "True";
   TokenKind2[TokenKind2["False"] = 16] = "False";
   TokenKind2[TokenKind2["As"] = 17] = "As";
   TokenKind2[TokenKind2["AndKw"] = 18] = "AndKw";
-  TokenKind2[TokenKind2["Plus"] = 19] = "Plus";
-  TokenKind2[TokenKind2["Minus"] = 20] = "Minus";
-  TokenKind2[TokenKind2["Star"] = 21] = "Star";
-  TokenKind2[TokenKind2["Slash"] = 22] = "Slash";
-  TokenKind2[TokenKind2["Lt"] = 23] = "Lt";
-  TokenKind2[TokenKind2["Le"] = 24] = "Le";
-  TokenKind2[TokenKind2["Gt"] = 25] = "Gt";
-  TokenKind2[TokenKind2["Ge"] = 26] = "Ge";
-  TokenKind2[TokenKind2["EqEq"] = 27] = "EqEq";
-  TokenKind2[TokenKind2["Ne"] = 28] = "Ne";
-  TokenKind2[TokenKind2["Pipe"] = 29] = "Pipe";
-  TokenKind2[TokenKind2["Arrow"] = 30] = "Arrow";
-  TokenKind2[TokenKind2["Eq"] = 31] = "Eq";
-  TokenKind2[TokenKind2["Bar"] = 32] = "Bar";
-  TokenKind2[TokenKind2["Comma"] = 33] = "Comma";
-  TokenKind2[TokenKind2["Dot"] = 34] = "Dot";
-  TokenKind2[TokenKind2["Underscore"] = 35] = "Underscore";
-  TokenKind2[TokenKind2["ColonColon"] = 36] = "ColonColon";
-  TokenKind2[TokenKind2["And"] = 37] = "And";
-  TokenKind2[TokenKind2["Or"] = 38] = "Or";
-  TokenKind2[TokenKind2["PlusPlus"] = 39] = "PlusPlus";
+  TokenKind2[TokenKind2["Module"] = 19] = "Module";
+  TokenKind2[TokenKind2["Use"] = 20] = "Use";
+  TokenKind2[TokenKind2["Plus"] = 21] = "Plus";
+  TokenKind2[TokenKind2["Minus"] = 22] = "Minus";
+  TokenKind2[TokenKind2["Star"] = 23] = "Star";
+  TokenKind2[TokenKind2["Slash"] = 24] = "Slash";
+  TokenKind2[TokenKind2["Lt"] = 25] = "Lt";
+  TokenKind2[TokenKind2["Le"] = 26] = "Le";
+  TokenKind2[TokenKind2["Gt"] = 27] = "Gt";
+  TokenKind2[TokenKind2["Ge"] = 28] = "Ge";
+  TokenKind2[TokenKind2["EqEq"] = 29] = "EqEq";
+  TokenKind2[TokenKind2["Ne"] = 30] = "Ne";
+  TokenKind2[TokenKind2["Pipe"] = 31] = "Pipe";
+  TokenKind2[TokenKind2["Arrow"] = 32] = "Arrow";
+  TokenKind2[TokenKind2["Eq"] = 33] = "Eq";
+  TokenKind2[TokenKind2["Bar"] = 34] = "Bar";
+  TokenKind2[TokenKind2["Comma"] = 35] = "Comma";
+  TokenKind2[TokenKind2["Dot"] = 36] = "Dot";
+  TokenKind2[TokenKind2["Underscore"] = 37] = "Underscore";
+  TokenKind2[TokenKind2["And"] = 38] = "And";
+  TokenKind2[TokenKind2["Or"] = 39] = "Or";
   TokenKind2[TokenKind2["Colon"] = 40] = "Colon";
-  TokenKind2[TokenKind2["LParen"] = 41] = "LParen";
-  TokenKind2[TokenKind2["RParen"] = 42] = "RParen";
-  TokenKind2[TokenKind2["LBrace"] = 43] = "LBrace";
-  TokenKind2[TokenKind2["RBrace"] = 44] = "RBrace";
-  TokenKind2[TokenKind2["LBracket"] = 45] = "LBracket";
-  TokenKind2[TokenKind2["RBracket"] = 46] = "RBracket";
-  TokenKind2[TokenKind2["Error"] = 47] = "Error";
+  TokenKind2[TokenKind2["ColonColon"] = 41] = "ColonColon";
+  TokenKind2[TokenKind2["LParen"] = 42] = "LParen";
+  TokenKind2[TokenKind2["RParen"] = 43] = "RParen";
+  TokenKind2[TokenKind2["LBrace"] = 44] = "LBrace";
+  TokenKind2[TokenKind2["RBrace"] = 45] = "RBrace";
+  TokenKind2[TokenKind2["LBracket"] = 46] = "LBracket";
+  TokenKind2[TokenKind2["RBracket"] = 47] = "RBracket";
+  TokenKind2[TokenKind2["Error"] = 48] = "Error";
 })(TokenKind ||= {});
 var EOF = -1;
 var TAB = 9;
@@ -1841,13 +2292,15 @@ var keywords = new Map([
   ["then", 9 /* Then */],
   ["else", 10 /* Else */],
   ["match", 11 /* Match */],
-  ["with", 12 /* With */],
-  ["end", 13 /* End */],
-  ["data", 14 /* Data */],
+  ["end", 12 /* End */],
+  ["type", 13 /* Type */],
+  ["when", 14 /* When */],
   ["true", 15 /* True */],
   ["false", 16 /* False */],
   ["as", 17 /* As */],
-  ["and", 18 /* AndKw */]
+  ["and", 18 /* AndKw */],
+  ["module", 19 /* Module */],
+  ["use", 20 /* Use */]
 ]);
 var isDigit = (ch) => ch >= DIGIT_0 && ch <= DIGIT_9;
 var isLower = (ch) => ch >= LOWER_A && ch <= LOWER_Z;
@@ -1935,7 +2388,7 @@ var scanString = (state, start) => {
     advance(state);
   }
   if (peek(state) === EOF) {
-    return [47 /* Error */, start, state.pos];
+    return [48 /* Error */, start, state.pos];
   }
   advance(state);
   return [2 /* String */, start, state.pos];
@@ -1943,7 +2396,7 @@ var scanString = (state, start) => {
 var scanLowerOrKeyword = (state, start) => {
   if (peek(state) === UNDERSCORE && !isIdentContinue(peekAt(state, 1))) {
     advance(state);
-    return [35 /* Underscore */, start, state.pos];
+    return [37 /* Underscore */, start, state.pos];
   }
   while (isIdentContinue(peek(state))) {
     advance(state);
@@ -1965,85 +2418,81 @@ var scanOperator = (state, start, ch) => {
   advance(state);
   switch (ch) {
     case PLUS:
-      if (peek(state) === PLUS) {
-        advance(state);
-        return [39 /* PlusPlus */, start, state.pos];
-      }
-      return [19 /* Plus */, start, state.pos];
+      return [21 /* Plus */, start, state.pos];
     case MINUS:
-      return [20 /* Minus */, start, state.pos];
+      if (peek(state) === GT) {
+        advance(state);
+        return [32 /* Arrow */, start, state.pos];
+      }
+      return [22 /* Minus */, start, state.pos];
     case STAR:
-      return [21 /* Star */, start, state.pos];
+      return [23 /* Star */, start, state.pos];
     case SLASH:
-      return [22 /* Slash */, start, state.pos];
+      return [24 /* Slash */, start, state.pos];
     case LT:
       if (peek(state) === EQ) {
         advance(state);
-        return [24 /* Le */, start, state.pos];
+        return [26 /* Le */, start, state.pos];
       }
-      return [23 /* Lt */, start, state.pos];
+      return [25 /* Lt */, start, state.pos];
     case GT:
       if (peek(state) === EQ) {
         advance(state);
-        return [26 /* Ge */, start, state.pos];
+        return [28 /* Ge */, start, state.pos];
       }
-      return [25 /* Gt */, start, state.pos];
+      return [27 /* Gt */, start, state.pos];
     case EQ:
       if (peek(state) === EQ) {
         advance(state);
-        return [27 /* EqEq */, start, state.pos];
+        return [29 /* EqEq */, start, state.pos];
       }
-      if (peek(state) === GT) {
-        advance(state);
-        return [30 /* Arrow */, start, state.pos];
-      }
-      return [31 /* Eq */, start, state.pos];
+      return [33 /* Eq */, start, state.pos];
     case BANG:
       if (peek(state) === EQ) {
         advance(state);
-        return [28 /* Ne */, start, state.pos];
+        return [30 /* Ne */, start, state.pos];
       }
-      return [47 /* Error */, start, state.pos];
+      return [48 /* Error */, start, state.pos];
     case PIPE:
       if (peek(state) === GT) {
         advance(state);
-        return [29 /* Pipe */, start, state.pos];
+        return [31 /* Pipe */, start, state.pos];
       }
       if (peek(state) === PIPE) {
         advance(state);
-        return [38 /* Or */, start, state.pos];
+        return [39 /* Or */, start, state.pos];
       }
-      return [32 /* Bar */, start, state.pos];
+      return [34 /* Bar */, start, state.pos];
     case AMPERSAND:
       if (peek(state) === AMPERSAND) {
         advance(state);
-        return [37 /* And */, start, state.pos];
+        return [38 /* And */, start, state.pos];
       }
-      return [47 /* Error */, start, state.pos];
+      return [48 /* Error */, start, state.pos];
     case COMMA:
-      return [33 /* Comma */, start, state.pos];
+      return [35 /* Comma */, start, state.pos];
     case DOT:
-      return [34 /* Dot */, start, state.pos];
+      return [36 /* Dot */, start, state.pos];
     case LPAREN:
-      return [41 /* LParen */, start, state.pos];
+      return [42 /* LParen */, start, state.pos];
     case RPAREN:
-      return [42 /* RParen */, start, state.pos];
+      return [43 /* RParen */, start, state.pos];
     case LBRACE:
-      return [43 /* LBrace */, start, state.pos];
+      return [44 /* LBrace */, start, state.pos];
     case RBRACE:
-      return [44 /* RBrace */, start, state.pos];
+      return [45 /* RBrace */, start, state.pos];
     case LBRACKET:
-      return [45 /* LBracket */, start, state.pos];
+      return [46 /* LBracket */, start, state.pos];
     case RBRACKET:
-      return [46 /* RBracket */, start, state.pos];
+      return [47 /* RBracket */, start, state.pos];
     case COLON:
       if (peek(state) === COLON) {
         advance(state);
-        return [36 /* ColonColon */, start, state.pos];
+        return [41 /* ColonColon */, start, state.pos];
       }
       return [40 /* Colon */, start, state.pos];
     default:
-      return [47 /* Error */, start, state.pos];
+      return [48 /* Error */, start, state.pos];
   }
 };
 var nextToken = (state) => {
@@ -2102,22 +2551,94 @@ var error2 = (state, message) => {
 };
 var span = (start, end) => ({ start, end });
 var tokenSpan = (token) => span(token[1], token[2]);
-var atNewStatement = (state) => state.lexer.atLineStart && !at(state, 32 /* Bar */);
+var atNewStatement = (state) => state.lexer.atLineStart && !at(state, 34 /* Bar */);
+var isLambdaStart = (state) => {
+  const savedPos = state.lexer.pos;
+  const savedCurrent = state.current;
+  while (at(state, 3 /* Lower */)) {
+    advance2(state);
+  }
+  const isLambda = at(state, 32 /* Arrow */);
+  state.lexer.pos = savedPos;
+  state.current = savedCurrent;
+  return isLambda;
+};
+var parseLambda = (state) => {
+  const start = state.current[1];
+  const params = [];
+  while (at(state, 3 /* Lower */) && !at(state, 32 /* Arrow */)) {
+    const token = advance2(state);
+    params.push({ name: text(state, token), span: tokenSpan(token) });
+  }
+  expect(state, 32 /* Arrow */, "expected '->'");
+  const body = parseExpr(state);
+  const end = body.span?.end ?? state.current[1];
+  let result = body;
+  for (let i = params.length - 1;i >= 0; i--) {
+    const p = params[i];
+    const absStart = i === 0 ? start : p.span.start;
+    result = abs(p.name, result, span(absStart, end), p.span);
+  }
+  return result;
+};
 var synchronize = (state) => {
   while (!at(state, 0 /* Eof */)) {
-    if (atAny(state, 5 /* Let */, 14 /* Data */, 8 /* If */, 11 /* Match */, 13 /* End */)) {
+    if (atAny(state, 5 /* Let */, 13 /* Type */, 8 /* If */, 11 /* Match */, 12 /* End */)) {
       return;
     }
     advance2(state);
   }
 };
+var parseParams = (state) => {
+  const params = [];
+  while (at(state, 3 /* Lower */) || at(state, 42 /* LParen */)) {
+    if (at(state, 42 /* LParen */)) {
+      advance2(state);
+      const paramToken = expect(state, 3 /* Lower */, "expected parameter name");
+      if (!paramToken)
+        break;
+      const paramName = text(state, paramToken);
+      let paramType;
+      if (at(state, 40 /* Colon */)) {
+        advance2(state);
+        paramType = parseType(state) ?? undefined;
+      }
+      expect(state, 43 /* RParen */, "expected ')' after parameter");
+      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
+    } else {
+      const paramToken = advance2(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+    }
+  }
+  return params;
+};
+var wrapInLambdas = (params, body) => {
+  let result = body;
+  for (let i = params.length - 1;i >= 0; i--) {
+    const p = params[i];
+    result = abs(p.name, result, undefined, p.span, p.type);
+  }
+  return result;
+};
 var parse = (source) => {
   const state = createParser(source);
+  const modules = [];
+  const uses = [];
   const declarations = [];
   const bindings = [];
   let expr = null;
+  while (at(state, 19 /* Module */)) {
+    const mod = parseModuleDecl(state);
+    if (mod)
+      modules.push(mod);
+  }
+  while (at(state, 20 /* Use */)) {
+    const use = parseUseDecl(state);
+    if (use)
+      uses.push(use);
+  }
   while (!at(state, 0 /* Eof */)) {
-    if (at(state, 14 /* Data */)) {
+    if (at(state, 13 /* Type */)) {
       const decl = parseDataDecl(state);
       if (decl)
         declarations.push(decl);
@@ -2135,7 +2656,7 @@ var parse = (source) => {
     }
   }
   return {
-    program: { declarations, bindings, expr },
+    program: { modules, uses, declarations, bindings, expr },
     diagnostics: state.diagnostics
   };
 };
@@ -2145,9 +2666,9 @@ var parseLetBindingOrExpr = (state) => {
   const recursive = at(state, 6 /* Rec */);
   if (recursive)
     advance2(state);
-  if (!recursive && atAny(state, 41 /* LParen */, 43 /* LBrace */, 35 /* Underscore */, 4 /* Upper */)) {
+  if (!recursive && atAny(state, 42 /* LParen */, 44 /* LBrace */, 37 /* Underscore */, 4 /* Upper */)) {
     const pattern = parsePattern(state);
-    expect(state, 31 /* Eq */, "expected '=' after pattern");
+    expect(state, 33 /* Eq */, "expected '=' after pattern");
     const value = parseExpr(state);
     expect(state, 7 /* In */, "expected 'in' after let value");
     const body2 = parseExpr(state);
@@ -2161,42 +2682,19 @@ var parseLetBindingOrExpr = (state) => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
-  const params = [];
-  while (at(state, 3 /* Lower */) || at(state, 41 /* LParen */)) {
-    if (at(state, 41 /* LParen */)) {
-      advance2(state);
-      const paramToken = expect(state, 3 /* Lower */, "expected parameter name");
-      if (!paramToken)
-        break;
-      const paramName = text(state, paramToken);
-      let paramType;
-      if (at(state, 40 /* Colon */)) {
-        advance2(state);
-        paramType = parseType(state) ?? undefined;
-      }
-      expect(state, 42 /* RParen */, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      const paramToken = advance2(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
-  }
+  const params = parseParams(state);
   let returnType;
   if (at(state, 40 /* Colon */)) {
     advance2(state);
     returnType = parseType(state) ?? undefined;
   }
-  if (!expect(state, 31 /* Eq */, "expected '=' after parameters")) {
+  if (!expect(state, 33 /* Eq */, "expected '=' after parameters")) {
     synchronize(state);
     return { kind: "expr", expr: num(0) };
   }
   const body = parseExpr(state);
   if (at(state, 7 /* In */) || recursive && at(state, 18 /* AndKw */)) {
-    let value = body;
-    for (let i = params.length - 1;i >= 0; i--) {
-      const p = params[i];
-      value = abs(p.name, value, undefined, p.span, p.type);
-    }
+    const value = wrapInLambdas(params, body);
     if (recursive) {
       const bindings = [recBinding(name, value, nameSpan, returnType)];
       while (at(state, 18 /* AndKw */)) {
@@ -2228,7 +2726,7 @@ var parseDataDecl = (state) => {
   while (at(state, 3 /* Lower */)) {
     typeParams.push(text(state, advance2(state)));
   }
-  if (!expect(state, 31 /* Eq */, "expected '=' after type parameters")) {
+  if (!expect(state, 33 /* Eq */, "expected '=' after type parameters")) {
     synchronize(state);
     return null;
   }
@@ -2236,7 +2734,7 @@ var parseDataDecl = (state) => {
   const first = parseConstructor(state);
   if (first)
     constructors.push(first);
-  while (at(state, 32 /* Bar */)) {
+  while (at(state, 34 /* Bar */)) {
     advance2(state);
     const con = parseConstructor(state);
     if (con)
@@ -2250,7 +2748,7 @@ var parseConstructor = (state) => {
     return null;
   const name = text(state, nameToken);
   const fields = [];
-  while (atAny(state, 3 /* Lower */, 4 /* Upper */, 41 /* LParen */) && !atNewStatement(state)) {
+  while (atAny(state, 3 /* Lower */, 4 /* Upper */, 42 /* LParen */) && !atNewStatement(state)) {
     const field2 = parseTypeAtom(state);
     if (field2)
       fields.push(field2);
@@ -2259,12 +2757,147 @@ var parseConstructor = (state) => {
   }
   return conDecl(name, fields);
 };
+var parseModuleDecl = (state) => {
+  const start = state.current[1];
+  advance2(state);
+  const nameToken = expect(state, 4 /* Upper */, "expected module name");
+  if (!nameToken) {
+    synchronize(state);
+    return null;
+  }
+  const name = text(state, nameToken);
+  const nameSpan = tokenSpan(nameToken);
+  const declarations = [];
+  const bindings = [];
+  while (!at(state, 12 /* End */) && !at(state, 0 /* Eof */)) {
+    if (at(state, 13 /* Type */)) {
+      const decl = parseDataDecl(state);
+      if (decl)
+        declarations.push(decl);
+    } else if (at(state, 5 /* Let */)) {
+      const binding = parseModuleBinding(state);
+      if (binding)
+        bindings.push(binding);
+    } else {
+      error2(state, "expected 'data' or 'let' declaration in module");
+      advance2(state);
+    }
+  }
+  const endToken = expect(state, 12 /* End */, "expected 'end' after module body");
+  const end = endToken ? endToken[2] : state.current[1];
+  return moduleDecl(name, declarations, bindings, span(start, end), nameSpan);
+};
+var parseModuleBinding = (state) => {
+  advance2(state);
+  const recursive = at(state, 6 /* Rec */);
+  if (recursive)
+    advance2(state);
+  const nameToken = expect(state, 3 /* Lower */, "expected binding name");
+  if (!nameToken) {
+    synchronize(state);
+    return null;
+  }
+  const name = text(state, nameToken);
+  const nameSpan = tokenSpan(nameToken);
+  const params = parseParams(state);
+  let returnType;
+  if (at(state, 40 /* Colon */)) {
+    advance2(state);
+    returnType = parseType(state) ?? undefined;
+  }
+  expect(state, 33 /* Eq */, "expected '=' after parameters");
+  const value = wrapInLambdas(params, parseExpr(state));
+  return recBinding(name, value, nameSpan, returnType);
+};
+var parseUseDecl = (state) => {
+  const start = state.current[1];
+  advance2(state);
+  const moduleToken = expect(state, 4 /* Upper */, "expected module name");
+  if (!moduleToken) {
+    synchronize(state);
+    return null;
+  }
+  const moduleName = text(state, moduleToken);
+  const moduleSpan = tokenSpan(moduleToken);
+  let imports = null;
+  let alias;
+  let aliasSpan;
+  if (at(state, 42 /* LParen */)) {
+    advance2(state);
+    if (at(state, 36 /* Dot */)) {
+      advance2(state);
+      if (at(state, 36 /* Dot */)) {
+        advance2(state);
+        imports = importAll();
+      } else {
+        error2(state, "expected '..' for import all");
+      }
+      expect(state, 43 /* RParen */, "expected ')' after '..'");
+    } else {
+      const items = parseImportItems(state);
+      imports = importSpecific(items);
+      expect(state, 43 /* RParen */, "expected ')' after import list");
+    }
+  }
+  if (at(state, 17 /* As */)) {
+    advance2(state);
+    const aliasToken = expect(state, 4 /* Upper */, "expected alias name");
+    if (aliasToken) {
+      alias = text(state, aliasToken);
+      aliasSpan = tokenSpan(aliasToken);
+    }
+  }
+  const end = state.current[1];
+  return useDecl(moduleName, imports, alias, span(start, end), moduleSpan, aliasSpan);
+};
+var parseImportItems = (state) => {
+  const items = [];
+  do {
+    if (at(state, 35 /* Comma */))
+      advance2(state);
+    if (at(state, 4 /* Upper */)) {
+      const nameToken = advance2(state);
+      const name = text(state, nameToken);
+      const nameSpan = tokenSpan(nameToken);
+      let constructors;
+      if (at(state, 42 /* LParen */)) {
+        advance2(state);
+        if (at(state, 36 /* Dot */)) {
+          advance2(state);
+          if (at(state, 36 /* Dot */)) {
+            advance2(state);
+            constructors = "all";
+          } else {
+            error2(state, "expected '..' for all constructors");
+          }
+        } else {
+          const cons = [];
+          do {
+            if (at(state, 35 /* Comma */))
+              advance2(state);
+            const conToken = expect(state, 4 /* Upper */, "expected constructor name");
+            if (conToken)
+              cons.push(text(state, conToken));
+          } while (at(state, 35 /* Comma */));
+          constructors = cons;
+        }
+        expect(state, 43 /* RParen */, "expected ')' after constructors");
+      }
+      items.push(importItem(name, constructors, nameSpan));
+    } else if (at(state, 3 /* Lower */)) {
+      const nameToken = advance2(state);
+      items.push(importItem(text(state, nameToken), undefined, tokenSpan(nameToken)));
+    } else {
+      break;
+    }
+  } while (at(state, 35 /* Comma */));
+  return items;
+};
 var parseType = (state) => {
   const left = parseTypeAtom(state);
   if (!left)
     return null;
-  if (at(state, 20 /* Minus */) && state.lexer.source.charCodeAt(state.current[2]) === 62) {
-    advance2(state);
+  if (at(state, 32 /* Arrow */)) {
     advance2(state);
     const right = parseType(state);
     if (!right)
@@ -2279,7 +2912,7 @@ var parseTypeAtom = (state) => {
   }
   if (at(state, 4 /* Upper */)) {
     let type = tycon(text(state, advance2(state)));
-    while (atAny(state, 3 /* Lower */, 4 /* Upper */, 41 /* LParen */) && !atNewStatement(state)) {
+    while (atAny(state, 3 /* Lower */, 4 /* Upper */, 42 /* LParen */) && !atNewStatement(state)) {
       const arg = parseTypeAtomSimple(state);
       if (arg) {
         type = tyapp(type, arg);
@@ -2289,10 +2922,10 @@ var parseTypeAtom = (state) => {
     }
     return type;
   }
-  if (at(state, 41 /* LParen */)) {
+  if (at(state, 42 /* LParen */)) {
     advance2(state);
     const inner = parseTypeAtom(state);
-    expect(state, 42 /* RParen */, "expected ')' after type");
+    expect(state, 43 /* RParen */, "expected ')' after type");
     return inner;
   }
   return null;
@@ -2304,10 +2937,10 @@ var parseTypeAtomSimple = (state) => {
   if (at(state, 4 /* Upper */)) {
     return tycon(text(state, advance2(state)));
   }
-  if (at(state, 41 /* LParen */)) {
+  if (at(state, 42 /* LParen */)) {
     advance2(state);
     const inner = parseTypeAtom(state);
-    expect(state, 42 /* RParen */, "expected ')' after type");
+    expect(state, 43 /* RParen */, "expected ')' after type");
     return inner;
   }
   return null;
@@ -2343,32 +2976,28 @@ var parsePrefix = (state) => {
       advance2(state);
       return bool(false, tokenSpan(token));
     case 3 /* Lower */: {
+      if (isLambdaStart(state)) {
+        return parseLambda(state);
+      }
       advance2(state);
       const name = text(state, token);
-      const paramSpan = tokenSpan(token);
-      if (at(state, 30 /* Arrow */)) {
-        advance2(state);
-        const body = parseExpr(state);
-        const end = body.span?.end ?? state.current[1];
-        return abs(name, body, span(start, end), paramSpan);
-      }
       return var_(name, tokenSpan(token));
     }
     case 4 /* Upper */: {
       advance2(state);
       return var_(text(state, token), tokenSpan(token));
     }
-    case 41 /* LParen */:
+    case 42 /* LParen */:
       return parseParenOrTuple(state);
-    case 20 /* Minus */: {
+    case 22 /* Minus */: {
       advance2(state);
       const operand = parsePrecedence(state, 50 /* Multiplicative */ + 1);
       const end = operand.span?.end ?? state.current[1];
       return binOp("-", num(0, span(start, start)), operand, span(start, end));
     }
-    case 43 /* LBrace */:
+    case 44 /* LBrace */:
       return parseRecord(state);
-    case 45 /* LBracket */:
+    case 46 /* LBracket */:
       return parseListLiteral(state);
     case 8 /* If */:
       return parseIf(state);
@@ -2393,54 +3022,62 @@ var parseInfix = (state, left, bp) => {
     return binOp(op, left, right, span(start, end));
   };
   switch (kind) {
-    case 19 /* Plus */:
+    case 21 /* Plus */:
       return binOp2("+");
-    case 20 /* Minus */:
+    case 22 /* Minus */:
       return binOp2("-");
-    case 21 /* Star */:
+    case 23 /* Star */:
       return binOp2("*");
-    case 22 /* Slash */:
+    case 24 /* Slash */:
       return binOp2("/");
-    case 23 /* Lt */:
+    case 25 /* Lt */:
       return binOp2("<");
-    case 24 /* Le */:
+    case 26 /* Le */:
       return binOp2("<=");
-    case 25 /* Gt */:
+    case 27 /* Gt */:
       return binOp2(">");
-    case 26 /* Ge */:
+    case 28 /* Ge */:
       return binOp2(">=");
-    case 27 /* EqEq */:
+    case 29 /* EqEq */:
       return binOp2("==");
-    case 28 /* Ne */:
+    case 30 /* Ne */:
       return binOp2("!=");
-    case 39 /* PlusPlus */:
-      return binOp2("++");
-    case 37 /* And */: {
+    case 38 /* And */: {
       advance2(state);
       const right = parsePrecedence(state, bp);
       const end = right.span?.end ?? state.current[1];
       return if_(left, right, bool(false), span(start, end));
     }
-    case 38 /* Or */: {
+    case 39 /* Or */: {
       advance2(state);
       const right = parsePrecedence(state, bp);
       const end = right.span?.end ?? state.current[1];
       return if_(left, bool(true), right, span(start, end));
     }
-    case 29 /* Pipe */: {
+    case 31 /* Pipe */: {
       advance2(state);
       const right = parsePrecedence(state, bp);
       const end = right.span?.end ?? state.current[1];
       return app(right, left, span(start, end));
     }
-    case 36 /* ColonColon */: {
+    case 41 /* ColonColon */: {
       advance2(state);
       const right = parsePrecedence(state, bp - 1);
       const end = right.span?.end ?? state.current[1];
-      return app(app(var_("Cons"), left), right, span(start, end));
+      const cons = var_("Cons");
+      return app(app(cons, left), right, span(start, end));
     }
-    case 34 /* Dot */: {
+    case 36 /* Dot */: {
       advance2(state);
+      if (left.kind === "Var" && left.name.length > 0 && left.name[0].toUpperCase() === left.name[0]) {
+        if (at(state, 3 /* Lower */) || at(state, 4 /* Upper */)) {
+          const memberToken = advance2(state);
+          const member = text(state, memberToken);
+          const memberSpan = tokenSpan(memberToken);
+          const end2 = memberToken[2];
+          return qualifiedVar(left.name, member, span(start, end2), left.span, memberSpan);
+        }
+      }
       if (at(state, 1 /* Number */)) {
         const indexToken = state.current;
         advance2(state);
@@ -2472,30 +3109,29 @@ var parseInfix = (state, left, bp) => {
 var infixBindingPower = (state) => {
   const kind = state.current[0];
   switch (kind) {
-    case 29 /* Pipe */:
+    case 31 /* Pipe */:
       return 10 /* Pipe */;
-    case 38 /* Or */:
+    case 41 /* ColonColon */:
+      return 11 /* Cons */;
+    case 39 /* Or */:
       return 12 /* Or */;
-    case 37 /* And */:
+    case 38 /* And */:
       return 14 /* And */;
-    case 36 /* ColonColon */:
-      return 15 /* Cons */;
-    case 27 /* EqEq */:
-    case 28 /* Ne */:
+    case 29 /* EqEq */:
+    case 30 /* Ne */:
       return 20 /* Equality */;
-    case 23 /* Lt */:
-    case 24 /* Le */:
-    case 25 /* Gt */:
-    case 26 /* Ge */:
+    case 25 /* Lt */:
+    case 26 /* Le */:
+    case 27 /* Gt */:
+    case 28 /* Ge */:
       return 30 /* Comparison */;
-    case 19 /* Plus */:
-    case 20 /* Minus */:
-    case 39 /* PlusPlus */:
+    case 21 /* Plus */:
+    case 22 /* Minus */:
       return 40 /* Additive */;
-    case 21 /* Star */:
-    case 22 /* Slash */:
+    case 23 /* Star */:
+    case 24 /* Slash */:
       return 50 /* Multiplicative */;
-    case 34 /* Dot */:
+    case 36 /* Dot */:
       return 70 /* FieldAccess */;
     case 3 /* Lower */:
     case 4 /* Upper */:
@@ -2503,8 +3139,8 @@ var infixBindingPower = (state) => {
     case 2 /* String */:
     case 15 /* True */:
     case 16 /* False */:
-    case 41 /* LParen */:
-    case 43 /* LBrace */:
+    case 42 /* LParen */:
+    case 44 /* LBrace */:
       if (state.lexer.atLineStart) {
         return 0 /* None */;
       }
@@ -2516,7 +3152,7 @@ var infixBindingPower = (state) => {
 var parseParenOrTuple = (state) => {
   const start = state.current[1];
   advance2(state);
-  if (at(state, 42 /* RParen */)) {
+  if (at(state, 43 /* RParen */)) {
     advance2(state);
     error2(state, "empty parentheses");
     return num(0);
@@ -2528,40 +3164,40 @@ var parseParenOrTuple = (state) => {
     if (at(state, 40 /* Colon */)) {
       advance2(state);
       const paramType = parseType(state);
-      expect(state, 42 /* RParen */, "expected ')' after type");
-      if (at(state, 30 /* Arrow */)) {
+      expect(state, 43 /* RParen */, "expected ')' after type");
+      if (at(state, 32 /* Arrow */)) {
         advance2(state);
         const body = parseExpr(state);
         const end = body.span?.end ?? state.current[1];
         return abs(text(state, nameToken), body, span(start, end), tokenSpan(nameToken), paramType ?? undefined);
       }
-      error2(state, "expected '=>' after annotated parameter");
+      error2(state, "expected '->' after annotated parameter");
       return num(0);
     }
     state.lexer.pos = savedPos;
     state.current = savedCurrent;
   }
   const first = parseExpr(state);
-  if (at(state, 33 /* Comma */)) {
+  if (at(state, 35 /* Comma */)) {
     const elements = [first];
-    while (at(state, 33 /* Comma */)) {
+    while (at(state, 35 /* Comma */)) {
       advance2(state);
       elements.push(parseExpr(state));
     }
-    const endToken = expect(state, 42 /* RParen */, "expected ')' after tuple");
+    const endToken = expect(state, 43 /* RParen */, "expected ')' after tuple");
     const end = endToken ? endToken[2] : state.current[1];
     return tuple(elements, span(start, end));
   }
-  expect(state, 42 /* RParen */, "expected ')' after expression");
+  expect(state, 43 /* RParen */, "expected ')' after expression");
   return first;
 };
 var parseRecord = (state) => {
   const start = state.current[1];
   advance2(state);
   const fields = [];
-  if (!at(state, 44 /* RBrace */)) {
+  if (!at(state, 45 /* RBrace */)) {
     do {
-      if (at(state, 33 /* Comma */))
+      if (at(state, 35 /* Comma */))
         advance2(state);
       const nameToken = expect(state, 3 /* Lower */, "expected field name");
       if (!nameToken)
@@ -2569,7 +3205,7 @@ var parseRecord = (state) => {
       const name = text(state, nameToken);
       const fieldStart = nameToken[1];
       const fieldEnd = nameToken[2];
-      if (at(state, 31 /* Eq */)) {
+      if (at(state, 33 /* Eq */)) {
         advance2(state);
         const value = parseExpr(state);
         const valueEnd = value.span?.end ?? state.current[1];
@@ -2578,9 +3214,9 @@ var parseRecord = (state) => {
         const value = var_(name, span(fieldStart, fieldEnd));
         fields.push(field(name, value, span(fieldStart, fieldEnd)));
       }
-    } while (at(state, 33 /* Comma */));
+    } while (at(state, 35 /* Comma */));
   }
-  const endToken = expect(state, 44 /* RBrace */, "expected '}' after record");
+  const endToken = expect(state, 45 /* RBrace */, "expected '}' after record");
   const end = endToken ? endToken[2] : state.current[1];
   return record(fields, span(start, end));
 };
@@ -2588,14 +3224,14 @@ var parseListLiteral = (state) => {
   const start = state.current[1];
   advance2(state);
   const elements = [];
-  if (!at(state, 46 /* RBracket */)) {
+  if (!at(state, 47 /* RBracket */)) {
     do {
-      if (at(state, 33 /* Comma */))
+      if (at(state, 35 /* Comma */))
         advance2(state);
       elements.push(parseExpr(state));
-    } while (at(state, 33 /* Comma */));
+    } while (at(state, 35 /* Comma */));
   }
-  const endToken = expect(state, 46 /* RBracket */, "expected ']' after list");
+  const endToken = expect(state, 47 /* RBracket */, "expected ']' after list");
   const end = endToken ? endToken[2] : state.current[1];
   let result = var_("Nil", span(end - 1, end));
   for (let i = elements.length - 1;i >= 0; i--) {
@@ -2620,15 +3256,14 @@ var parseMatch = (state) => {
   const start = state.current[1];
   advance2(state);
   const scrutinee = parseExpr(state);
-  expect(state, 12 /* With */, "expected 'with' after match expression");
   const cases = [];
-  while (at(state, 32 /* Bar */)) {
+  while (at(state, 14 /* When */)) {
     const caseStart = state.current[1];
     advance2(state);
     let pattern = parsePattern(state);
-    if (at(state, 32 /* Bar */)) {
+    if (at(state, 34 /* Bar */)) {
       const alternatives = [pattern];
-      while (at(state, 32 /* Bar */)) {
+      while (at(state, 34 /* Bar */)) {
         advance2(state);
         alternatives.push(parsePattern(state));
       }
@@ -2640,12 +3275,12 @@ var parseMatch = (state) => {
       advance2(state);
       guard = parseExpr(state);
     }
-    expect(state, 30 /* Arrow */, "expected '=>' after pattern");
+    expect(state, 32 /* Arrow */, "expected '->' after pattern");
     const body = parseExpr(state);
     const caseEnd = body.span?.end ?? state.current[1];
     cases.push(case_(pattern, body, guard, span(caseStart, caseEnd)));
   }
-  const endToken = expect(state, 13 /* End */, "expected 'end' after match cases");
+  const endToken = expect(state, 12 /* End */, "expected 'end' after match cases");
   const end = endToken ? endToken[2] : state.current[1];
   return match(scrutinee, cases, span(start, end));
 };
@@ -2656,37 +3291,14 @@ var parseRecBinding = (state) => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
-  const params = [];
-  while (at(state, 3 /* Lower */) || at(state, 41 /* LParen */)) {
-    if (at(state, 41 /* LParen */)) {
-      advance2(state);
-      const paramToken = expect(state, 3 /* Lower */, "expected parameter name");
-      if (!paramToken)
-        break;
-      const paramName = text(state, paramToken);
-      let paramType;
-      if (at(state, 40 /* Colon */)) {
-        advance2(state);
-        paramType = parseType(state) ?? undefined;
-      }
-      expect(state, 42 /* RParen */, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      const paramToken = advance2(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
-  }
+  const params = parseParams(state);
   let returnType;
   if (at(state, 40 /* Colon */)) {
     advance2(state);
     returnType = parseType(state) ?? undefined;
   }
-  expect(state, 31 /* Eq */, "expected '=' after name");
-  let value = parseExpr(state);
-  for (let i = params.length - 1;i >= 0; i--) {
-    const p = params[i];
-    value = abs(p.name, value, undefined, p.span, p.type);
-  }
+  expect(state, 33 /* Eq */, "expected '=' after name");
+  const value = wrapInLambdas(params, parseExpr(state));
   return recBinding(name, value, nameSpan, returnType);
 };
 var parseLetExpr = (state) => {
@@ -2695,7 +3307,7 @@ var parseLetExpr = (state) => {
   const recursive = at(state, 6 /* Rec */);
   if (recursive)
     advance2(state);
-  if (!recursive && atAny(state, 41 /* LParen */, 43 /* LBrace */, 35 /* Underscore */, 4 /* Upper */)) {
+  if (!recursive && atAny(state, 42 /* LParen */, 44 /* LBrace */, 37 /* Underscore */, 4 /* Upper */)) {
     return parseLetDestructuring(state, start);
   }
   if (recursive) {
@@ -2715,37 +3327,14 @@ var parseLetExpr = (state) => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
-  const params = [];
-  while (at(state, 3 /* Lower */) || at(state, 41 /* LParen */)) {
-    if (at(state, 41 /* LParen */)) {
-      advance2(state);
-      const paramToken = expect(state, 3 /* Lower */, "expected parameter name");
-      if (!paramToken)
-        break;
-      const paramName = text(state, paramToken);
-      let paramType;
-      if (at(state, 40 /* Colon */)) {
-        advance2(state);
-        paramType = parseType(state) ?? undefined;
-      }
-      expect(state, 42 /* RParen */, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      const paramToken = advance2(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
-  }
+  const params = parseParams(state);
   let returnType;
   if (at(state, 40 /* Colon */)) {
     advance2(state);
     returnType = parseType(state) ?? undefined;
   }
-  expect(state, 31 /* Eq */, "expected '=' after name");
-  let value = parseExpr(state);
-  for (let i = params.length - 1;i >= 0; i--) {
-    const p = params[i];
-    value = abs(p.name, value, undefined, p.span, p.type);
-  }
+  expect(state, 33 /* Eq */, "expected '=' after name");
+  const value = wrapInLambdas(params, parseExpr(state));
   expect(state, 7 /* In */, "expected 'in' after let value");
   const body = parseExpr(state);
   const end = body.span?.end ?? state.current[1];
@@ -2753,7 +3342,7 @@ var parseLetExpr = (state) => {
 };
 var parseLetDestructuring = (state, start) => {
   const pattern = parsePattern(state);
-  expect(state, 31 /* Eq */, "expected '=' after pattern");
+  expect(state, 33 /* Eq */, "expected '=' after pattern");
   const value = parseExpr(state);
   expect(state, 7 /* In */, "expected 'in' after let value");
   const body = parseExpr(state);
@@ -2761,15 +3350,15 @@ var parseLetDestructuring = (state, start) => {
   return match(value, [case_(pattern, body)], span(start, end));
 };
 var PATTERN_STARTS = new Set([
-  35 /* Underscore */,
+  37 /* Underscore */,
   3 /* Lower */,
   4 /* Upper */,
   1 /* Number */,
   2 /* String */,
   15 /* True */,
   16 /* False */,
-  41 /* LParen */,
-  43 /* LBrace */
+  42 /* LParen */,
+  44 /* LBrace */
 ]);
 var parsePattern = (state, allowArgs = true) => {
   const pattern = parsePatternCore(state, allowArgs);
@@ -2791,7 +3380,7 @@ var parsePatternCore = (state, allowArgs = true) => {
   const kind = token[0];
   const start = token[1];
   switch (kind) {
-    case 35 /* Underscore */:
+    case 37 /* Underscore */:
       advance2(state);
       return pwildcard(tokenSpan(token));
     case 3 /* Lower */:
@@ -2801,6 +3390,24 @@ var parsePatternCore = (state, allowArgs = true) => {
       advance2(state);
       const name = text(state, token);
       const nameSpan = tokenSpan(token);
+      if (at(state, 36 /* Dot */)) {
+        advance2(state);
+        const conToken = expect(state, 4 /* Upper */, "expected constructor name after '.'");
+        if (!conToken)
+          return pwildcard();
+        const conName = text(state, conToken);
+        const conSpan = tokenSpan(conToken);
+        if (!allowArgs) {
+          const end3 = conToken[2];
+          return qualifiedPCon(name, conName, [], span(start, end3), nameSpan, conSpan);
+        }
+        const args2 = [];
+        while (PATTERN_STARTS.has(state.current[0])) {
+          args2.push(parsePatternCore(state, false));
+        }
+        const end2 = args2[args2.length - 1]?.span?.end ?? conToken[2];
+        return qualifiedPCon(name, conName, args2, span(start, end2), nameSpan, conSpan);
+      }
       if (!allowArgs)
         return pcon(name, [], nameSpan, nameSpan);
       const args = [];
@@ -2822,9 +3429,9 @@ var parsePatternCore = (state, allowArgs = true) => {
     case 16 /* False */:
       advance2(state);
       return plit(false, tokenSpan(token));
-    case 41 /* LParen */:
+    case 42 /* LParen */:
       return parseTuplePattern(state);
-    case 43 /* LBrace */:
+    case 44 /* LBrace */:
       return parseRecordPattern(state);
     default:
       error2(state, `unexpected token in pattern: ${TokenKind[kind]}`);
@@ -2836,32 +3443,32 @@ var parsePatternCore = (state, allowArgs = true) => {
 var parseTuplePattern = (state) => {
   const start = state.current[1];
   advance2(state);
-  if (at(state, 42 /* RParen */)) {
+  if (at(state, 43 /* RParen */)) {
     advance2(state);
     error2(state, "empty pattern");
     return pwildcard();
   }
   const first = parsePattern(state);
-  if (at(state, 33 /* Comma */)) {
+  if (at(state, 35 /* Comma */)) {
     const elements = [first];
-    while (at(state, 33 /* Comma */)) {
+    while (at(state, 35 /* Comma */)) {
       advance2(state);
       elements.push(parsePattern(state));
     }
-    const endToken = expect(state, 42 /* RParen */, "expected ')' after tuple pattern");
+    const endToken = expect(state, 43 /* RParen */, "expected ')' after tuple pattern");
     const end = endToken ? endToken[2] : state.current[1];
     return ptuple(elements, span(start, end));
   }
-  expect(state, 42 /* RParen */, "expected ')' after pattern");
+  expect(state, 43 /* RParen */, "expected ')' after pattern");
   return first;
 };
 var parseRecordPattern = (state) => {
   const start = state.current[1];
   advance2(state);
   const fields = [];
-  if (!at(state, 44 /* RBrace */)) {
+  if (!at(state, 45 /* RBrace */)) {
     do {
-      if (at(state, 33 /* Comma */))
+      if (at(state, 35 /* Comma */))
         advance2(state);
       const nameToken = expect(state, 3 /* Lower */, "expected field name");
       if (!nameToken)
@@ -2869,7 +3476,7 @@ var parseRecordPattern = (state) => {
       const name = text(state, nameToken);
       const fieldStart = nameToken[1];
       const fieldEnd = nameToken[2];
-      if (at(state, 31 /* Eq */)) {
+      if (at(state, 33 /* Eq */)) {
         advance2(state);
         const pattern = parsePattern(state);
         const patternEnd = pattern.span?.end ?? state.current[1];
@@ -2878,9 +3485,9 @@ var parseRecordPattern = (state) => {
         const pattern = pvar(name, span(fieldStart, fieldEnd));
         fields.push(pfield(name, pattern, span(fieldStart, fieldEnd)));
       }
-    } while (at(state, 33 /* Comma */));
+    } while (at(state, 35 /* Comma */));
   }
-  const endToken = expect(state, 44 /* RBrace */, "expected '}' after record pattern");
+  const endToken = expect(state, 45 /* RBrace */, "expected '}' after record pattern");
   const end = endToken ? endToken[2] : state.current[1];
   return precord(fields, span(start, end));
 };
@@ -2927,7 +3534,7 @@ var parseStringContent = (state, quoted, tokenStart) => {
   }
   return result;
 };
-var programToExpr = (program) => {
+var programToExpr = (program, modules = [], uses = []) => {
   if (!program.expr && program.bindings.length === 0) {
     return null;
   }
@@ -2945,6 +3552,25 @@ var programToExpr = (program) => {
       expr = let_(binding.name, value, expr, undefined, binding.nameSpan, binding.returnType);
     }
   }
+  const importedBindings = [];
+  for (const use of uses) {
+    const mod = modules.find((m) => m.name === use.moduleName);
+    if (!mod)
+      continue;
+    if (use.imports?.kind === "All") {
+      importedBindings.push(...mod.bindings);
+    } else if (use.imports?.kind === "Specific") {
+      for (const item of use.imports.items) {
+        const binding = mod.bindings.find((b) => b.name === item.name);
+        if (binding) {
+          importedBindings.push(binding);
+        }
+      }
+    }
+  }
+  if (importedBindings.length > 0) {
+    expr = letRec(importedBindings, expr);
+  }
   return expr;
 };
 
@@ -2955,88 +3581,65 @@ var list = dataDecl("List", ["a"], [
   conDecl("Nil", []),
   conDecl("Cons", [tyvar("a"), tyapp(tycon("List"), tyvar("a"))])
 ]);
-var declarations = [maybe, either, list];
-var map = letRec([
-  recBinding("map", abs("f", abs("xs", match(var_("xs"), [
-    case_(pcon("Nil", []), var_("Nil")),
-    case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("Cons"), app(var_("f"), var_("x"))), app(app(var_("map"), var_("f")), var_("rest"))))
-  ]))))
-], var_("map"));
-var filter = letRec([
-  recBinding("filter", abs("p", abs("xs", match(var_("xs"), [
-    case_(pcon("Nil", []), var_("Nil")),
-    case_(pcon("Cons", [pvar("x"), pvar("rest")]), if_(app(var_("p"), var_("x")), app(app(var_("Cons"), var_("x")), app(app(var_("filter"), var_("p")), var_("rest"))), app(app(var_("filter"), var_("p")), var_("rest"))))
-  ]))))
-], var_("filter"));
-var head = abs("xs", match(var_("xs"), [
+var mapExpr = abs("f", abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), var_("Nil")),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("Cons"), app(var_("f"), var_("x"))), app(app(var_("map"), var_("f")), var_("rest"))))
+])));
+var filterExpr = abs("p", abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), var_("Nil")),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), if_(app(var_("p"), var_("x")), app(app(var_("Cons"), var_("x")), app(app(var_("filter"), var_("p")), var_("rest"))), app(app(var_("filter"), var_("p")), var_("rest"))))
+])));
+var headExpr = abs("xs", match(var_("xs"), [
   case_(pcon("Nil", []), var_("Nothing")),
   case_(pcon("Cons", [pvar("x"), pwildcard()]), app(var_("Just"), var_("x")))
 ]));
-var tail = abs("xs", match(var_("xs"), [
+var tailExpr = abs("xs", match(var_("xs"), [
   case_(pcon("Nil", []), var_("Nothing")),
   case_(pcon("Cons", [pwildcard(), pvar("rest")]), app(var_("Just"), var_("rest")))
 ]));
-var isEmpty = abs("xs", match(var_("xs"), [
+var isEmptyExpr = abs("xs", match(var_("xs"), [
   case_(pcon("Nil", []), bool(true)),
   case_(pcon("Cons", [pwildcard(), pwildcard()]), bool(false))
 ]));
-var length = letRec([
-  recBinding("length", abs("xs", match(var_("xs"), [
-    case_(pcon("Nil", []), num(0)),
-    case_(pcon("Cons", [pwildcard(), pvar("rest")]), binOp("+", num(1), app(var_("length"), var_("rest"))))
-  ])))
-], var_("length"));
-var foldr = letRec([
-  recBinding("foldr", abs("f", abs("z", abs("xs", match(var_("xs"), [
-    case_(pcon("Nil", []), var_("z")),
-    case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("f"), var_("x")), app(app(app(var_("foldr"), var_("f")), var_("z")), var_("rest"))))
-  ])))))
-], var_("foldr"));
-var foldl = letRec([
-  recBinding("foldl", abs("f", abs("z", abs("xs", match(var_("xs"), [
-    case_(pcon("Nil", []), var_("z")),
-    case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(app(var_("foldl"), var_("f")), app(app(var_("f"), var_("z")), var_("x"))), var_("rest")))
-  ])))))
-], var_("foldl"));
-var reverse = abs("xs", app(app(app(foldl, abs("acc", abs("x", app(app(var_("Cons"), var_("x")), var_("acc"))))), var_("Nil")), var_("xs")));
-var concat = abs("xs", abs("ys", app(app(app(foldr, var_("Cons")), var_("ys")), var_("xs"))));
-var id = abs("x", var_("x"));
-var const_ = abs("x", abs("_", var_("x")));
-var compose = abs("f", abs("g", abs("x", app(var_("f"), app(var_("g"), var_("x"))))));
-var flip = abs("f", abs("a", abs("b", app(app(var_("f"), var_("b")), var_("a")))));
-var functions = {
-  map,
-  filter,
-  head,
-  tail,
-  isEmpty,
-  length,
-  foldr,
-  foldl,
-  reverse,
-  concat,
-  id,
-  const: const_,
-  compose,
-  flip
-};
-var wrapWithPrelude = (expr) => {
-  let result = let_("flip", flip, expr);
-  result = let_("compose", compose, result);
-  result = let_("const", const_, result);
-  result = let_("id", id, result);
-  result = let_("concat", concat, result);
-  result = let_("reverse", reverse, result);
-  result = letRec([recBinding("foldl", foldl.bindings[0].value)], result);
-  result = letRec([recBinding("foldr", foldr.bindings[0].value)], result);
-  result = letRec([recBinding("length", length.bindings[0].value)], result);
-  result = let_("isEmpty", isEmpty, result);
-  result = let_("tail", tail, result);
-  result = let_("head", head, result);
-  result = letRec([recBinding("filter", filter.bindings[0].value)], result);
-  result = letRec([recBinding("map", map.bindings[0].value)], result);
-  return result;
-};
+var lengthExpr = abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), num(0)),
+  case_(pcon("Cons", [pwildcard(), pvar("rest")]), binOp("+", num(1), app(var_("length"), var_("rest"))))
+]));
+var foldrExpr = abs("f", abs("z", abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), var_("z")),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("f"), var_("x")), app(app(app(var_("foldr"), var_("f")), var_("z")), var_("rest"))))
+]))));
+var foldlExpr = abs("f", abs("z", abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), var_("z")),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(app(var_("foldl"), var_("f")), app(app(var_("f"), var_("z")), var_("x"))), var_("rest")))
+]))));
+var reverseExpr = abs("xs", app(app(app(var_("foldl"), abs("acc", abs("x", app(app(var_("Cons"), var_("x")), var_("acc"))))), var_("Nil")), var_("xs")));
+var concatExpr = abs("xs", abs("ys", app(app(app(var_("foldr"), var_("Cons")), var_("ys")), var_("xs"))));
+var idExpr = abs("x", var_("x"));
+var constExpr = abs("x", abs("_", var_("x")));
+var composeExpr = abs("f", abs("g", abs("x", app(var_("f"), app(var_("g"), var_("x"))))));
+var flipExpr = abs("f", abs("a", abs("b", app(app(var_("f"), var_("b")), var_("a")))));
+var maybeModule = moduleDecl("Maybe", [maybe], []);
+var eitherModule = moduleDecl("Either", [either], []);
+var listModule = moduleDecl("List", [list], [
+  recBinding("map", mapExpr),
+  recBinding("filter", filterExpr),
+  recBinding("head", headExpr),
+  recBinding("tail", tailExpr),
+  recBinding("isEmpty", isEmptyExpr),
+  recBinding("length", lengthExpr),
+  recBinding("foldr", foldrExpr),
+  recBinding("foldl", foldlExpr),
+  recBinding("reverse", reverseExpr),
+  recBinding("concat", concatExpr)
+]);
+var coreModule = moduleDecl("Core", [], [
+  recBinding("id", idExpr),
+  recBinding("const", constExpr),
+  recBinding("compose", composeExpr),
+  recBinding("flip", flipExpr)
+]);
+var modules = [maybeModule, eitherModule, listModule, coreModule];
 
 // src/lsp/positions.ts
 var offsetToPosition = (source, offset) => {
@@ -3073,14 +3676,14 @@ var spanToRange = (source, span2) => ({
 // src/lsp/transport.ts
 var isRequest = (msg) => ("id" in msg) && ("method" in msg);
 var isNotification = (msg) => !("id" in msg) && ("method" in msg);
-var successResponse = (id2, result) => ({
+var successResponse = (id, result) => ({
   jsonrpc: "2.0",
-  id: id2,
+  id,
   result
 });
-var errorResponse = (id2, code, message) => ({
+var errorResponse = (id, code, message) => ({
   jsonrpc: "2.0",
-  id: id2,
+  id,
   error: { code, message }
 });
 var notification = (method, params) => ({
@@ -3092,6 +3695,14 @@ var notification = (method, params) => ({
 // src/lsp/server.ts
 var SYNC_FULL = 1;
 var SEVERITY_ERROR = 1;
+var preludeUses = modules.map((mod) => useDecl(mod.name, importAll()));
+var processProgram = (program) => {
+  const allModules = [...modules, ...program.modules];
+  const allUses = [...preludeUses, ...program.uses];
+  const moduleEnv = processModules(allModules);
+  const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
+  return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+};
 var createServer = (transport) => {
   const documents = new Map;
   transport.onMessage((message) => {
@@ -3103,38 +3714,38 @@ var createServer = (transport) => {
   });
   transport.onClose(() => {});
   const handleRequest = (request) => {
-    const { id: id2, method, params } = request;
+    const { id, method, params } = request;
     try {
       switch (method) {
         case "initialize":
-          transport.send(successResponse(id2, handleInitialize(params)));
+          transport.send(successResponse(id, handleInitialize(params)));
           break;
         case "shutdown":
-          transport.send(successResponse(id2, null));
+          transport.send(successResponse(id, null));
           break;
         case "textDocument/hover":
-          transport.send(successResponse(id2, handleHover(params)));
+          transport.send(successResponse(id, handleHover(params)));
           break;
         case "textDocument/definition":
-          transport.send(successResponse(id2, handleDefinition(params)));
+          transport.send(successResponse(id, handleDefinition(params)));
           break;
         case "textDocument/prepareRename":
-          transport.send(successResponse(id2, handlePrepareRename(params)));
+          transport.send(successResponse(id, handlePrepareRename(params)));
           break;
         case "textDocument/rename":
-          transport.send(successResponse(id2, handleRename(params)));
+          transport.send(successResponse(id, handleRename(params)));
           break;
         case "textDocument/completion":
-          transport.send(successResponse(id2, handleCompletion(params)));
+          transport.send(successResponse(id, handleCompletion(params)));
           break;
         case "algow/evaluate":
-          transport.send(successResponse(id2, handleEvaluate(params)));
+          transport.send(successResponse(id, handleEvaluate(params)));
           break;
         default:
-          transport.send(errorResponse(id2, -32601, `Method not found: ${method}`));
+          transport.send(errorResponse(id, -32601, `Method not found: ${method}`));
       }
     } catch (err) {
-      transport.send(errorResponse(id2, -32603, err.message));
+      transport.send(errorResponse(id, -32603, err.message));
     }
   };
   const handleNotification = (msg) => {
@@ -3279,7 +3890,6 @@ ${def.name}: ${typeToString(type)}
   const COMPLETION_KIND_FUNCTION = 3;
   const COMPLETION_KIND_CONSTRUCTOR = 4;
   const COMPLETION_KIND_FIELD = 5;
-  const COMPLETION_KIND_VARIABLE = 6;
   const COMPLETION_KIND_KEYWORD = 14;
   const handleCompletion = (params) => {
     const doc = documents.get(params.textDocument.uri);
@@ -3294,9 +3904,8 @@ ${def.name}: ${typeToString(type)}
       const fieldItems = getRecordFieldCompletions(doc, varName);
       items.push(...fieldItems);
     } else {
-      items.push(...getVariableCompletions(doc, offset));
+      items.push(...getTypeEnvCompletions(doc));
       items.push(...getConstructorCompletions(doc));
-      items.push(...getPreludeFunctionCompletions());
       items.push(...getKeywordCompletions());
     }
     return { isIncomplete: false, items };
@@ -3339,23 +3948,13 @@ ${def.name}: ${typeToString(type)}
   const resolveType = (type) => {
     return type;
   };
-  const getVariableCompletions = (doc, _offset) => {
-    if (!doc.symbols || !doc.types)
-      return [];
+  const getTypeEnvCompletions = (doc) => {
     const items = [];
-    const seen = new Set;
-    for (const def of doc.symbols.definitions) {
-      if (seen.has(def.name))
-        continue;
-      seen.add(def.name);
-      if (def.kind === "constructor")
-        continue;
-      const type = doc.types.get(def);
-      const detail = type ? typeToString(type) : undefined;
+    for (const [name, scheme2] of doc.typeEnv) {
       items.push({
-        label: def.name,
-        kind: def.kind === "parameter" ? COMPLETION_KIND_VARIABLE : COMPLETION_KIND_FUNCTION,
-        detail
+        label: name,
+        kind: COMPLETION_KIND_FUNCTION,
+        detail: typeToString(scheme2.type)
       });
     }
     return items;
@@ -3373,17 +3972,6 @@ ${def.name}: ${typeToString(type)}
     }
     return items;
   };
-  const getPreludeFunctionCompletions = () => {
-    const items = [];
-    for (const name of Object.keys(functions)) {
-      items.push({
-        label: name,
-        kind: COMPLETION_KIND_FUNCTION,
-        detail: "prelude"
-      });
-    }
-    return items;
-  };
   const getKeywordCompletions = () => {
     const keywords2 = [
       "let",
@@ -3393,9 +3981,9 @@ ${def.name}: ${typeToString(type)}
       "then",
       "else",
       "match",
-      "with",
+      "when",
       "end",
-      "data",
+      "type",
       "true",
       "false"
     ];
@@ -3412,16 +4000,13 @@ ${def.name}: ${typeToString(type)}
     if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
       return { success: false, error: "Cannot evaluate: document has errors" };
     }
-    const expr = programToExpr(doc.program);
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
     if (!expr) {
       return { success: false, error: "No expression to evaluate" };
     }
-    const wrappedExpr = wrapWithPrelude(expr);
     try {
-      const prelude = processDeclarations(declarations);
-      const { constructorNames } = processDeclarations(doc.program.declarations, prelude);
-      const constructorEnv = createConstructorEnv(constructorNames);
-      const result = evaluate(constructorEnv, wrappedExpr);
+      const constructorEnv = createConstructorEnv(doc.constructorNames);
+      const result = evaluate(constructorEnv, expr);
       return { success: true, value: valueToString(result) };
     } catch (err) {
       if (err instanceof RuntimeError) {
@@ -3436,19 +4021,17 @@ ${def.name}: ${typeToString(type)}
     for (const diag of parseResult.diagnostics) {
       lspDiagnostics.push(convertDiagnostic(text2, diag));
     }
-    const prelude = processDeclarations(declarations);
-    const { typeEnv, registry, constructorNames } = processDeclarations(parseResult.program.declarations, prelude);
-    const expr = programToExpr(parseResult.program);
+    const { typeEnv, registry, constructorNames, allModules, allUses } = processProgram(parseResult.program);
+    const expr = programToExpr(parseResult.program, allModules, allUses);
     let symbols = null;
     let types = null;
     if (expr) {
-      const wrappedExpr = wrapWithPrelude(expr);
-      const bindResult = bindWithConstructors(constructorNames, wrappedExpr);
+      const bindResult = bindWithConstructors(constructorNames, expr);
       symbols = bindResult.symbols;
       for (const diag of bindResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
       }
-      const checkResult = check(typeEnv, registry, wrappedExpr, symbols);
+      const checkResult = check(typeEnv, registry, expr, symbols);
       types = checkResult.types;
       for (const diag of checkResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
@@ -3461,8 +4044,12 @@ ${def.name}: ${typeToString(type)}
       diagnostics: lspDiagnostics,
       symbols,
       types,
+      typeEnv,
       program: parseResult.program,
-      registry
+      registry,
+      constructorNames,
+      allModules,
+      allUses
     };
   };
   const convertDiagnostic = (source, diag) => {

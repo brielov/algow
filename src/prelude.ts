@@ -1,35 +1,32 @@
 /**
- * Prelude - standard data types and functions included in every program.
+ * Prelude - standard modules included in every program.
  *
- * Structured as modules:
- * - Maybe: Maybe type and operations
- * - Either: Either type
- * - List: List type and operations (map, filter, foldr, foldl, etc.)
+ * Modules:
+ * - Maybe: Optional values
+ * - Either: Sum type for errors/results
+ * - List: Linked list with common operations
  * - Core: Utility functions (id, const, compose, flip)
  */
 
 import * as ast from "./ast";
 
 // =============================================================================
-// Data Declarations
+// DATA DECLARATIONS
 // =============================================================================
 
-/** type Maybe a = Nothing | Just a */
-export const maybe = ast.dataDecl(
+const maybe = ast.dataDecl(
   "Maybe",
   ["a"],
   [ast.conDecl("Nothing", []), ast.conDecl("Just", [ast.tyvar("a")])],
 );
 
-/** type Either a b = Left a | Right b */
-export const either = ast.dataDecl(
+const either = ast.dataDecl(
   "Either",
   ["a", "b"],
   [ast.conDecl("Left", [ast.tyvar("a")]), ast.conDecl("Right", [ast.tyvar("b")])],
 );
 
-/** type List a = Nil | Cons a (List a) */
-export const list = ast.dataDecl(
+const list = ast.dataDecl(
   "List",
   ["a"],
   [
@@ -38,13 +35,10 @@ export const list = ast.dataDecl(
   ],
 );
 
-export const declarations = [maybe, either, list] as const;
-
 // =============================================================================
-// Function Expressions (for use in modules)
+// FUNCTION EXPRESSIONS
 // =============================================================================
 
-/** map f xs = match xs when Nil -> Nil | Cons x rest -> Cons (f x) (map f rest) end */
 const mapExpr = ast.abs(
   "f",
   ast.abs(
@@ -62,7 +56,6 @@ const mapExpr = ast.abs(
   ),
 );
 
-/** filter p xs = match xs when Nil -> Nil | Cons x rest -> if p x then Cons x (filter p rest) else filter p rest end */
 const filterExpr = ast.abs(
   "p",
   ast.abs(
@@ -84,7 +77,6 @@ const filterExpr = ast.abs(
   ),
 );
 
-/** head xs = match xs when Nil -> Nothing | Cons x _ -> Just x end */
 const headExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -96,7 +88,6 @@ const headExpr = ast.abs(
   ]),
 );
 
-/** tail xs = match xs when Nil -> Nothing | Cons _ rest -> Just rest end */
 const tailExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -108,7 +99,6 @@ const tailExpr = ast.abs(
   ]),
 );
 
-/** isEmpty xs = match xs when Nil -> true | Cons _ _ -> false end */
 const isEmptyExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -117,7 +107,6 @@ const isEmptyExpr = ast.abs(
   ]),
 );
 
-/** length xs = match xs when Nil -> 0 | Cons _ rest -> 1 + length rest end */
 const lengthExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
@@ -129,7 +118,6 @@ const lengthExpr = ast.abs(
   ]),
 );
 
-/** foldr f z xs = match xs when Nil -> z | Cons x rest -> f x (foldr f z rest) end */
 const foldrExpr = ast.abs(
   "f",
   ast.abs(
@@ -153,7 +141,6 @@ const foldrExpr = ast.abs(
   ),
 );
 
-/** foldl f z xs = match xs when Nil -> z | Cons x rest -> foldl f (f z x) rest end */
 const foldlExpr = ast.abs(
   "f",
   ast.abs(
@@ -177,7 +164,6 @@ const foldlExpr = ast.abs(
   ),
 );
 
-/** reverse xs = foldl (acc x -> Cons x acc) Nil xs */
 const reverseExpr = ast.abs(
   "xs",
   ast.app(
@@ -195,7 +181,6 @@ const reverseExpr = ast.abs(
   ),
 );
 
-/** concat xs ys = foldr Cons ys xs */
 const concatExpr = ast.abs(
   "xs",
   ast.abs(
@@ -204,88 +189,52 @@ const concatExpr = ast.abs(
   ),
 );
 
-/** id x = x */
 const idExpr = ast.abs("x", ast.var_("x"));
-
-/** const x _ = x */
 const constExpr = ast.abs("x", ast.abs("_", ast.var_("x")));
-
-/** compose f g x = f (g x) */
 const composeExpr = ast.abs(
   "f",
   ast.abs("g", ast.abs("x", ast.app(ast.var_("f"), ast.app(ast.var_("g"), ast.var_("x"))))),
 );
-
-/** flip f a b = f b a */
 const flipExpr = ast.abs(
   "f",
   ast.abs("a", ast.abs("b", ast.app(ast.app(ast.var_("f"), ast.var_("b")), ast.var_("a")))),
 );
 
 // =============================================================================
-// Prelude Function Names (for LSP completion)
+// MODULES
 // =============================================================================
 
-export const preludeFunctionNames = [
-  "map",
-  "filter",
-  "head",
-  "tail",
-  "isEmpty",
-  "length",
-  "foldr",
-  "foldl",
-  "reverse",
-  "concat",
-  "id",
-  "const",
-  "compose",
-  "flip",
-] as const;
+export const maybeModule = ast.moduleDecl("Maybe", [maybe], []);
 
-// =============================================================================
-// Function Expressions (for testing)
-// =============================================================================
+export const eitherModule = ast.moduleDecl("Either", [either], []);
 
-export const preludeFunctionExprs = {
-  map: ast.letRec([ast.recBinding("map", mapExpr)], ast.var_("map")),
-  filter: ast.letRec([ast.recBinding("filter", filterExpr)], ast.var_("filter")),
-  head: headExpr,
-  tail: tailExpr,
-  isEmpty: isEmptyExpr,
-  length: ast.letRec([ast.recBinding("length", lengthExpr)], ast.var_("length")),
-  foldr: ast.letRec([ast.recBinding("foldr", foldrExpr)], ast.var_("foldr")),
-  foldl: ast.letRec([ast.recBinding("foldl", foldlExpr)], ast.var_("foldl")),
-  reverse: reverseExpr,
-  concat: concatExpr,
-  id: idExpr,
-  const: constExpr,
-  compose: composeExpr,
-  flip: flipExpr,
-} as const;
+export const listModule = ast.moduleDecl(
+  "List",
+  [list],
+  [
+    ast.recBinding("map", mapExpr),
+    ast.recBinding("filter", filterExpr),
+    ast.recBinding("head", headExpr),
+    ast.recBinding("tail", tailExpr),
+    ast.recBinding("isEmpty", isEmptyExpr),
+    ast.recBinding("length", lengthExpr),
+    ast.recBinding("foldr", foldrExpr),
+    ast.recBinding("foldl", foldlExpr),
+    ast.recBinding("reverse", reverseExpr),
+    ast.recBinding("concat", concatExpr),
+  ],
+);
 
-/**
- * Wrap an expression with all prelude function bindings.
- * This makes map, filter, foldr, foldl, etc. available in the expression.
- */
-export const wrapWithPrelude = (expr: ast.Expr): ast.Expr => {
-  // Wrap with simple functions (non-recursive)
-  let result: ast.Expr = ast.let_("flip", flipExpr, expr);
-  result = ast.let_("compose", composeExpr, result);
-  result = ast.let_("const", constExpr, result);
-  result = ast.let_("id", idExpr, result);
-  result = ast.let_("concat", concatExpr, result);
-  result = ast.let_("reverse", reverseExpr, result);
+export const coreModule = ast.moduleDecl(
+  "Core",
+  [],
+  [
+    ast.recBinding("id", idExpr),
+    ast.recBinding("const", constExpr),
+    ast.recBinding("compose", composeExpr),
+    ast.recBinding("flip", flipExpr),
+  ],
+);
 
-  // Wrap with recursive functions
-  result = ast.letRec([ast.recBinding("foldl", foldlExpr)], result);
-  result = ast.letRec([ast.recBinding("foldr", foldrExpr)], result);
-  result = ast.letRec([ast.recBinding("length", lengthExpr)], result);
-  result = ast.let_("isEmpty", isEmptyExpr, result);
-  result = ast.let_("tail", tailExpr, result);
-  result = ast.let_("head", headExpr, result);
-  result = ast.letRec([ast.recBinding("filter", filterExpr)], result);
-  result = ast.letRec([ast.recBinding("map", mapExpr)], result);
-
-  return result;
-};
+/** All prelude modules */
+export const modules = [maybeModule, eitherModule, listModule, coreModule] as const;

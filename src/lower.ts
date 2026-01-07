@@ -318,10 +318,11 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
       return lowerMatch(ctx, expr);
 
     case "QualifiedVar":
-      // Modules are not supported in the lowering phase
-      // Qualified names should be resolved before lowering
+      // Qualified access requires importing the module first.
+      // Use: use ModuleName (..) to import all bindings, then access directly.
       throw new Error(
-        `Qualified access (${expr.moduleName}.${expr.member}) is not supported in lowering. Use the compiler with module support.`,
+        `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
+          `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
       );
   }
 };

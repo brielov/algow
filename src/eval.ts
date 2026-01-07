@@ -206,10 +206,11 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
     }
 
     case "QualifiedVar":
-      // Modules are not supported in the interpreter yet
-      // Use the compiler instead
+      // Qualified access requires importing the module first.
+      // Use: use ModuleName (..) to import all bindings, then access directly.
       throw new RuntimeError(
-        `Qualified access (${expr.moduleName}.${expr.member}) is not supported in the interpreter. Use the compiler.`,
+        `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
+          `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
       );
 
     case "Match":
@@ -525,14 +526,6 @@ export const createConstructorEnv = (constructorNames: readonly string[]): Env =
     env.set(name, vcon(name));
   }
   return env;
-};
-
-/**
- * Evaluate a prelude function and add it to the environment.
- */
-export const evalPreludeFunction = (env: Env, name: string, expr: ast.Expr): Env => {
-  const value = evaluate(env, expr);
-  return extendEnv(env, name, value);
 };
 
 // Re-export empty env for convenience

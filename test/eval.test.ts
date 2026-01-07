@@ -9,20 +9,9 @@ import {
   vbool,
   vtuple,
   emptyEnv,
-  evalPreludeFunction,
   RuntimeError,
   type Env,
 } from "../src/eval";
-import { preludeFunctionExprs } from "../src/prelude";
-
-// Helper to build a list AST
-const list = (...items: ast.Expr[]): ast.Expr => {
-  let result: ast.Expr = ast.var_("Nil");
-  for (let i = items.length - 1; i >= 0; i--) {
-    result = ast.app(ast.app(ast.var_("Cons"), items[i]!), result);
-  }
-  return result;
-};
 
 // Base environment with constructors
 const baseEnv: Env = new Map([
@@ -379,90 +368,6 @@ describe("Interpreter", () => {
         ast.case_(ast.precord([ast.pfield("x", ast.pvar("a"))]), ast.var_("a")),
       ]);
       expect(evaluate(emptyEnv, expr)).toEqual(vnum(10));
-    });
-  });
-
-  describe("prelude functions", () => {
-    // Load prelude into environment
-    let env = baseEnv;
-    env = evalPreludeFunction(env, "id", preludeFunctionExprs.id);
-    env = evalPreludeFunction(env, "const", preludeFunctionExprs.const);
-    env = evalPreludeFunction(env, "head", preludeFunctionExprs.head);
-    env = evalPreludeFunction(env, "tail", preludeFunctionExprs.tail);
-    env = evalPreludeFunction(env, "isEmpty", preludeFunctionExprs.isEmpty);
-    env = evalPreludeFunction(env, "length", preludeFunctionExprs.length);
-    env = evalPreludeFunction(env, "map", preludeFunctionExprs.map);
-    env = evalPreludeFunction(env, "filter", preludeFunctionExprs.filter);
-    env = evalPreludeFunction(env, "foldr", preludeFunctionExprs.foldr);
-    env = evalPreludeFunction(env, "foldl", preludeFunctionExprs.foldl);
-    env = evalPreludeFunction(env, "reverse", preludeFunctionExprs.reverse);
-    env = evalPreludeFunction(env, "concat", preludeFunctionExprs.concat);
-
-    const myList = list(ast.num(1), ast.num(2), ast.num(3));
-
-    it("id returns its argument", () => {
-      const result = evaluate(env, ast.app(ast.var_("id"), ast.num(42)));
-      expect(result).toEqual(vnum(42));
-    });
-
-    it("const returns first argument", () => {
-      const result = evaluate(env, ast.app(ast.app(ast.var_("const"), ast.num(1)), ast.num(2)));
-      expect(result).toEqual(vnum(1));
-    });
-
-    it("head returns Just first element", () => {
-      const result = evaluate(env, ast.app(ast.var_("head"), myList));
-      expect(result).toEqual(vcon("Just", [vnum(1)]));
-    });
-
-    it("head returns Nothing for empty list", () => {
-      const result = evaluate(env, ast.app(ast.var_("head"), ast.var_("Nil")));
-      expect(result).toEqual(vcon("Nothing"));
-    });
-
-    it("isEmpty returns true for empty list", () => {
-      const result = evaluate(env, ast.app(ast.var_("isEmpty"), ast.var_("Nil")));
-      expect(result).toEqual(vbool(true));
-    });
-
-    it("isEmpty returns false for non-empty list", () => {
-      const result = evaluate(env, ast.app(ast.var_("isEmpty"), myList));
-      expect(result).toEqual(vbool(false));
-    });
-
-    it("length counts elements", () => {
-      const result = evaluate(env, ast.app(ast.var_("length"), myList));
-      expect(result).toEqual(vnum(3));
-    });
-
-    it("map transforms elements", () => {
-      const double = ast.abs("x", ast.binOp("*", ast.var_("x"), ast.num(2)));
-      const result = evaluate(env, ast.app(ast.app(ast.var_("map"), double), myList));
-      expect(result).toEqual(
-        vcon("Cons", [vnum(2), vcon("Cons", [vnum(4), vcon("Cons", [vnum(6), vcon("Nil")])])]),
-      );
-    });
-
-    it("filter keeps matching elements", () => {
-      const greaterThan1 = ast.abs("x", ast.binOp(">", ast.var_("x"), ast.num(1)));
-      const result = evaluate(env, ast.app(ast.app(ast.var_("filter"), greaterThan1), myList));
-      expect(result).toEqual(vcon("Cons", [vnum(2), vcon("Cons", [vnum(3), vcon("Nil")])]));
-    });
-
-    it("foldr accumulates from right", () => {
-      const add = ast.abs("a", ast.abs("b", ast.binOp("+", ast.var_("a"), ast.var_("b"))));
-      const result = evaluate(
-        env,
-        ast.app(ast.app(ast.app(ast.var_("foldr"), add), ast.num(0)), myList),
-      );
-      expect(result).toEqual(vnum(6));
-    });
-
-    it("reverse reverses the list", () => {
-      const result = evaluate(env, ast.app(ast.var_("reverse"), myList));
-      expect(result).toEqual(
-        vcon("Cons", [vnum(3), vcon("Cons", [vnum(2), vcon("Cons", [vnum(1), vcon("Nil")])])]),
-      );
     });
   });
 
