@@ -25,8 +25,18 @@ export type OptPass = {
 };
 
 // =============================================================================
-// CONSTANT FOLDING
+// CONSTANT FOLDING WITH PROPAGATION
 // =============================================================================
+
+/**
+ * A constant value that can be tracked and propagated.
+ */
+type ConstValue = number | string | boolean;
+
+/**
+ * Environment mapping variable names to their known constant values.
+ */
+type ConstEnv = Map<string, ConstValue>;
 
 /**
  * Evaluate a binary operation on literal values at compile time.
@@ -97,41 +107,322 @@ const evalBinOp = (
 };
 
 /**
- * Transform bindings in an expression, returning a new expression.
- * Used by constant folding to replace operations with their results.
+ * Get the constant value of an atom, if known.
+ * Looks up variables in the environment.
  */
-const transformBindings = (
-  expr: ir.IRExpr,
-  transform: (binding: ir.IRBinding) => ir.IRBinding,
+const atomToConst = (atom: ir.IRAtom, env: ConstEnv): ConstValue | undefined => {
+  if (atom.kind === "IRLit") {
+    return atom.value;
+  }
+  if (atom.kind === "IRVar") {
+    return env.get(atom.name);
+  }
+  return undefined;
+};
+
+/**
+ * Replace an atom with a literal if its value is known.
+ */
+const substituteAtom = (atom: ir.IRAtom, env: ConstEnv): ir.IRAtom => {
+  const value = atomToConst(atom, env);
+  if (value !== undefined && atom.kind === "IRVar") {
+    return ir.irLit(value, atom.type);
+  }
+  return atom;
+};
+
+/**
+ * Extract the structure of an expression: a sequence of let bindings
+ * followed by a final atom. Returns null if the structure is complex
+ * (e.g., contains letrec).
+ */
+type ExprStructure = {
+  readonly lets: ReadonlyArray<{ name: string; binding: ir.IRBinding }>;
+  readonly result: ir.IRAtom;
+};
+
+const extractStructure = (expr: ir.IRExpr): ExprStructure | null => {
+  const lets: Array<{ name: string; binding: ir.IRBinding }> = [];
+  let current = expr;
+
+  while (current.kind === "IRLet") {
+    lets.push({ name: current.name, binding: current.binding });
+    current = current.body;
+  }
+
+  if (current.kind === "IRAtomExpr") {
+    return { lets, result: current.atom };
+  }
+
+  // IRLetRec - complex, don't extract
+  return null;
+};
+
+/**
+ * Prepend let bindings to an expression.
+ */
+const prependLets = (
+  lets: ReadonlyArray<{ name: string; binding: ir.IRBinding }>,
+  body: ir.IRExpr,
 ): ir.IRExpr => {
+  let result = body;
+  for (let i = lets.length - 1; i >= 0; i--) {
+    const { name, binding } = lets[i]!;
+    result = ir.irLet(name, binding, result);
+  }
+  return result;
+};
+
+/**
+ * Fold constants in an expression with propagation.
+ * Tracks known constant values and substitutes them.
+ */
+const foldExpr = (expr: ir.IRExpr, env: ConstEnv): ir.IRExpr => {
+  switch (expr.kind) {
+    case "IRAtomExpr": {
+      // Substitute variable with constant if known
+      const newAtom = substituteAtom(expr.atom, env);
+      if (newAtom !== expr.atom) {
+        return ir.irAtomExpr(newAtom);
+      }
+      return expr;
+    }
+
+    case "IRLet": {
+      // First fold the binding
+      const foldedBinding = foldBinding(expr.binding, env);
+
+      // Check if the result is a constant atom
+      if (foldedBinding.kind === "IRAtomBinding" && foldedBinding.atom.kind === "IRLit") {
+        // Add to environment for propagation
+        const newEnv = new Map(env);
+        newEnv.set(expr.name, foldedBinding.atom.value);
+        const foldedBody = foldExpr(expr.body, newEnv);
+        return ir.irLet(expr.name, foldedBinding, foldedBody);
+      }
+
+      // Not a constant - continue without adding to env
+      const foldedBody = foldExpr(expr.body, env);
+      return ir.irLet(expr.name, foldedBinding, foldedBody);
+    }
+
+    case "IRLetRec": {
+      // Recursive bindings are functions, not constants
+      const newBindings = expr.bindings.map((b) => ({
+        name: b.name,
+        binding: foldBinding(b.binding, env),
+      }));
+      const foldedBody = foldExpr(expr.body, env);
+      return ir.irLetRec(newBindings, foldedBody);
+    }
+  }
+};
+
+/**
+ * Fold constants in a binding.
+ */
+const foldBinding = (binding: ir.IRBinding, env: ConstEnv): ir.IRBinding => {
+  switch (binding.kind) {
+    case "IRAtomBinding": {
+      const newAtom = substituteAtom(binding.atom, env);
+      if (newAtom !== binding.atom) {
+        return ir.irAtomBinding(newAtom);
+      }
+      return binding;
+    }
+
+    case "IRBinOpBinding": {
+      // Substitute both operands
+      const left = substituteAtom(binding.left, env);
+      const right = substituteAtom(binding.right, env);
+
+      // Try to fold if both are constants
+      const leftVal = atomToConst(left, env);
+      const rightVal = atomToConst(right, env);
+
+      if (leftVal !== undefined && rightVal !== undefined) {
+        const result = evalBinOp(binding.op, leftVal, rightVal);
+        if (result !== undefined) {
+          return ir.irAtomBinding(ir.irLit(result, binding.type));
+        }
+      }
+
+      // Return with substituted atoms
+      if (left !== binding.left || right !== binding.right) {
+        return ir.irBinOpBinding(binding.op, left, right, binding.operandType, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRAppBinding": {
+      const func = substituteAtom(binding.func, env);
+      const arg = substituteAtom(binding.arg, env);
+      if (func !== binding.func || arg !== binding.arg) {
+        return ir.irAppBinding(func, arg, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRIfBinding": {
+      const cond = substituteAtom(binding.cond, env);
+      const condVal = atomToConst(cond, env);
+
+      // If condition is a known boolean, fold to the appropriate branch
+      if (typeof condVal === "boolean") {
+        const chosenBranch = condVal ? binding.thenBranch : binding.elseBranch;
+        const foldedBranch = foldExpr(chosenBranch, env);
+
+        // Extract the structure of the folded branch
+        const structure = extractStructure(foldedBranch);
+        if (structure) {
+          // If the branch is just an atom, return it as a binding
+          if (structure.lets.length === 0) {
+            return ir.irAtomBinding(structure.result);
+          }
+          // Otherwise, we need to inline the lets - this is handled at the expression level
+          // For now, return the if with the folded branches (dead code elimination will help)
+        }
+
+        // Can't inline directly, return folded branches
+        return ir.irIfBinding(
+          cond,
+          foldExpr(binding.thenBranch, env),
+          foldExpr(binding.elseBranch, env),
+          binding.type,
+        );
+      }
+
+      // Condition not constant - fold both branches
+      return ir.irIfBinding(
+        cond,
+        foldExpr(binding.thenBranch, env),
+        foldExpr(binding.elseBranch, env),
+        binding.type,
+      );
+    }
+
+    case "IRTupleBinding": {
+      const elements = binding.elements.map((e) => substituteAtom(e, env));
+      const changed = elements.some((e, i) => e !== binding.elements[i]);
+      if (changed) {
+        return ir.irTupleBinding(elements, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRRecordBinding": {
+      const fields = binding.fields.map((f) => ({
+        name: f.name,
+        value: substituteAtom(f.value, env),
+      }));
+      const changed = fields.some((f, i) => f.value !== binding.fields[i]?.value);
+      if (changed) {
+        return ir.irRecordBinding(fields, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRFieldAccessBinding": {
+      const record = substituteAtom(binding.record, env);
+      if (record !== binding.record) {
+        return ir.irFieldAccessBinding(record, binding.field, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRTupleIndexBinding": {
+      const tuple = substituteAtom(binding.tuple, env);
+      if (tuple !== binding.tuple) {
+        return ir.irTupleIndexBinding(tuple, binding.index, binding.type);
+      }
+      return binding;
+    }
+
+    case "IRMatchBinding": {
+      const scrutinee = substituteAtom(binding.scrutinee, env);
+      const cases = binding.cases.map((c) => ({
+        pattern: c.pattern,
+        guard: c.guard ? foldExpr(c.guard, env) : undefined,
+        body: foldExpr(c.body, env),
+      }));
+      return ir.irMatchBinding(scrutinee, cases, binding.type);
+    }
+
+    case "IRLambdaBinding": {
+      // Don't propagate constants into lambda bodies - they have their own scope
+      // But we still fold within the body
+      return ir.irLambdaBinding(
+        binding.param,
+        binding.paramType,
+        foldExpr(binding.body, new Map()),
+        binding.type,
+        binding.tailRecursive,
+      );
+    }
+
+    case "IRClosureBinding": {
+      const captures = binding.captures.map((c) => substituteAtom(c, env));
+      const changed = captures.some((c, i) => c !== binding.captures[i]);
+      if (changed) {
+        return ir.irClosureBinding(binding.funcId, captures, binding.type);
+      }
+      return binding;
+    }
+  }
+};
+
+/**
+ * Second pass: inline if-expressions with constant conditions.
+ * This is done after the main fold pass to handle cases where
+ * the branch needs to be inlined into the surrounding context.
+ */
+const inlineConstantIfs = (expr: ir.IRExpr): ir.IRExpr => {
   switch (expr.kind) {
     case "IRAtomExpr":
       return expr;
 
     case "IRLet": {
-      const newBinding = transform(transformBinding(expr.binding, transform));
-      const newBody = transformBindings(expr.body, transform);
+      const newBinding = inlineConstantIfsBinding(expr.binding);
+
+      // Check if this is an if with constant condition
+      if (newBinding.kind === "IRIfBinding" && newBinding.cond.kind === "IRLit") {
+        const condVal = newBinding.cond.value;
+        if (typeof condVal === "boolean") {
+          const chosenBranch = condVal ? newBinding.thenBranch : newBinding.elseBranch;
+          const structure = extractStructure(chosenBranch);
+
+          if (structure) {
+            // Inline the lets from the branch, then bind the result
+            const foldedLets = structure.lets.map((l) => ({
+              name: l.name,
+              binding: inlineConstantIfsBinding(l.binding),
+            }));
+            const resultBinding = ir.irAtomBinding(structure.result);
+            const newBody = inlineConstantIfs(expr.body);
+
+            // Build: foldedLets... then let expr.name = result in newBody
+            const innerLet = ir.irLet(expr.name, resultBinding, newBody);
+            return prependLets(foldedLets, innerLet);
+          }
+        }
+      }
+
+      const newBody = inlineConstantIfs(expr.body);
       return ir.irLet(expr.name, newBinding, newBody);
     }
 
     case "IRLetRec": {
       const newBindings = expr.bindings.map((b) => ({
         name: b.name,
-        binding: transform(transformBinding(b.binding, transform)),
+        binding: inlineConstantIfsBinding(b.binding),
       }));
-      const newBody = transformBindings(expr.body, transform);
+      const newBody = inlineConstantIfs(expr.body);
       return ir.irLetRec(newBindings, newBody);
     }
   }
 };
 
-/**
- * Transform nested expressions within a binding.
- */
-const transformBinding = (
-  binding: ir.IRBinding,
-  transform: (binding: ir.IRBinding) => ir.IRBinding,
-): ir.IRBinding => {
+const inlineConstantIfsBinding = (binding: ir.IRBinding): ir.IRBinding => {
   switch (binding.kind) {
     case "IRAtomBinding":
     case "IRAppBinding":
@@ -146,8 +437,8 @@ const transformBinding = (
     case "IRIfBinding":
       return ir.irIfBinding(
         binding.cond,
-        transformBindings(binding.thenBranch, transform),
-        transformBindings(binding.elseBranch, transform),
+        inlineConstantIfs(binding.thenBranch),
+        inlineConstantIfs(binding.elseBranch),
         binding.type,
       );
 
@@ -156,8 +447,8 @@ const transformBinding = (
         binding.scrutinee,
         binding.cases.map((c) => ({
           pattern: c.pattern,
-          guard: c.guard ? transformBindings(c.guard, transform) : undefined,
-          body: transformBindings(c.body, transform),
+          guard: c.guard ? inlineConstantIfs(c.guard) : undefined,
+          body: inlineConstantIfs(c.body),
         })),
         binding.type,
       );
@@ -166,8 +457,9 @@ const transformBinding = (
       return ir.irLambdaBinding(
         binding.param,
         binding.paramType,
-        transformBindings(binding.body, transform),
+        inlineConstantIfs(binding.body),
         binding.type,
+        binding.tailRecursive,
       );
   }
 };
@@ -175,39 +467,22 @@ const transformBinding = (
 /**
  * Constant Folding Pass
  *
- * Evaluates binary operations on literals at compile time.
- * For example: `1 + 2` becomes `3`
+ * Evaluates constant expressions at compile time and propagates
+ * known constant values through the program.
+ *
+ * Features:
+ * - Folds binary operations: `1 + 2` → `3`
+ * - Propagates constants: `let x = 3 in x + 2` → `let x = 3 in 5`
+ * - Folds conditionals: `if true then a else b` → `a`
+ * - Inlines folded branches when possible
  */
 export const constantFolding: OptPass = {
   name: "constant-folding",
   run(expr) {
-    return transformBindings(expr, (binding) => {
-      if (binding.kind === "IRBinOpBinding") {
-        const { op, left, right, type } = binding;
-
-        // Both operands must be literals
-        if (left.kind === "IRLit" && right.kind === "IRLit") {
-          const result = evalBinOp(op, left.value, right.value);
-          if (result !== undefined) {
-            return ir.irAtomBinding(ir.irLit(result, type));
-          }
-        }
-      }
-
-      // Also fold if conditions with literal conditions
-      if (binding.kind === "IRIfBinding") {
-        const { cond } = binding;
-        if (cond.kind === "IRLit" && typeof cond.value === "boolean") {
-          // Replace if with the appropriate branch, but we need to return
-          // the branch as a binding. Since branches are expressions, we need
-          // to handle this at the expression level instead.
-          // For now, just return the binding unchanged.
-          // The actual folding happens at the expression level.
-        }
-      }
-
-      return binding;
-    });
+    // First pass: fold and propagate constants
+    const folded = foldExpr(expr, new Map());
+    // Second pass: inline constant if-expressions
+    return inlineConstantIfs(folded);
   },
 };
 

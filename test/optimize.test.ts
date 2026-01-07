@@ -175,6 +175,198 @@ describe("Optimizations", () => {
         expect(result.binding.kind).toBe("IRBinOpBinding");
       }
     });
+
+    it("propagates constants through let bindings", () => {
+      // let x = 3 in let y = x + 2 in y
+      // Should fold to: let x = 3 in let y = 5 in y
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(3, numType)),
+        ir.irLet(
+          "y",
+          ir.irBinOpBinding("+", ir.irVar("x", numType), ir.irLit(2, numType), numType, numType),
+          ir.irAtomExpr(ir.irVar("y", numType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // x = 3, y = 5, but we still have the let bindings
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet") {
+        expect(result.name).toBe("x");
+        // Check the inner let
+        expect(result.body.kind).toBe("IRLet");
+        if (result.body.kind === "IRLet") {
+          expect(result.body.name).toBe("y");
+          expect(result.body.binding.kind).toBe("IRAtomBinding");
+          if (result.body.binding.kind === "IRAtomBinding" && result.body.binding.atom.kind === "IRLit") {
+            expect(result.body.binding.atom.value).toBe(5);
+          }
+        }
+      }
+    });
+
+    it("propagates constants through chains", () => {
+      // let x = 2 in let y = x * 3 in let z = y + 1 in z
+      // Should fold to: let x = 2 in let y = 6 in let z = 7 in z
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(2, numType)),
+        ir.irLet(
+          "y",
+          ir.irBinOpBinding("*", ir.irVar("x", numType), ir.irLit(3, numType), numType, numType),
+          ir.irLet(
+            "z",
+            ir.irBinOpBinding("+", ir.irVar("y", numType), ir.irLit(1, numType), numType, numType),
+            ir.irAtomExpr(ir.irVar("z", numType)),
+          ),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // Navigate to z's binding
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.body.kind === "IRLet" && result.body.body.kind === "IRLet") {
+        const zBinding = result.body.body.binding;
+        expect(zBinding.kind).toBe("IRAtomBinding");
+        if (zBinding.kind === "IRAtomBinding" && zBinding.atom.kind === "IRLit") {
+          expect(zBinding.atom.value).toBe(7);
+        }
+      }
+    });
+
+    it("folds if-expression with true condition to then branch", () => {
+      // let result = if true then 42 else 0 in result
+      const expr = ir.irLet(
+        "result",
+        ir.irIfBinding(
+          ir.irLit(true, boolType),
+          ir.irAtomExpr(ir.irLit(42, numType)),
+          ir.irAtomExpr(ir.irLit(0, numType)),
+          numType,
+        ),
+        ir.irAtomExpr(ir.irVar("result", numType)),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // Should fold to: let result = 42 in result
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet") {
+        expect(result.binding.kind).toBe("IRAtomBinding");
+        if (result.binding.kind === "IRAtomBinding" && result.binding.atom.kind === "IRLit") {
+          expect(result.binding.atom.value).toBe(42);
+        }
+      }
+    });
+
+    it("folds if-expression with false condition to else branch", () => {
+      // let result = if false then 42 else 0 in result
+      const expr = ir.irLet(
+        "result",
+        ir.irIfBinding(
+          ir.irLit(false, boolType),
+          ir.irAtomExpr(ir.irLit(42, numType)),
+          ir.irAtomExpr(ir.irLit(0, numType)),
+          numType,
+        ),
+        ir.irAtomExpr(ir.irVar("result", numType)),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // Should fold to: let result = 0 in result
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet") {
+        expect(result.binding.kind).toBe("IRAtomBinding");
+        if (result.binding.kind === "IRAtomBinding" && result.binding.atom.kind === "IRLit") {
+          expect(result.binding.atom.value).toBe(0);
+        }
+      }
+    });
+
+    it("folds if-expression with propagated condition", () => {
+      // let cond = 5 > 3 in let result = if cond then 1 else 0 in result
+      const expr = ir.irLet(
+        "cond",
+        ir.irBinOpBinding(">", ir.irLit(5, numType), ir.irLit(3, numType), numType, boolType),
+        ir.irLet(
+          "result",
+          ir.irIfBinding(
+            ir.irVar("cond", boolType),
+            ir.irAtomExpr(ir.irLit(1, numType)),
+            ir.irAtomExpr(ir.irLit(0, numType)),
+            numType,
+          ),
+          ir.irAtomExpr(ir.irVar("result", numType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // cond = true (folded), result = 1 (if folded)
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.body.kind === "IRLet") {
+        const resultBinding = result.body.binding;
+        expect(resultBinding.kind).toBe("IRAtomBinding");
+        if (resultBinding.kind === "IRAtomBinding" && resultBinding.atom.kind === "IRLit") {
+          expect(resultBinding.atom.value).toBe(1);
+        }
+      }
+    });
+
+    it("substitutes final atom expression with constant", () => {
+      // let x = 42 in x
+      // The final x should be substituted with 42
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(42, numType)),
+        ir.irAtomExpr(ir.irVar("x", numType)),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // The body should now have the literal 42 instead of variable x
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet") {
+        expect(result.body.kind).toBe("IRAtomExpr");
+        if (result.body.kind === "IRAtomExpr" && result.body.atom.kind === "IRLit") {
+          expect(result.body.atom.value).toBe(42);
+        }
+      }
+    });
+
+    it("inlines complex if-then branch", () => {
+      // let result = if true then (let a = 1 + 2 in a) else 0 in result
+      const expr = ir.irLet(
+        "result",
+        ir.irIfBinding(
+          ir.irLit(true, boolType),
+          ir.irLet(
+            "a",
+            ir.irBinOpBinding("+", ir.irLit(1, numType), ir.irLit(2, numType), numType, numType),
+            ir.irAtomExpr(ir.irVar("a", numType)),
+          ),
+          ir.irAtomExpr(ir.irLit(0, numType)),
+          numType,
+        ),
+        ir.irAtomExpr(ir.irVar("result", numType)),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // Should inline and fold: let a = 3 in let result = a in result
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet") {
+        expect(result.name).toBe("a");
+        expect(result.binding.kind).toBe("IRAtomBinding");
+        if (result.binding.kind === "IRAtomBinding" && result.binding.atom.kind === "IRLit") {
+          expect(result.binding.atom.value).toBe(3);
+        }
+      }
+    });
   });
 
   describe("Dead Code Elimination", () => {
@@ -294,14 +486,11 @@ describe("Optimizations", () => {
 
       const result = optimize(expr);
 
-      // Should fold 3*4 to 12, and remove unused binding
-      expect(result.kind).toBe("IRLet");
-      if (result.kind === "IRLet") {
-        expect(result.name).toBe("x");
-        expect(result.binding.kind).toBe("IRAtomBinding");
-        if (result.binding.kind === "IRAtomBinding" && result.binding.atom.kind === "IRLit") {
-          expect(result.binding.atom.value).toBe(12);
-        }
+      // With constant propagation, the entire expression folds to just 12
+      // (unused is DCE'd, x=12 is folded, x is substituted with 12)
+      expect(result.kind).toBe("IRAtomExpr");
+      if (result.kind === "IRAtomExpr" && result.atom.kind === "IRLit") {
+        expect(result.atom.value).toBe(12);
       }
     });
   });

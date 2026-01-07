@@ -392,15 +392,10 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
     if (p.kind !== "IRPCon") return false;
     // Check that all args are simple (var, wildcard, literal, or tuple of simples)
     return p.args.every(
-      (arg) =>
-        arg.kind === "IRPVar" ||
-        arg.kind === "IRPWildcard" ||
-        arg.kind === "IRPLit",
+      (arg) => arg.kind === "IRPVar" || arg.kind === "IRPWildcard" || arg.kind === "IRPLit",
     );
   };
-  const allSimpleConstructors = binding.cases.every((c) =>
-    isSimpleConstructorPattern(c.pattern),
-  );
+  const allSimpleConstructors = binding.cases.every((c) => isSimpleConstructorPattern(c.pattern));
   const tags = binding.cases
     .filter((c) => c.pattern.kind === "IRPCon")
     .map((c) => (c.pattern as ir.IRPCon).name);

@@ -73,7 +73,22 @@ require(["vs/editor/editor.main"], () => {
 
   // Syntax highlighting
   monaco.languages.setMonarchTokensProvider("algow", {
-    keywords: ["let", "rec", "in", "if", "then", "else", "match", "when", "end", "type", "module", "use", "as", "and"],
+    keywords: [
+      "let",
+      "rec",
+      "in",
+      "if",
+      "then",
+      "else",
+      "match",
+      "when",
+      "end",
+      "type",
+      "module",
+      "use",
+      "as",
+      "and",
+    ],
     literals: ["true", "false"],
 
     tokenizer: {

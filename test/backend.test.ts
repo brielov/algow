@@ -608,7 +608,11 @@ describe("TCO (Tail Call Optimization)", () => {
           body: ir.irAtomExpr(ir.irLit(0, numType)),
         },
         {
-          pattern: ir.irPCon("Cons", [ir.irPVar("x", numType), ir.irPVar("rest", listType)], listType),
+          pattern: ir.irPCon(
+            "Cons",
+            [ir.irPVar("x", numType), ir.irPVar("rest", listType)],
+            listType,
+          ),
           body: ir.irAtomExpr(ir.irVar("x", numType)),
         },
       ],
