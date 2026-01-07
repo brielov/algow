@@ -630,4 +630,30 @@ describe("lowerToIR", () => {
       }
     });
   });
+
+  describe("Qualified variable access", () => {
+    it("lowers qualified variable when member is in type environment", () => {
+      // Simulate: use Math (..); Math.double 5
+      // where double is imported into the type environment
+      const expr = ast.qualifiedVar("Math", "double");
+      const env = makeTypeEnv({ double: funType(numType, numType) });
+      const ir = lowerToIR(expr, env, makeCheckOutput());
+
+      expect(ir.kind).toBe("IRAtomExpr");
+      if (ir.kind === "IRAtomExpr") {
+        expect(ir.atom.kind).toBe("IRVar");
+        if (ir.atom.kind === "IRVar") {
+          expect(ir.atom.name).toBe("double");
+        }
+      }
+    });
+
+    it("throws for qualified variable when member is not imported", () => {
+      // Math.unknown where 'unknown' is not in the type environment
+      const expr = ast.qualifiedVar("Math", "unknown");
+      expect(() => lowerToIR(expr, makeTypeEnv(), makeCheckOutput())).toThrow(
+        "Qualified access (Math.unknown) requires importing the module",
+      );
+    });
+  });
 });

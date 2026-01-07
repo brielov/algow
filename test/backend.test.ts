@@ -592,3 +592,42 @@ describe("Runtime", () => {
     expect(RUNTIME).toContain("$eq");
   });
 });
+
+describe("TCO (Tail Call Optimization)", () => {
+  it("generates valid JS for recursive function with pattern matching", () => {
+    // This is a simpler test that just verifies the code is syntactically valid
+    // The actual continue-in-IIFE bug would cause a runtime error
+    const listType = appType({ kind: "TCon", name: "List" }, numType);
+
+    // Simple pattern match without TCO (non-tail recursive)
+    const matchBinding = ir.irMatchBinding(
+      ir.irVar("xs", listType),
+      [
+        {
+          pattern: ir.irPCon("Nil", [], listType),
+          body: ir.irAtomExpr(ir.irLit(0, numType)),
+        },
+        {
+          pattern: ir.irPCon("Cons", [ir.irPVar("x", numType), ir.irPVar("rest", listType)], listType),
+          body: ir.irAtomExpr(ir.irVar("x", numType)),
+        },
+      ],
+      numType,
+    );
+
+    const body = ir.irLet("_match", matchBinding, ir.irAtomExpr(ir.irVar("_match", numType)));
+    const lambda = ir.irLambdaBinding("xs", listType, body, funType(listType, numType));
+
+    const expr = ir.irLetRec(
+      [ir.irRecBinding("head", lambda)],
+      ir.irAtomExpr(ir.irVar("head", funType(listType, numType))),
+    );
+
+    const result = generateJS(expr, ["Nil", "Cons"]);
+
+    // Should use switch-based pattern matching (optimized)
+    expect(result.code).toContain("switch (_s.$tag)");
+    expect(result.code).toContain('case "Nil"');
+    expect(result.code).toContain('case "Cons"');
+  });
+});

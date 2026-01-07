@@ -2458,10 +2458,11 @@ const toSimplePattern = (p: ast.Pattern): SimplePattern => {
     case "PCon":
       return { kind: "Con", name: p.name, args: p.args.map(toSimplePattern) };
     case "QualifiedPCon":
-      // For exhaustiveness, use module.constructor as the name
+      // For exhaustiveness, use just the constructor name (not qualified)
+      // since the registry only has unqualified constructor names
       return {
         kind: "Con",
-        name: `${p.moduleName}.${p.constructor}`,
+        name: p.constructor,
         args: p.args.map(toSimplePattern),
       };
     case "PTuple":

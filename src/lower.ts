@@ -295,13 +295,19 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
     case "Match":
       return lowerMatch(ctx, expr);
 
-    case "QualifiedVar":
-      // Qualified access requires importing the module first.
-      // Use: use ModuleName (..) to import all bindings, then access directly.
+    case "QualifiedVar": {
+      // If the member was imported, it will be in the type environment
+      // and we can access it directly by its name
+      const scheme = ctx.typeEnv.get(expr.member);
+      if (scheme) {
+        return ir.irAtomExpr(ir.irVar(expr.member, applySubst(ctx.subst, scheme.type)));
+      }
+      // Member not imported - require explicit import
       throw new Error(
         `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
           `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
       );
+    }
 
     default:
       return assertNever(expr);

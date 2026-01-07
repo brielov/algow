@@ -1207,6 +1207,71 @@ describe("Type Inference", () => {
         expect(exhaustivenessErrors.length).toBeGreaterThan(0);
         expect(exhaustivenessErrors[0]!.message).toContain("Just Nothing");
       });
+
+      it("accepts exhaustive match with qualified patterns", () => {
+        const [maybeEnv, maybeReg] = createMaybeEnv();
+        const env = mergeEnvs(baseEnv, maybeEnv);
+
+        // match Just 42 with
+        // | Maybe.Just x => x
+        // | Maybe.Nothing => 0
+        // end
+        const { diagnostics } = infer(
+          env,
+          maybeReg,
+          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+            ast.case_(ast.qualifiedPCon("Maybe", "Just", [ast.pvar("x")]), ast.var_("x")),
+            ast.case_(ast.qualifiedPCon("Maybe", "Nothing", []), ast.num(0)),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors).toHaveLength(0);
+      });
+
+      it("reports non-exhaustive match with qualified patterns", () => {
+        const [maybeEnv, maybeReg] = createMaybeEnv();
+        const env = mergeEnvs(baseEnv, maybeEnv);
+
+        // match Just 42 with
+        // | Maybe.Just x => x
+        // end (missing Maybe.Nothing)
+        const { diagnostics } = infer(
+          env,
+          maybeReg,
+          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+            ast.case_(ast.qualifiedPCon("Maybe", "Just", [ast.pvar("x")]), ast.var_("x")),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors.length).toBeGreaterThan(0);
+        expect(exhaustivenessErrors[0]!.message).toContain("Nothing");
+      });
+
+      it("accepts mixed qualified and unqualified patterns", () => {
+        const [maybeEnv, maybeReg] = createMaybeEnv();
+        const env = mergeEnvs(baseEnv, maybeEnv);
+
+        // match Just 42 with
+        // | Maybe.Just x => x
+        // | Nothing => 0
+        // end
+        const { diagnostics } = infer(
+          env,
+          maybeReg,
+          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+            ast.case_(ast.qualifiedPCon("Maybe", "Just", [ast.pvar("x")]), ast.var_("x")),
+            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors).toHaveLength(0);
+      });
     });
 
     describe("empty match", () => {

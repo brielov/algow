@@ -66,9 +66,31 @@ const toGoId = (name: string): string => {
   }
   // Avoid Go keywords
   const goKeywords = new Set([
-    "break", "case", "chan", "const", "continue", "default", "defer", "else",
-    "fallthrough", "for", "func", "go", "goto", "if", "import", "interface",
-    "map", "package", "range", "return", "select", "struct", "switch", "type", "var",
+    "break",
+    "case",
+    "chan",
+    "const",
+    "continue",
+    "default",
+    "defer",
+    "else",
+    "fallthrough",
+    "for",
+    "func",
+    "go",
+    "goto",
+    "if",
+    "import",
+    "interface",
+    "map",
+    "package",
+    "range",
+    "return",
+    "select",
+    "struct",
+    "switch",
+    "type",
+    "var",
   ]);
   if (goKeywords.has(id)) {
     id = id + "_";
@@ -457,10 +479,7 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
 /**
  * Generate bindings for constructor pattern arguments.
  */
-const genPatternBindings = (
-  argsExpr: string,
-  pattern: ir.IRPCon,
-): Array<[string, string]> => {
+const genPatternBindings = (argsExpr: string, pattern: ir.IRPCon): Array<[string, string]> => {
   const bindings: Array<[string, string]> = [];
 
   for (let i = 0; i < pattern.args.length; i++) {

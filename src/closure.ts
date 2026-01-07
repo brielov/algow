@@ -168,7 +168,9 @@ const patternBindings = (pattern: ir.IRPattern): Set<string> => {
       return union(new Set([pattern.name]), patternBindings(pattern.pattern));
     case "IRPOr":
       // All alternatives bind the same variables
-      return pattern.alternatives.length > 0 ? patternBindings(pattern.alternatives[0]!) : new Set();
+      return pattern.alternatives.length > 0
+        ? patternBindings(pattern.alternatives[0]!)
+        : new Set();
   }
 };
 
@@ -303,7 +305,9 @@ const convertBinding = (ctx: ConvertContext, binding: ir.IRBinding): ir.IRBindin
       ctx.functions.push(fn);
 
       // Create closure binding that captures free variables
-      const captures: ir.IRAtom[] = freeVars.map((name) => ir.irVar(name, { kind: "TVar", name: "_" }));
+      const captures: ir.IRAtom[] = freeVars.map((name) =>
+        ir.irVar(name, { kind: "TVar", name: "_" }),
+      );
 
       return ir.irClosureBinding(funcId, captures, binding.type);
     }
@@ -354,10 +358,21 @@ const convertExprWithEnv = (
         return ir.irAppBinding(substituteAtom(b.func), substituteAtom(b.arg), b.type);
 
       case "IRBinOpBinding":
-        return ir.irBinOpBinding(b.op, substituteAtom(b.left), substituteAtom(b.right), b.operandType, b.type);
+        return ir.irBinOpBinding(
+          b.op,
+          substituteAtom(b.left),
+          substituteAtom(b.right),
+          b.operandType,
+          b.type,
+        );
 
       case "IRIfBinding":
-        return ir.irIfBinding(substituteAtom(b.cond), substituteExpr(b.thenBranch), substituteExpr(b.elseBranch), b.type);
+        return ir.irIfBinding(
+          substituteAtom(b.cond),
+          substituteExpr(b.thenBranch),
+          substituteExpr(b.elseBranch),
+          b.type,
+        );
 
       case "IRTupleBinding":
         return ir.irTupleBinding(b.elements.map(substituteAtom), b.type);

@@ -221,13 +221,25 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
       return value;
     }
 
-    case "QualifiedVar":
-      // Qualified access requires importing the module first.
-      // Use: use ModuleName (..) to import all bindings, then access directly.
-      throw new RuntimeError(
-        `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
-          `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
-      );
+    case "QualifiedVar": {
+      // If the member was imported, it will be in the environment
+      // and we can access it directly by its name
+      const value = env.get(expr.member);
+      if (!value) {
+        throw new RuntimeError(
+          `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
+            `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
+        );
+      }
+      // Dereference if it's a ref cell (from letrec)
+      if (value.kind === "VRef") {
+        if (value.value === null) {
+          throw new RuntimeError(`Uninitialized recursive binding: ${expr.member}`);
+        }
+        return value.value;
+      }
+      return value;
+    }
 
     case "Match":
       return evalMatch(env, expr);

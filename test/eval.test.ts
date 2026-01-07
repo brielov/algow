@@ -638,4 +638,33 @@ describe("Interpreter", () => {
       expect(evaluate(emptyEnv, expr)).toEqual(vbool(true));
     });
   });
+
+  describe("qualified variable access", () => {
+    it("evaluates qualified variable from environment", () => {
+      // Simulate: use Math (..); Math.double 5
+      // where double is in the environment
+      const env: Env = new Map([["double", vnum(42)]]);
+      const expr = ast.qualifiedVar("Math", "double");
+      expect(evaluate(env, expr)).toEqual(vnum(42));
+    });
+
+    it("dereferences VRef from letrec binding", () => {
+      // Simulate module binding through letrec:
+      // letRec double = x -> x * 2 in Math.double
+      // The binding creates a VRef that must be dereferenced
+      const doubleBody = ast.binOp("*", ast.var_("x"), ast.num(2));
+      const doubleFn = ast.abs("x", doubleBody);
+      const expr = ast.letRec(
+        [ast.recBinding("double", doubleFn)],
+        ast.app(ast.qualifiedVar("Math", "double"), ast.num(5)),
+      );
+      expect(evaluate(emptyEnv, expr)).toEqual(vnum(10));
+    });
+
+    it("throws error for unimported qualified variable", () => {
+      // Math.unknown where 'unknown' is not in the environment
+      const expr = ast.qualifiedVar("Math", "unknown");
+      expect(() => evaluate(emptyEnv, expr)).toThrow(RuntimeError);
+    });
+  });
 });

@@ -619,6 +619,9 @@ const genIfTCO = (
 
 /**
  * Generate match expression with TCO in case bodies.
+ * When a case body contains 'continue', we cannot use an IIFE wrapper
+ * since continue cannot jump out of an IIFE. In that case, we emit
+ * inline if-else statements directly.
  */
 const genMatchTCO = (
   ctx: CodeGenContext,
@@ -631,24 +634,17 @@ const genMatchTCO = (
 
   const hasGuards = binding.cases.some((c) => c.guard !== undefined);
 
-  const lines: string[] = [];
-  lines.push(`((${scrutineeVar}) => {`);
+  // First pass: check if any case body contains a continue statement
+  // If so, we can't use an IIFE wrapper
+  const caseResults: Array<{
+    case_: ir.IRCase;
+    bodyLines: string[];
+    bodyResult: string;
+    hasContinue: boolean;
+    guardResult?: string;
+  }> = [];
 
-  for (let i = 0; i < binding.cases.length; i++) {
-    const case_ = binding.cases[i]!;
-    const { condition, bindings } = genPatternMatch(scrutineeVar, case_.pattern);
-
-    const prefix = hasGuards || i === 0 ? "if" : "} else if";
-    const suffix = hasGuards && i > 0 ? "}" : "";
-
-    if (suffix) lines.push(`  ${suffix}`);
-    lines.push(`  ${prefix} (${condition}) {`);
-
-    for (const [name, expr] of bindings) {
-      lines.push(`    const ${toJsId(name)} = ${expr};`);
-    }
-
-    // Generate body with TCO
+  for (const case_ of binding.cases) {
     ctx.indent += 2;
     const bodyLines: string[] = [];
     const savedLines = ctx.lines;
@@ -665,20 +661,81 @@ const genMatchTCO = (
     ctx.lines = savedLines;
     ctx.indent -= 2;
 
+    caseResults.push({ case_, bodyLines, bodyResult, hasContinue, guardResult });
+  }
+
+  const anyContinue = caseResults.some((r) => r.hasContinue);
+
+  const lines: string[] = [];
+
+  if (anyContinue) {
+    // Emit inline if-else statements (no IIFE wrapper)
+    // Assign scrutinee to a local variable to avoid re-evaluation
+    // Use 'let' since we may assign the result back to this variable
+    emit(ctx, `let ${scrutineeVar} = ${scrutinee};`);
+
+    for (let i = 0; i < caseResults.length; i++) {
+      const { case_, bodyLines, bodyResult, hasContinue, guardResult } = caseResults[i]!;
+      const { condition, bindings } = genPatternMatch(scrutineeVar, case_.pattern);
+
+      const prefix = hasGuards || i === 0 ? "if" : "} else if";
+      const suffix = hasGuards && i > 0 ? "}" : "";
+
+      if (suffix) emit(ctx, suffix);
+      emit(ctx, `${prefix} (${condition}) {`);
+
+      ctx.indent++;
+      for (const [name, expr] of bindings) {
+        emit(ctx, `const ${toJsId(name)} = ${expr};`);
+      }
+
+      for (const line of bodyLines) {
+        emit(ctx, line.trimStart());
+      }
+
+      if (guardResult) {
+        if (hasContinue) {
+          emit(ctx, `if (${guardResult}) { /* continue handled above */ }`);
+        } else {
+          emit(ctx, `if (${guardResult}) { ${scrutineeVar} = ${bodyResult}; }`);
+        }
+      } else {
+        if (!hasContinue) {
+          emit(ctx, `${scrutineeVar} = ${bodyResult};`);
+        }
+      }
+      ctx.indent--;
+    }
+
+    emit(ctx, "}");
+    return scrutineeVar;
+  }
+
+  // No continue statements - use IIFE wrapper (original approach)
+  lines.push(`((${scrutineeVar}) => {`);
+
+  for (let i = 0; i < caseResults.length; i++) {
+    const { case_, bodyLines, bodyResult, guardResult } = caseResults[i]!;
+    const { condition, bindings } = genPatternMatch(scrutineeVar, case_.pattern);
+
+    const prefix = hasGuards || i === 0 ? "if" : "} else if";
+    const suffix = hasGuards && i > 0 ? "}" : "";
+
+    if (suffix) lines.push(`  ${suffix}`);
+    lines.push(`  ${prefix} (${condition}) {`);
+
+    for (const [name, expr] of bindings) {
+      lines.push(`    const ${toJsId(name)} = ${expr};`);
+    }
+
     for (const line of bodyLines) {
       lines.push("    " + line.trimStart());
     }
 
     if (guardResult) {
-      if (hasContinue) {
-        lines.push(`    if (${guardResult}) { /* continue handled above */ }`);
-      } else {
-        lines.push(`    if (${guardResult}) return ${bodyResult};`);
-      }
+      lines.push(`    if (${guardResult}) return ${bodyResult};`);
     } else {
-      if (!hasContinue) {
-        lines.push(`    return ${bodyResult};`);
-      }
+      lines.push(`    return ${bodyResult};`);
     }
   }
 
