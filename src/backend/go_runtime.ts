@@ -28,9 +28,9 @@ type Func interface {
 	Apply(arg Value) Value
 }
 
-// Con represents a constructor value
+// Con represents a constructor value with integer tag for efficiency
 type Con struct {
-	Tag  string
+	Tag  int
 	Args []Value
 }
 
@@ -75,8 +75,8 @@ func Apply(fn Value, arg Value) Value {
 	}
 }
 
-// NewCon creates a new constructor value
-func NewCon(tag string, args ...Value) Value {
+// NewCon creates a new constructor value with integer tag
+func NewCon(tag int, args ...Value) Value {
 	return Con{Tag: tag, Args: args}
 }
 

@@ -14,8 +14,56 @@
  */
 
 import type * as ir from "../ir";
-import type { Type } from "../checker";
+import { type Type, freeTypeVars } from "../checker";
 import { GO_RUNTIME } from "./go_runtime";
+
+// =============================================================================
+// TYPE ANALYSIS
+// =============================================================================
+
+/** Check if a type is monomorphic (has no free type variables) */
+const isMonomorphic = (type: Type): boolean => freeTypeVars(type).size === 0;
+
+/**
+ * Convert a type to its Go representation.
+ * Returns null for polymorphic types or complex types that should stay boxed.
+ *
+ * We only generate typed code for primitives:
+ * - number -> float64
+ * - string -> string
+ * - boolean -> bool
+ *
+ * Functions, records, tuples, and ADTs stay as Value because:
+ * - Functions can be passed to polymorphic higher-order functions that use Apply()
+ * - Records/tuples interact with pattern matching which expects Value
+ * - ADTs require complex boxing/unboxing at boundaries
+ */
+const typeToGo = (type: Type): string | null => {
+  if (!isMonomorphic(type)) return null;
+
+  switch (type.kind) {
+    case "TCon":
+      switch (type.name) {
+        case "number":
+          return "float64";
+        case "string":
+          return "string";
+        case "boolean":
+          return "bool";
+        default:
+          // User-defined type (ADT) - keep as Value
+          return null;
+      }
+
+    // Functions, tuples, records, TApp (ADTs) stay as Value
+    case "TFun":
+    case "TTuple":
+    case "TRecord":
+    case "TApp":
+    case "TVar":
+      return null;
+  }
+};
 
 /** Helper for exhaustive switch checking */
 const assertNever = (x: never): never => {
@@ -31,21 +79,29 @@ type CodeGenContext = {
   indent: number;
   /** Generated code lines */
   lines: string[];
-  /** Set of constructor names */
-  constructors: Set<string>;
+  /** Map of constructor names to integer tags */
+  constructorTags: Map<string, number>;
   /** Lifted functions from closure conversion */
   functions: readonly ir.IRFunction[];
+  /** Variables with known typed Go representation (not boxed as Value) */
+  typedVars: Map<string, string>;
 };
 
 const createContext = (
   constructorNames: readonly string[],
   functions: readonly ir.IRFunction[],
-): CodeGenContext => ({
-  indent: 0,
-  lines: [],
-  constructors: new Set(constructorNames),
-  functions,
-});
+): CodeGenContext => {
+  // Assign integer tags to constructors
+  const constructorTags = new Map<string, number>();
+  constructorNames.forEach((name, i) => constructorTags.set(name, i));
+  return {
+    indent: 0,
+    lines: [],
+    constructorTags,
+    functions,
+    typedVars: new Map(),
+  };
+};
 
 /** Add a line of code with current indentation */
 const emit = (ctx: CodeGenContext, code: string): void => {
@@ -103,28 +159,86 @@ const toGoId = (name: string): string => {
 // =============================================================================
 
 /**
+ * Check if an atom has a typed Go representation.
+ */
+const getAtomGoType = (ctx: CodeGenContext, atom: ir.IRAtom): string | null => {
+  if (atom.kind === "IRLit") {
+    return typeToGo(atom.type);
+  }
+  if (atom.kind === "IRVar") {
+    // Check if this is a typed variable
+    return ctx.typedVars.get(atom.name) ?? null;
+  }
+  return null;
+};
+
+/**
+ * Generate a typed atom value (raw value without Value wrapper).
+ */
+const genTypedAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
+  switch (atom.kind) {
+    case "IRLit":
+      if (typeof atom.value === "string") {
+        return JSON.stringify(atom.value);
+      }
+      if (typeof atom.value === "boolean") {
+        return atom.value ? "true" : "false";
+      }
+      // Numbers as raw float64
+      return `float64(${atom.value})`;
+
+    case "IRVar": {
+      const name = atom.name;
+      if (name.startsWith("$env[")) {
+        return name.replace("$env", "env");
+      }
+      return toGoId(name);
+    }
+
+    default:
+      return assertNever(atom);
+  }
+};
+
+/**
  * Generate Go code for an IR expression.
  * Returns the Go expression as a string.
  */
 const genExpr = (ctx: CodeGenContext, expr: ir.IRExpr): string => {
   switch (expr.kind) {
-    case "IRAtomExpr":
+    case "IRAtomExpr": {
+      const goType = getAtomGoType(ctx, expr.atom);
+      if (goType) {
+        // Typed atom - but may need to box for return
+        return genTypedAtom(ctx, expr.atom);
+      }
       return genAtom(ctx, expr.atom);
+    }
 
     case "IRLet": {
-      const binding = genBinding(ctx, expr.binding);
       const goName = toGoId(expr.name);
-      // Use var + assignment to allow shadowing of prelude variables
-      emit(ctx, `var ${goName} Value = ${binding}`);
+      const bindingType = expr.binding.type;
+      const goType = typeToGo(bindingType);
+
+      if (goType) {
+        // Use typed variable declaration
+        const binding = genTypedBinding(ctx, expr.binding);
+        emit(ctx, `var ${goName} ${goType} = ${binding}`);
+        ctx.typedVars.set(expr.name, goType);
+      } else {
+        // Fall back to boxed Value
+        const binding = genBinding(ctx, expr.binding);
+        emit(ctx, `var ${goName} Value = ${binding}`);
+      }
       return genExpr(ctx, expr.body);
     }
 
     case "IRLetRec": {
-      // Declare all variables first
+      // For letrec, check if all bindings are typeable
+      // For simplicity, fall back to Value for recursive bindings
       for (const { name } of expr.bindings) {
         emit(ctx, `var ${toGoId(name)} Value`);
       }
-      // Then assign values
       for (const { name, binding } of expr.bindings) {
         const bindingCode = genBinding(ctx, binding);
         emit(ctx, `${toGoId(name)} = ${bindingCode}`);
@@ -160,9 +274,10 @@ const genAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
       if (name.startsWith("$env[")) {
         return name.replace("$env", "env");
       }
-      // Check if this is a constructor
-      if (ctx.constructors.has(name)) {
-        return `NewCon("${name}")`;
+      // Check if this is a constructor - use integer tag
+      const tag = ctx.constructorTags.get(name);
+      if (tag !== undefined) {
+        return `NewCon(${tag})`;
       }
       return toGoId(name);
     }
@@ -173,7 +288,7 @@ const genAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
 };
 
 /**
- * Generate Go for a binding.
+ * Generate Go for a binding (boxed as Value).
  */
 const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
   switch (binding.kind) {
@@ -187,7 +302,7 @@ const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
     }
 
     case "IRBinOpBinding":
-      return genBinOp(ctx, binding);
+      return genBinOp(ctx, binding, false);
 
     case "IRIfBinding":
       return genIf(ctx, binding);
@@ -229,59 +344,113 @@ const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
 };
 
 /**
- * Generate Go for binary operations.
+ * Generate Go for a typed binding (raw value without Value wrapper).
  */
-const genBinOp = (_ctx: CodeGenContext, binding: ir.IRBinOpBinding): string => {
-  const left = genAtom(_ctx, binding.left);
-  const right = genAtom(_ctx, binding.right);
+const genTypedBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
+  switch (binding.kind) {
+    case "IRAtomBinding":
+      return genTypedAtom(ctx, binding.atom);
+
+    case "IRBinOpBinding":
+      return genBinOp(ctx, binding, true);
+
+    case "IRAppBinding": {
+      // Check if we can do a direct typed call
+      const funcGoType = getAtomGoType(ctx, binding.func);
+      if (funcGoType && funcGoType.startsWith("func(")) {
+        // Direct function call
+        const func = genTypedAtom(ctx, binding.func);
+        const argGoType = getAtomGoType(ctx, binding.arg);
+        const arg = argGoType ? genTypedAtom(ctx, binding.arg) : genAtom(ctx, binding.arg);
+        return `${func}(${arg})`;
+      }
+      // Fall through to default
+      break;
+    }
+
+    case "IRLambdaBinding": {
+      // Generate typed lambda directly
+      return genLambda(ctx, binding);
+    }
+
+    default:
+      break;
+  }
+
+  // Default: box, then type assert to extract typed value
+  const goType = typeToGo(binding.type);
+  const boxed = genBinding(ctx, binding);
+  if (goType) {
+    return `${boxed}.(${goType})`;
+  }
+  return boxed;
+};
+
+/**
+ * Generate Go for binary operations.
+ * @param typed If true, return raw typed value; if false, wrap in Value()
+ */
+const genBinOp = (ctx: CodeGenContext, binding: ir.IRBinOpBinding, typed: boolean): string => {
+  // Check which operands are typed
+  const leftGoType = getAtomGoType(ctx, binding.left);
+  const rightGoType = getAtomGoType(ctx, binding.right);
+
+  // Generate operand code - use typed if available, otherwise boxed
+  const left = leftGoType ? genTypedAtom(ctx, binding.left) : genAtom(ctx, binding.left);
+  const right = rightGoType ? genTypedAtom(ctx, binding.right) : genAtom(ctx, binding.right);
 
   // Check operand type for string operations
   const isString = isStringType(binding.operandType);
 
-  // Helper to extract typed value from interface{}
-  // Use float64 for all numbers to match JS semantics
-  const asNum = (v: string) => `${v}.(float64)`;
-  const asStr = (v: string) => `${v}.(string)`;
+  // Helper to wrap result if needed
+  const wrap = (expr: string) => (typed ? expr : `Value(${expr})`);
+
+  // Type assertion helpers - only needed when operand is boxed
+  const asNum = (v: string, isTyped: boolean) => (isTyped ? v : `${v}.(float64)`);
+  const asStr = (v: string, isTyped: boolean) => (isTyped ? v : `${v}.(string)`);
+
+  const leftTyped = leftGoType !== null;
+  const rightTyped = rightGoType !== null;
 
   switch (binding.op) {
     case "+":
       if (isString) {
-        return `Value(${asStr(left)} + ${asStr(right)})`;
+        return wrap(`${asStr(left, leftTyped)} + ${asStr(right, rightTyped)}`);
       }
-      return `Value(${asNum(left)} + ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} + ${asNum(right, rightTyped)}`);
 
     case "-":
-      return `Value(${asNum(left)} - ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} - ${asNum(right, rightTyped)}`);
 
     case "*":
-      return `Value(${asNum(left)} * ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} * ${asNum(right, rightTyped)}`);
 
     case "/":
-      return `Value(${asNum(left)} / ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} / ${asNum(right, rightTyped)}`);
 
     case "<":
-      return `Value(${asNum(left)} < ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} < ${asNum(right, rightTyped)}`);
 
     case ">":
-      return `Value(${asNum(left)} > ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} > ${asNum(right, rightTyped)}`);
 
     case "<=":
-      return `Value(${asNum(left)} <= ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} <= ${asNum(right, rightTyped)}`);
 
     case ">=":
-      return `Value(${asNum(left)} >= ${asNum(right)})`;
+      return wrap(`${asNum(left, leftTyped)} >= ${asNum(right, rightTyped)}`);
 
     case "==":
       if (isComplexType(binding.operandType)) {
-        return `Eq(${left}, ${right})`;
+        return typed ? `Eq(${left}, ${right}).(bool)` : `Eq(${left}, ${right})`;
       }
-      return `Value(${left} == ${right})`;
+      return wrap(`${left} == ${right}`);
 
     case "!=":
       if (isComplexType(binding.operandType)) {
-        return `!Eq(${left}, ${right})`;
+        return typed ? `!Eq(${left}, ${right}).(bool)` : `Value(!Eq(${left}, ${right}).(bool))`;
       }
-      return `Value(${left} != ${right})`;
+      return wrap(`${left} != ${right}`);
   }
 };
 
@@ -309,12 +478,15 @@ const isComplexType = (type: Type): boolean => {
  * Generate Go for conditional.
  */
 const genIf = (ctx: CodeGenContext, binding: ir.IRIfBinding): string => {
-  const cond = genAtom(ctx, binding.cond);
+  // Check if condition is typed
+  const condGoType = getAtomGoType(ctx, binding.cond);
+  const cond = condGoType ? genTypedAtom(ctx, binding.cond) : genAtom(ctx, binding.cond);
+  const condExpr = condGoType === "bool" ? cond : `${cond}.(bool)`;
 
   // Use immediately invoked function for complex branches
   const lines: string[] = [];
   lines.push(`func() Value {`);
-  lines.push(`\tif ${cond}.(bool) {`);
+  lines.push(`\tif ${condExpr} {`);
 
   // Generate then branch
   ctx.indent += 2;
@@ -355,6 +527,22 @@ const genIf = (ctx: CodeGenContext, binding: ir.IRIfBinding): string => {
 const genLambda = (ctx: CodeGenContext, binding: ir.IRLambdaBinding): string => {
   const param = toGoId(binding.param);
 
+  // Check if this lambda can be typed
+  // Use typeToGo on the function type - this will return null since we don't generate typed functions
+  const funcGoType = typeToGo(binding.type);
+  const isTypedLambda = funcGoType !== null;
+
+  const paramGoType = isTypedLambda ? typeToGo(binding.paramType) : null;
+  let retGoType: string | null = null;
+  if (isTypedLambda && binding.type.kind === "TFun") {
+    retGoType = typeToGo(binding.type.ret);
+  }
+
+  // If typed, track the param as a typed variable
+  if (isTypedLambda) {
+    ctx.typedVars.set(binding.param, paramGoType!);
+  }
+
   // Generate body
   ctx.indent++;
   const savedLines = ctx.lines;
@@ -364,14 +552,29 @@ const genLambda = (ctx: CodeGenContext, binding: ir.IRLambdaBinding): string => 
   ctx.lines = savedLines;
   ctx.indent--;
 
+  // Clean up typed var tracking
+  if (isTypedLambda) {
+    ctx.typedVars.delete(binding.param);
+  }
+
   const lines: string[] = [];
-  lines.push(`PureFunc{Fn: func(${param} Value) Value {`);
+  if (isTypedLambda) {
+    // Generate typed lambda - use raw func, not PureFunc wrapper
+    lines.push(`func(${param} ${paramGoType}) ${retGoType} {`);
+  } else {
+    lines.push(`PureFunc{Fn: func(${param} Value) Value {`);
+  }
 
   for (const line of bodyLines) {
     lines.push("\t" + line);
   }
   lines.push(`\treturn ${bodyResult}`);
-  lines.push(`}}`);
+
+  if (isTypedLambda) {
+    lines.push(`}`);
+  } else {
+    lines.push(`}}`);
+  }
 
   return lines.join("\n" + "\t".repeat(ctx.indent));
 };
@@ -407,7 +610,8 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
 
     for (const case_ of binding.cases) {
       const pattern = case_.pattern as ir.IRPCon;
-      lines.push(`\tcase "${pattern.name}":`);
+      const tag = ctx.constructorTags.get(pattern.name) ?? 0;
+      lines.push(`\tcase ${tag}: // ${pattern.name}`);
 
       // Generate bindings for constructor arguments
       const bindings = genPatternBindings("_s.(Con).Args", pattern);
@@ -437,7 +641,7 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
     // Fall back to if/else chain
     for (let i = 0; i < binding.cases.length; i++) {
       const case_ = binding.cases[i]!;
-      const { condition, bindings } = genPatternMatch("_s", case_.pattern);
+      const { condition, bindings } = genPatternMatch(ctx, "_s", case_.pattern);
 
       const prefix = i === 0 ? "if" : "} else if";
       lines.push(`\t${prefix} ${condition} {`);
@@ -462,7 +666,10 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
         for (const line of guardLines) {
           lines.push("\t\t" + line);
         }
-        lines.push(`\t\tif ${guardResult}.(bool) {`);
+        // Check if guard result is a typed variable
+        const guardGoType = typeToGo(case_.guard.type);
+        const guardCondition = guardGoType === "bool" ? guardResult : `${guardResult}.(bool)`;
+        lines.push(`\t\tif ${guardCondition} {`);
       }
 
       // Generate body
@@ -519,6 +726,7 @@ const genPatternBindings = (argsExpr: string, pattern: ir.IRPCon): Array<[string
  * Generate pattern match condition and bindings.
  */
 const genPatternMatch = (
+  ctx: CodeGenContext,
   scrutinee: string,
   pattern: ir.IRPattern,
 ): { condition: string; bindings: Array<[string, string]> } => {
@@ -540,12 +748,13 @@ const genPatternMatch = (
     }
 
     case "IRPCon": {
-      const conditions: string[] = [`${scrutinee}.(Con).Tag == "${pattern.name}"`];
+      const tag = ctx.constructorTags.get(pattern.name) ?? 0;
+      const conditions: string[] = [`${scrutinee}.(Con).Tag == ${tag}`];
       const bindings: Array<[string, string]> = [];
 
       for (let i = 0; i < pattern.args.length; i++) {
         const argScrutinee = `${scrutinee}.(Con).Args[${i}]`;
-        const result = genPatternMatch(argScrutinee, pattern.args[i]!);
+        const result = genPatternMatch(ctx, argScrutinee, pattern.args[i]!);
         if (result.condition !== "true") {
           conditions.push(result.condition);
         }
@@ -561,7 +770,7 @@ const genPatternMatch = (
 
       for (let i = 0; i < pattern.elements.length; i++) {
         const elemScrutinee = `${scrutinee}.([]Value)[${i}]`;
-        const result = genPatternMatch(elemScrutinee, pattern.elements[i]!);
+        const result = genPatternMatch(ctx, elemScrutinee, pattern.elements[i]!);
         if (result.condition !== "true") {
           conditions.push(result.condition);
         }
@@ -577,7 +786,7 @@ const genPatternMatch = (
 
       for (const field of pattern.fields) {
         const fieldScrutinee = `${scrutinee}.(map[string]Value)["${field.name}"]`;
-        const result = genPatternMatch(fieldScrutinee, field.pattern);
+        const result = genPatternMatch(ctx, fieldScrutinee, field.pattern);
         if (result.condition !== "true") {
           conditions.push(result.condition);
         }
@@ -588,7 +797,7 @@ const genPatternMatch = (
     }
 
     case "IRPAs": {
-      const result = genPatternMatch(scrutinee, pattern.pattern);
+      const result = genPatternMatch(ctx, scrutinee, pattern.pattern);
       result.bindings.push([pattern.name, scrutinee]);
       return result;
     }
@@ -598,7 +807,7 @@ const genPatternMatch = (
       let bindings: Array<[string, string]> = [];
 
       for (let i = 0; i < pattern.alternatives.length; i++) {
-        const result = genPatternMatch(scrutinee, pattern.alternatives[i]!);
+        const result = genPatternMatch(ctx, scrutinee, pattern.alternatives[i]!);
         conditions.push(`(${result.condition})`);
         if (i === 0) {
           bindings = result.bindings;

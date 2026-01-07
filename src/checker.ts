@@ -881,7 +881,7 @@ export const generalize = (env: TypeEnv, type: Type): Scheme => {
  * @param type The type to analyze
  * @returns Set of free type variable names
  */
-const freeTypeVars = (type: Type): Set<string> => {
+export const freeTypeVars = (type: Type): Set<string> => {
   switch (type.kind) {
     case "TCon":
       return new Set(); // Type constructors have no variables
