@@ -932,6 +932,7 @@ const infixBindingPower = (state: ParserState): number => {
     case TokenKind.False:
     case TokenKind.LParen:
     case TokenKind.LBrace:
+    case TokenKind.LBracket:
       if (state.lexer.atLineStart) {
         return Bp.None;
       }
