@@ -145,6 +145,244 @@ describe("Optimizations", () => {
       }
     });
 
+    it("folds string equality", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          "==",
+          ir.irLit("abc", strType),
+          ir.irLit("abc", strType),
+          strType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds string inequality", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          "!=",
+          ir.irLit("abc", strType),
+          ir.irLit("def", strType),
+          strType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds string comparison operators", () => {
+      // "abc" < "def"
+      const ltExpr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          "<",
+          ir.irLit("abc", strType),
+          ir.irLit("def", strType),
+          strType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const ltResult = constantFolding.run(ltExpr);
+      if (
+        ltResult.kind === "IRLet" &&
+        ltResult.binding.kind === "IRAtomBinding" &&
+        ltResult.binding.atom.kind === "IRLit"
+      ) {
+        expect(ltResult.binding.atom.value).toBe(true);
+      }
+
+      // "def" > "abc"
+      const gtExpr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          ">",
+          ir.irLit("def", strType),
+          ir.irLit("abc", strType),
+          strType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const gtResult = constantFolding.run(gtExpr);
+      if (
+        gtResult.kind === "IRLet" &&
+        gtResult.binding.kind === "IRAtomBinding" &&
+        gtResult.binding.atom.kind === "IRLit"
+      ) {
+        expect(gtResult.binding.atom.value).toBe(true);
+      }
+
+      // "abc" <= "abc"
+      const leExpr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          "<=",
+          ir.irLit("abc", strType),
+          ir.irLit("abc", strType),
+          strType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const leResult = constantFolding.run(leExpr);
+      if (
+        leResult.kind === "IRLet" &&
+        leResult.binding.kind === "IRAtomBinding" &&
+        leResult.binding.atom.kind === "IRLit"
+      ) {
+        expect(leResult.binding.atom.value).toBe(true);
+      }
+
+      // "def" >= "abc"
+      const geExpr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          ">=",
+          ir.irLit("def", strType),
+          ir.irLit("abc", strType),
+          strType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const geResult = constantFolding.run(geExpr);
+      if (
+        geResult.kind === "IRLet" &&
+        geResult.binding.kind === "IRAtomBinding" &&
+        geResult.binding.atom.kind === "IRLit"
+      ) {
+        expect(geResult.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds boolean equality", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          "==",
+          ir.irLit(true, boolType),
+          ir.irLit(true, boolType),
+          boolType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds boolean inequality", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(
+          "!=",
+          ir.irLit(true, boolType),
+          ir.irLit(false, boolType),
+          boolType,
+          boolType,
+        ),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds number comparison <=", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding("<=", ir.irLit(5, numType), ir.irLit(5, numType), numType, boolType),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds number comparison >=", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(">=", ir.irLit(10, numType), ir.irLit(5, numType), numType, boolType),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds number inequality", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding("!=", ir.irLit(5, numType), ir.irLit(10, numType), numType, boolType),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
+    it("folds number >", () => {
+      const expr = ir.irLet(
+        "x",
+        ir.irBinOpBinding(">", ir.irLit(10, numType), ir.irLit(5, numType), numType, boolType),
+        ir.irAtomExpr(ir.irVar("x", boolType)),
+      );
+      const result = constantFolding.run(expr);
+      if (
+        result.kind === "IRLet" &&
+        result.binding.kind === "IRAtomBinding" &&
+        result.binding.atom.kind === "IRLit"
+      ) {
+        expect(result.binding.atom.value).toBe(true);
+      }
+    });
+
     it("does not fold division by zero", () => {
       // let x = 10 / 0 in x
       const expr = ir.irLet(
@@ -499,6 +737,267 @@ describe("Optimizations", () => {
       if (result.kind === "IRAtomExpr" && result.atom.kind === "IRLit") {
         expect(result.atom.value).toBe(12);
       }
+    });
+  });
+
+  describe("Binding Type Folding", () => {
+    it("propagates constants through app bindings", () => {
+      // let x = 3 in let y = f x in y (x should be substituted)
+      const funcType = { kind: "TFun" as const, param: numType, ret: numType };
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(3, numType)),
+        ir.irLet(
+          "y",
+          ir.irAppBinding(ir.irVar("f", funcType), ir.irVar("x", numType), numType),
+          ir.irAtomExpr(ir.irVar("y", numType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      // The app binding should have the constant 3 substituted for x
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.body.kind === "IRLet") {
+        const appBinding = result.body.binding;
+        expect(appBinding.kind).toBe("IRAppBinding");
+        if (appBinding.kind === "IRAppBinding") {
+          expect(appBinding.arg.kind).toBe("IRLit");
+        }
+      }
+    });
+
+    it("propagates constants through tuple bindings", () => {
+      // let x = 3 in let t = (x, 4) in t
+      const tupleType = { kind: "TTuple" as const, elements: [numType, numType] };
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(3, numType)),
+        ir.irLet(
+          "t",
+          ir.irTupleBinding([ir.irVar("x", numType), ir.irLit(4, numType)], tupleType),
+          ir.irAtomExpr(ir.irVar("t", tupleType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.body.kind === "IRLet") {
+        const tupleBinding = result.body.binding;
+        expect(tupleBinding.kind).toBe("IRTupleBinding");
+        if (tupleBinding.kind === "IRTupleBinding") {
+          expect(tupleBinding.elements[0]?.kind).toBe("IRLit");
+        }
+      }
+    });
+
+    it("propagates constants through record bindings", () => {
+      // let x = 3 in let r = { a = x, b = 4 } in r
+      const recordType = {
+        kind: "TRecord" as const,
+        fields: new Map([
+          ["a", numType],
+          ["b", numType],
+        ]),
+        row: null,
+      };
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(3, numType)),
+        ir.irLet(
+          "r",
+          ir.irRecordBinding(
+            [
+              ir.irRecordField("a", ir.irVar("x", numType)),
+              ir.irRecordField("b", ir.irLit(4, numType)),
+            ],
+            recordType,
+          ),
+          ir.irAtomExpr(ir.irVar("r", recordType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.body.kind === "IRLet") {
+        const recordBinding = result.body.binding;
+        expect(recordBinding.kind).toBe("IRRecordBinding");
+        if (recordBinding.kind === "IRRecordBinding") {
+          expect(recordBinding.fields[0]?.value.kind).toBe("IRLit");
+        }
+      }
+    });
+
+    it("propagates constants through field access bindings", () => {
+      // let r = { a = 3 } in let x = r.a in x
+      const recordType = { kind: "TRecord" as const, fields: new Map([["a", numType]]), row: null };
+      const expr = ir.irLet(
+        "r",
+        ir.irRecordBinding([ir.irRecordField("a", ir.irLit(3, numType))], recordType),
+        ir.irLet(
+          "x",
+          ir.irFieldAccessBinding(ir.irVar("r", recordType), "a", numType),
+          ir.irAtomExpr(ir.irVar("x", numType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLet");
+    });
+
+    it("propagates constants through tuple index bindings", () => {
+      // let t = (3, 4) in let x = t.0 in x
+      const tupleType = { kind: "TTuple" as const, elements: [numType, numType] };
+      const expr = ir.irLet(
+        "t",
+        ir.irTupleBinding([ir.irLit(3, numType), ir.irLit(4, numType)], tupleType),
+        ir.irLet(
+          "x",
+          ir.irTupleIndexBinding(ir.irVar("t", tupleType), 0, numType),
+          ir.irAtomExpr(ir.irVar("x", numType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLet");
+    });
+
+    it("propagates constants through match bindings", () => {
+      // let x = 3 in match x when n -> n + 1 end
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(3, numType)),
+        ir.irLet(
+          "result",
+          ir.irMatchBinding(
+            ir.irVar("x", numType),
+            [
+              ir.irCase(
+                ir.irPVar("n", numType),
+                ir.irLet(
+                  "_t",
+                  ir.irBinOpBinding(
+                    "+",
+                    ir.irVar("n", numType),
+                    ir.irLit(1, numType),
+                    numType,
+                    numType,
+                  ),
+                  ir.irAtomExpr(ir.irVar("_t", numType)),
+                ),
+              ),
+            ],
+            numType,
+          ),
+          ir.irAtomExpr(ir.irVar("result", numType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.body.kind === "IRLet") {
+        const matchBinding = result.body.binding;
+        expect(matchBinding.kind).toBe("IRMatchBinding");
+        if (matchBinding.kind === "IRMatchBinding") {
+          expect(matchBinding.scrutinee.kind).toBe("IRLit");
+        }
+      }
+    });
+
+    it("folds within lambda bodies", () => {
+      // let f = fn x => 1 + 2 in f
+      const funcType = { kind: "TFun" as const, param: numType, ret: numType };
+      const expr = ir.irLet(
+        "f",
+        ir.irLambdaBinding(
+          "x",
+          numType,
+          ir.irLet(
+            "_t",
+            ir.irBinOpBinding("+", ir.irLit(1, numType), ir.irLit(2, numType), numType, numType),
+            ir.irAtomExpr(ir.irVar("_t", numType)),
+          ),
+          funcType,
+        ),
+        ir.irAtomExpr(ir.irVar("f", funcType)),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.binding.kind === "IRLambdaBinding") {
+        // The 1 + 2 inside should be folded to 3
+        const body = result.binding.body;
+        if (body.kind === "IRLet" && body.binding.kind === "IRAtomBinding") {
+          expect(body.binding.atom.kind).toBe("IRLit");
+          if (body.binding.atom.kind === "IRLit") {
+            expect(body.binding.atom.value).toBe(3);
+          }
+        }
+      }
+    });
+
+    it("propagates constants through closure captures", () => {
+      // let x = 3 in let c = { $fn: fn_1, $env: [x] } in c
+      const funcType = { kind: "TFun" as const, param: numType, ret: numType };
+      const expr = ir.irLet(
+        "x",
+        ir.irAtomBinding(ir.irLit(3, numType)),
+        ir.irLet(
+          "c",
+          ir.irClosureBinding("fn_1", [ir.irVar("x", numType)], funcType),
+          ir.irAtomExpr(ir.irVar("c", funcType)),
+        ),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLet");
+      if (result.kind === "IRLet" && result.body.kind === "IRLet") {
+        const closureBinding = result.body.binding;
+        expect(closureBinding.kind).toBe("IRClosureBinding");
+        if (closureBinding.kind === "IRClosureBinding") {
+          expect(closureBinding.captures[0]?.kind).toBe("IRLit");
+        }
+      }
+    });
+
+    it("folds letrec bindings", () => {
+      // let rec f = fn x => 1 + 2 in f
+      const funcType = { kind: "TFun" as const, param: numType, ret: numType };
+      const expr = ir.irLetRec(
+        [
+          {
+            name: "f",
+            binding: ir.irLambdaBinding(
+              "x",
+              numType,
+              ir.irLet(
+                "_t",
+                ir.irBinOpBinding(
+                  "+",
+                  ir.irLit(1, numType),
+                  ir.irLit(2, numType),
+                  numType,
+                  numType,
+                ),
+                ir.irAtomExpr(ir.irVar("_t", numType)),
+              ),
+              funcType,
+            ),
+          },
+        ],
+        ir.irAtomExpr(ir.irVar("f", funcType)),
+      );
+
+      const result = constantFolding.run(expr);
+
+      expect(result.kind).toBe("IRLetRec");
     });
   });
 

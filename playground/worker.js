@@ -4062,7 +4062,8 @@ var coreModule = moduleDecl("Core", [], [
   recBinding("flip", flipExpr)
 ]);
 var tString = tycon("string");
-var tInt2 = tycon("number");
+var tInt2 = tycon("Int");
+var tFloat2 = tycon("Float");
 var tBool2 = tycon("boolean");
 var tChar2 = tycon("char");
 var tMaybe = (t) => tyapp(tycon("Maybe"), t);
@@ -4408,7 +4409,7 @@ var getFieldType = (type, field2) => {
   throw new Error(`Expected record type with field ${field2}, got ${type.kind}`);
 };
 var tInt3 = { kind: "TCon", name: "Int" };
-var tFloat2 = { kind: "TCon", name: "Float" };
+var tFloat3 = { kind: "TCon", name: "Float" };
 var tStr2 = { kind: "TCon", name: "string" };
 var tChar3 = { kind: "TCon", name: "char" };
 var tBool3 = { kind: "TCon", name: "boolean" };
@@ -4417,7 +4418,7 @@ var normalize = (ctx, expr) => {
     case "Int":
       return { bindings: [], atom: irLit(expr.value, tInt3) };
     case "Float":
-      return { bindings: [], atom: irLit(expr.value, tFloat2) };
+      return { bindings: [], atom: irLit(expr.value, tFloat3) };
     case "Str":
       return { bindings: [], atom: irLit(expr.value, tStr2) };
     case "Char":
@@ -4491,7 +4492,7 @@ var lowerExpr = (ctx, expr) => {
     case "Int":
       return irAtomExpr(irLit(expr.value, tInt3));
     case "Float":
-      return irAtomExpr(irLit(expr.value, tFloat2));
+      return irAtomExpr(irLit(expr.value, tFloat3));
     case "Str":
       return irAtomExpr(irLit(expr.value, tStr2));
     case "Char":
@@ -4736,7 +4737,7 @@ var lowerPattern = (pattern, type) => {
     case "PLit": {
       let litType;
       if (typeof pattern.value === "number") {
-        litType = Number.isInteger(pattern.value) ? tInt3 : tFloat2;
+        litType = Number.isInteger(pattern.value) ? tInt3 : tFloat3;
       } else if (typeof pattern.value === "string") {
         litType = tStr2;
       } else {

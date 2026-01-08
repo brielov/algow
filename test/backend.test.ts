@@ -654,7 +654,209 @@ describe("Foreign Functions", () => {
   });
 });
 
+describe("Tuple Index", () => {
+  it("generates tuple index access", () => {
+    const tupleT = tupleType([intType, strType]);
+    const binding = ir.irTupleIndexBinding(ir.irVar("t", tupleT), 0, intType);
+    const body = ir.irAtomExpr(ir.irVar("_t", intType));
+    const expr = ir.irLet("_t", binding, body);
+    const result = generateJS(expr, []);
+    expect(result.code).toContain("t[0]");
+  });
+
+  it("generates tuple index for second element", () => {
+    const tupleT = tupleType([intType, strType]);
+    const binding = ir.irTupleIndexBinding(ir.irVar("t", tupleT), 1, strType);
+    const body = ir.irAtomExpr(ir.irVar("_t", strType));
+    const expr = ir.irLet("_t", binding, body);
+    const result = generateJS(expr, []);
+    expect(result.code).toContain("t[1]");
+  });
+});
+
+describe("Constructor Application", () => {
+  it("uses $apply for constructor application", () => {
+    const maybeType = appType({ kind: "TCon", name: "Maybe" }, intType);
+    const justType = funType(intType, maybeType);
+    const binding = ir.irAppBinding(ir.irVar("Just", justType), ir.irLit(42, intType), maybeType);
+    const body = ir.irAtomExpr(ir.irVar("_t", maybeType));
+    const expr = ir.irLet("_t", binding, body);
+    const result = generateJS(expr, ["Just", "Nothing"]);
+    expect(result.code).toContain("$apply");
+  });
+});
+
+describe("As-Patterns", () => {
+  it("generates as-pattern binding", () => {
+    const maybeType = appType({ kind: "TCon", name: "Maybe" }, intType);
+    // Pattern: Just n as whole - irPAs(pattern, name, type)
+    const innerPattern = ir.irPVar("n", intType);
+    const conPattern = ir.irPCon("Just", [innerPattern], maybeType);
+    const asPattern = ir.irPAs(conPattern, "whole", maybeType);
+    const caseBody = ir.irAtomExpr(ir.irVar("whole", maybeType));
+    const cases = [ir.irCase(asPattern, caseBody)];
+    const binding = ir.irMatchBinding(ir.irVar("x", maybeType), cases, maybeType);
+    const body = ir.irAtomExpr(ir.irVar("_t", maybeType));
+    const expr = ir.irLet("_t", binding, body);
+    const result = generateJS(expr, ["Just", "Nothing"]);
+    expect(result.code).toContain("const whole = _s");
+    expect(result.code).toContain("const n = _s.$args[0]");
+  });
+});
+
+describe("Or-Patterns", () => {
+  it("generates or-pattern with multiple alternatives", () => {
+    // Pattern: 0 | 1 -> true
+    const orPattern = ir.irPOr([ir.irPLit(0, intType), ir.irPLit(1, intType)], intType);
+    const caseBody = ir.irAtomExpr(ir.irLit(true, boolType));
+    const cases = [ir.irCase(orPattern, caseBody)];
+    const binding = ir.irMatchBinding(ir.irVar("x", intType), cases, boolType);
+    const body = ir.irAtomExpr(ir.irVar("_t", boolType));
+    const expr = ir.irLet("_t", binding, body);
+    const result = generateJS(expr, []);
+    expect(result.code).toContain("(_s === 0) || (_s === 1)");
+  });
+});
+
+describe("Pattern Guards", () => {
+  it("generates guard expression in pattern match", () => {
+    // match x when n if n > 0 -> n
+    // irCase(pattern, body, guard?) - body before guard
+    const pattern = ir.irPVar("n", intType);
+    const guardBinding = ir.irBinOpBinding(
+      ">",
+      ir.irVar("n", intType),
+      ir.irLit(0, intType),
+      intType,
+      boolType,
+    );
+    const guardExpr = ir.irLet("_g", guardBinding, ir.irAtomExpr(ir.irVar("_g", boolType)));
+    const caseBody = ir.irAtomExpr(ir.irVar("n", intType));
+    // irCase(pattern, body, guard)
+    const caseWithGuard = ir.irCase(pattern, caseBody, guardExpr);
+    const cases = [caseWithGuard];
+    const binding = ir.irMatchBinding(ir.irVar("x", intType), cases, intType);
+    const body = ir.irAtomExpr(ir.irVar("_t", intType));
+    const expr = ir.irLet("_t", binding, body);
+    const result = generateJS(expr, []);
+    expect(result.code).toContain("if (");
+    expect(result.code).toContain("return n");
+  });
+});
+
 describe("TCO (Tail Call Optimization)", () => {
+  it("generates tail-recursive lambda with while loop", () => {
+    const funcType_ = funType(intType, intType);
+
+    // Build a tail-recursive function: f x = if x <= 0 then x else f (x - 1)
+    const tailCallExpr = ir.irLet(
+      "_t1",
+      ir.irBinOpBinding("-", ir.irVar("x", intType), ir.irLit(1, intType), intType, intType),
+      ir.irLet(
+        "_t2",
+        ir.irAppBinding(ir.irVar("f", funcType_), ir.irVar("_t1", intType), intType),
+        ir.irAtomExpr(ir.irVar("_t2", intType)),
+      ),
+    );
+
+    const ifBinding = ir.irIfBinding(
+      ir.irVar("_cond", boolType),
+      ir.irAtomExpr(ir.irVar("x", intType)),
+      tailCallExpr,
+      intType,
+    );
+
+    const funcBody = ir.irLet(
+      "_cond",
+      ir.irBinOpBinding("<=", ir.irVar("x", intType), ir.irLit(0, intType), intType, boolType),
+      ir.irLet("_result", ifBinding, ir.irAtomExpr(ir.irVar("_result", intType))),
+    );
+
+    // Mark as tail recursive (pass as 5th argument)
+    const lambdaBinding = ir.irLambdaBinding("x", intType, funcBody, funcType_, {
+      selfName: "f",
+      params: ["x"],
+    });
+
+    const expr = ir.irLetRec(
+      [ir.irRecBinding("f", lambdaBinding)],
+      ir.irAtomExpr(ir.irVar("f", funcType_)),
+    );
+
+    const result = generateJS(expr, []);
+    expect(result.code).toContain("while (true)");
+    expect(result.code).toContain("continue");
+  });
+
+  it("generates multi-param tail-recursive lambda", () => {
+    const funcType_ = funType(intType, funType(intType, intType));
+
+    // Build: f acc x = if x <= 0 then acc else f (acc + x) (x - 1)
+    const innerBody = ir.irLet(
+      "_t1",
+      ir.irBinOpBinding("+", ir.irVar("acc", intType), ir.irVar("x", intType), intType, intType),
+      ir.irLet(
+        "_t2",
+        ir.irBinOpBinding("-", ir.irVar("x", intType), ir.irLit(1, intType), intType, intType),
+        ir.irLet(
+          "_t3",
+          ir.irAppBinding(
+            ir.irVar("f", funcType_),
+            ir.irVar("_t1", intType),
+            funType(intType, intType),
+          ),
+          ir.irLet(
+            "_t4",
+            ir.irAppBinding(
+              ir.irVar("_t3", funType(intType, intType)),
+              ir.irVar("_t2", intType),
+              intType,
+            ),
+            ir.irAtomExpr(ir.irVar("_t4", intType)),
+          ),
+        ),
+      ),
+    );
+
+    const ifBinding = ir.irIfBinding(
+      ir.irVar("_cond", boolType),
+      ir.irAtomExpr(ir.irVar("acc", intType)),
+      innerBody,
+      intType,
+    );
+
+    const innerLambdaBody = ir.irLet(
+      "_cond",
+      ir.irBinOpBinding("<=", ir.irVar("x", intType), ir.irLit(0, intType), intType, boolType),
+      ir.irLet("_result", ifBinding, ir.irAtomExpr(ir.irVar("_result", intType))),
+    );
+
+    const innerLambda = ir.irLambdaBinding(
+      "x",
+      intType,
+      innerLambdaBody,
+      funType(intType, intType),
+    );
+    const outerBody = ir.irLet(
+      "_inner",
+      innerLambda,
+      ir.irAtomExpr(ir.irVar("_inner", funType(intType, intType))),
+    );
+
+    const lambdaBinding = ir.irLambdaBinding("acc", intType, outerBody, funcType_, {
+      selfName: "f",
+      params: ["acc", "x"],
+    });
+
+    const expr = ir.irLetRec(
+      [ir.irRecBinding("f", lambdaBinding)],
+      ir.irAtomExpr(ir.irVar("f", funcType_)),
+    );
+
+    const result = generateJS(expr, []);
+    expect(result.code).toContain("while (true)");
+  });
+
   it("generates valid JS for recursive function with pattern matching", () => {
     // This is a simpler test that just verifies the code is syntactically valid
     // The actual continue-in-IIFE bug would cause a runtime error
