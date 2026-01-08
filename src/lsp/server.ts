@@ -52,6 +52,7 @@ import {
   type ConstructorRegistry,
   type ForeignMap,
   type ModuleTypeEnv,
+  processDeclarations,
   processModules,
   processUseStatements,
   type Type,
@@ -125,6 +126,7 @@ const processProgram = (program: Program) => {
       localRegistry: preludeRegistry,
       constructorNames: preludeConstructors,
       foreignFunctions: preludeForeign,
+      aliases: preludeAliases,
     } = processUseStatements(preludeUses, moduleEnv);
     // Process user use statements with collision checking against prelude
     const {
@@ -132,22 +134,37 @@ const processProgram = (program: Program) => {
       localRegistry: userRegistry,
       constructorNames: userConstructors,
       foreignFunctions: userForeign,
+      aliases: userAliases,
       diagnostics: useDiagnostics,
     } = processUseStatements(program.uses, moduleEnv, preludeEnv);
     // Merge environments
-    const typeEnv = new Map(preludeEnv);
-    for (const [k, v] of userEnv) typeEnv.set(k, v);
-    const registry = new Map(preludeRegistry);
-    for (const [k, v] of userRegistry) registry.set(k, v);
+    const localEnv = new Map(preludeEnv);
+    for (const [k, v] of userEnv) localEnv.set(k, v);
+    const localRegistry = new Map(preludeRegistry);
+    for (const [k, v] of userRegistry) localRegistry.set(k, v);
     const foreignFunctions = new Map(preludeForeign);
     for (const [k, v] of userForeign) foreignFunctions.set(k, v);
+    const aliases = new Map(preludeAliases);
+    for (const [k, v] of userAliases) aliases.set(k, v);
+    // Process top-level type declarations
+    const {
+      typeEnv: declEnv,
+      registry: declRegistry,
+      constructorNames: declConstructors,
+    } = processDeclarations(program.declarations);
+    // Merge type declarations into the environment
+    const typeEnv = new Map(localEnv);
+    for (const [k, v] of declEnv) typeEnv.set(k, v);
+    const registry = new Map(localRegistry);
+    for (const [k, v] of declRegistry) registry.set(k, v);
     return {
       typeEnv,
       registry,
-      constructorNames: [...preludeConstructors, ...userConstructors],
+      constructorNames: [...preludeConstructors, ...userConstructors, ...declConstructors],
       allModules,
       allUses,
       moduleEnv,
+      aliases,
       foreignFunctions,
       useDiagnostics,
     };
@@ -160,35 +177,60 @@ const processProgram = (program: Program) => {
       localRegistry: userRegistry,
       constructorNames: userConstructors,
       foreignFunctions: userForeign,
+      aliases,
       diagnostics: useDiagnostics,
     } = processUseStatements(program.uses, preludeCache.moduleEnv, preludeCache.typeEnv);
     // Merge with prelude
-    const typeEnv = new Map(preludeCache.typeEnv);
-    for (const [k, v] of userEnv) typeEnv.set(k, v);
-    const registry = new Map(preludeCache.registry);
-    for (const [k, v] of userRegistry) registry.set(k, v);
+    const localEnv = new Map(preludeCache.typeEnv);
+    for (const [k, v] of userEnv) localEnv.set(k, v);
+    const localRegistry = new Map(preludeCache.registry);
+    for (const [k, v] of userRegistry) localRegistry.set(k, v);
     const foreignFunctions = new Map(preludeCache.foreignFunctions);
     for (const [k, v] of userForeign) foreignFunctions.set(k, v);
+    // Process top-level type declarations
+    const {
+      typeEnv: declEnv,
+      registry: declRegistry,
+      constructorNames: declConstructors,
+    } = processDeclarations(program.declarations);
+    // Merge type declarations into the environment
+    const typeEnv = new Map(localEnv);
+    for (const [k, v] of declEnv) typeEnv.set(k, v);
+    const registry = new Map(localRegistry);
+    for (const [k, v] of declRegistry) registry.set(k, v);
     return {
       typeEnv,
       registry,
-      constructorNames: [...preludeCache.constructorNames, ...userConstructors],
+      constructorNames: [...preludeCache.constructorNames, ...userConstructors, ...declConstructors],
       allModules,
       allUses,
       moduleEnv: preludeCache.moduleEnv,
+      aliases,
       foreignFunctions,
       useDiagnostics,
     };
   }
 
-  // No user modules or uses - fully cached
+  // No user modules or uses - but may have type declarations
+  // Process top-level type declarations
+  const {
+    typeEnv: declEnv,
+    registry: declRegistry,
+    constructorNames: declConstructors,
+  } = processDeclarations(program.declarations);
+  // Merge type declarations into the environment
+  const typeEnv = new Map(preludeCache.typeEnv);
+  for (const [k, v] of declEnv) typeEnv.set(k, v);
+  const registry = new Map(preludeCache.registry);
+  for (const [k, v] of declRegistry) registry.set(k, v);
   return {
-    typeEnv: preludeCache.typeEnv,
-    registry: preludeCache.registry,
-    constructorNames: preludeCache.constructorNames,
+    typeEnv,
+    registry,
+    constructorNames: [...preludeCache.constructorNames, ...declConstructors],
     allModules,
     allUses,
     moduleEnv: preludeCache.moduleEnv,
+    aliases: new Map<string, string>(),
     foreignFunctions: preludeCache.foreignFunctions,
     useDiagnostics: [] as Diagnostic[],
   };
@@ -919,6 +961,7 @@ export const createServer = (transport: Transport): void => {
       allModules,
       allUses,
       moduleEnv,
+      aliases,
       foreignFunctions,
       useDiagnostics,
     } = processProgram(parseResult.program);
@@ -943,7 +986,7 @@ export const createServer = (transport: Transport): void => {
       }
 
       // Type checking phase: infer types
-      const checkResult = check(typeEnv, registry, expr, symbols, moduleEnv);
+      const checkResult = check(typeEnv, registry, expr, symbols, moduleEnv, aliases);
       types = checkResult.types;
 
       for (const diag of checkResult.diagnostics) {

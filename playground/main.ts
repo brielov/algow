@@ -23,44 +23,44 @@ type JsonRpcMessage = {
 
 // Default code for the playground
 const defaultCode = `-- Algow Playground
--- Hover over identifiers to see inferred types.
--- Ctrl/Cmd+Click to go to definitions.
--- F2 to rename symbols.
+-- Hover over identifiers to see inferred types
+-- Ctrl/Cmd+Click to go to definition
+-- F2 to rename symbols
 
--- Standard prelude modules: Maybe, Either, List, Core
--- Type 'List.' to see module member completions!
+-- Define a binary tree
+type Tree a = Leaf | Node (Tree a) a (Tree a)
 
--- Define a custom module
-module Math
-  let square x = x * x
-  let cube x = x * x * x
+-- Recursive tree operations
+let rec size tree = match tree
+  when Leaf -> 0
+  when Node left _ right -> 1 + size left + size right
 end
 
--- Import module bindings
-use Math (..)
-
--- Functions and pattern matching
-let double x = x * 2
-let numbers = [1, 2, 3, 4, 5]
-
-let rec sum xs = match xs
-  when Nil -> 0
-  when Cons x rest -> x + sum rest
+let rec contains x tree = match tree
+  when Leaf -> false
+  when Node left value right ->
+    if x == value then true
+    else if x < value then contains x left
+    else contains x right
 end
 
--- Or-patterns
-let describe n = match n
-  when 0 | 1 -> "small"
-  when _ -> "big"
-end
+-- Build a sample BST:     4
+--                       /   \\
+--                      2     6
+--                     / \\   / \\
+--                    1   3 5   7
+let left = Node (Node Leaf 1 Leaf) 2 (Node Leaf 3 Leaf)
+let right = Node (Node Leaf 5 Leaf) 6 (Node Leaf 7 Leaf)
+let tree = Node left 4 right
 
--- Try these (change the last line):
--- map double numbers
--- map square numbers
--- filter (x -> x > 2) numbers
--- sum numbers
+-- Try these expressions (change the last line):
+-- size tree
+-- contains 5 tree
+-- contains 9 tree
+-- map (x -> x * 2) [1, 2, 3, 4, 5]
+-- filter (x -> x > 2) [1, 2, 3, 4, 5]
 
-map square numbers
+in { treeSize = size tree, has5 = contains 5 tree, has9 = contains 9 tree }
 `;
 
 require.config({

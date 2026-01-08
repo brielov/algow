@@ -161,6 +161,11 @@ var tyfun = (param, ret, span) => ({
   ret,
   span
 });
+var tytuple = (elements, span) => ({
+  kind: "TyTuple",
+  elements,
+  span
+});
 var conDecl = (name, fields, span) => ({
   name,
   fields,
@@ -1525,6 +1530,8 @@ var typeExprToType = (texpr) => {
       return tfun(typeExprToType(texpr.param), typeExprToType(texpr.ret));
     case "TyVar":
       return tvar(texpr.name);
+    case "TyTuple":
+      return ttuple(texpr.elements.map(typeExprToType));
   }
 };
 var PRIMITIVE_TYPES = new Set(["Int", "Float", "string", "boolean"]);
@@ -1549,6 +1556,8 @@ var instantiateTypeExpr = (ctx, texpr) => {
         }
         return fresh;
       }
+      case "TyTuple":
+        return ttuple(t.elements.map(convert));
     }
   };
   return convert(texpr);
@@ -1704,6 +1713,34 @@ var specialize = (matrix, conName, arity) => {
   }
   return result;
 };
+var specializeBoolLiteral = (matrix, value) => {
+  const result = [];
+  for (const row of matrix) {
+    if (row.length === 0)
+      continue;
+    const first = row[0];
+    const rest = row.slice(1);
+    switch (first.kind) {
+      case "Lit":
+        if (first.value === value) {
+          result.push(rest);
+        }
+        break;
+      case "Wild":
+        result.push(rest);
+        break;
+      case "Or":
+        for (const alt of first.alternatives) {
+          const expanded = specializeBoolLiteral([[alt, ...rest]], value);
+          result.push(...expanded);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return result;
+};
 var specializeTuple = (matrix, arity) => {
   const result = [];
   for (const row of matrix) {
@@ -1769,6 +1806,19 @@ var findWitness = (env, registry, matrix, types, depth = 0) => {
   const firstType = types[0];
   const restTypes = types.slice(1);
   const typeName = getTypeConName(firstType);
+  if (typeName === "boolean") {
+    const specializedTrue = specializeBoolLiteral(matrix, true);
+    const witnessTrue = findWitness(env, registry, specializedTrue, restTypes, depth + 1);
+    if (witnessTrue) {
+      return [{ kind: "Lit", value: true }, ...witnessTrue];
+    }
+    const specializedFalse = specializeBoolLiteral(matrix, false);
+    const witnessFalse = findWitness(env, registry, specializedFalse, restTypes, depth + 1);
+    if (witnessFalse) {
+      return [{ kind: "Lit", value: false }, ...witnessFalse];
+    }
+    return null;
+  }
   if (firstType.kind === "TTuple") {
     const arity = firstType.elements.length;
     const specialized = specializeTuple(matrix, arity);
@@ -1912,12 +1962,34 @@ var processModules = (modules) => {
   }
   return result;
 };
-var processUseStatements = (uses, moduleEnv) => {
+var processUseStatements = (uses, moduleEnv, existingEnv) => {
   const localEnv = new Map;
   const localRegistry = new Map;
   const constructorNames = [];
   const aliases = new Map;
   const foreignFunctions = new Map;
+  const diagnostics = [];
+  const nameSource = new Map;
+  const addName = (name, scheme2, moduleName, span, isForeign = false) => {
+    if (existingEnv?.has(name)) {
+      const start = span?.start ?? 0;
+      const end = span?.end ?? start;
+      diagnostics.push(error(start, end, `'${name}' is already defined in the prelude`));
+      return;
+    }
+    if (localEnv.has(name)) {
+      const source = nameSource.get(name);
+      const start = span?.start ?? 0;
+      const end = span?.end ?? start;
+      diagnostics.push(error(start, end, `'${name}' is already imported${source ? ` from '${source}'` : ""}`));
+      return;
+    }
+    localEnv.set(name, scheme2);
+    nameSource.set(name, moduleName);
+    if (isForeign) {
+      foreignFunctions.set(name, { module: moduleName, name });
+    }
+  };
   for (const use of uses) {
     if (use.alias) {
       aliases.set(use.alias, use.moduleName);
@@ -1928,10 +2000,8 @@ var processUseStatements = (uses, moduleEnv) => {
     }
     if (use.imports?.kind === "All") {
       for (const [name, scheme2] of mod.typeEnv) {
-        localEnv.set(name, scheme2);
-        if (mod.foreignNames.has(name)) {
-          foreignFunctions.set(name, { module: use.moduleName, name });
-        }
+        const isForeign = mod.foreignNames.has(name);
+        addName(name, scheme2, use.moduleName, use.span, isForeign);
       }
       for (const [typeName, cons] of mod.registry) {
         localRegistry.set(typeName, cons);
@@ -1941,10 +2011,8 @@ var processUseStatements = (uses, moduleEnv) => {
       for (const item of use.imports.items) {
         const scheme2 = mod.typeEnv.get(item.name);
         if (scheme2) {
-          localEnv.set(item.name, scheme2);
-          if (mod.foreignNames.has(item.name)) {
-            foreignFunctions.set(item.name, { module: use.moduleName, name: item.name });
-          }
+          const isForeign = mod.foreignNames.has(item.name);
+          addName(item.name, scheme2, use.moduleName, item.span, isForeign);
         }
         if (item.constructors) {
           const cons = mod.registry.get(item.name);
@@ -1954,7 +2022,7 @@ var processUseStatements = (uses, moduleEnv) => {
               for (const conName of cons) {
                 const conScheme = mod.typeEnv.get(conName);
                 if (conScheme) {
-                  localEnv.set(conName, conScheme);
+                  addName(conName, conScheme, use.moduleName, item.span);
                   constructorNames.push(conName);
                 }
               }
@@ -1962,7 +2030,7 @@ var processUseStatements = (uses, moduleEnv) => {
               for (const conName of item.constructors) {
                 const conScheme = mod.typeEnv.get(conName);
                 if (conScheme) {
-                  localEnv.set(conName, conScheme);
+                  addName(conName, conScheme, use.moduleName, item.span);
                   constructorNames.push(conName);
                 }
               }
@@ -1972,7 +2040,7 @@ var processUseStatements = (uses, moduleEnv) => {
       }
     }
   }
-  return { localEnv, localRegistry, constructorNames, aliases, foreignFunctions };
+  return { localEnv, localRegistry, constructorNames, aliases, foreignFunctions, diagnostics };
 };
 var baseEnv = new Map;
 
@@ -2028,6 +2096,17 @@ var foreignRegistry = {
         return vcon("Nothing");
       return vcon("Just", [vchar(str2[idx])]);
     })),
+    head: vforeign((s) => {
+      const str2 = s.value;
+      if (str2.length === 0)
+        return vcon("Nothing");
+      return vcon("Just", [vchar(str2[0])]);
+    }),
+    tail: vforeign((s) => {
+      const str2 = s.value;
+      return vstr(str2.length === 0 ? "" : str2.slice(1));
+    }),
+    isEmpty: vforeign((s) => vbool(s.value.length === 0)),
     toList: vforeign((s) => {
       const str2 = s.value;
       let result = vcon("Nil");
@@ -2109,7 +2188,15 @@ var foreignRegistry = {
       return vbool(ch >= "a" && ch <= "z");
     }),
     toUpper: vforeign((c) => vchar(c.value.toUpperCase())),
-    toLower: vforeign((c) => vchar(c.value.toLowerCase()))
+    toLower: vforeign((c) => vchar(c.value.toLowerCase())),
+    isIdentStart: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z" || ch === "_");
+    }),
+    isIdentChar: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z" || ch >= "0" && ch <= "9" || ch === "_");
+    })
   },
   Int: {
     add: vforeign(curry2((a, b) => vint(a.value + b.value))),
@@ -2328,31 +2415,9 @@ var foreignRegistry = {
     })),
     member: vforeign(curry2((v, s) => vbool(s.value.has(v.value)))),
     size: vforeign((s) => vint(s.value.size)),
-    union: vforeign(curry2((s1, s2) => {
-      const result = new Set(s1.value);
-      for (const v of s2.value)
-        result.add(v);
-      return vset(result);
-    })),
-    intersect: vforeign(curry2((s1, s2) => {
-      const set1 = s1.value;
-      const set2 = s2.value;
-      const result = new Set;
-      for (const v of set1) {
-        if (set2.has(v))
-          result.add(v);
-      }
-      return vset(result);
-    })),
-    difference: vforeign(curry2((s1, s2) => {
-      const set2 = s2.value;
-      const result = new Set;
-      for (const v of s1.value) {
-        if (!set2.has(v))
-          result.add(v);
-      }
-      return vset(result);
-    })),
+    union: vforeign(curry2((s1, s2) => vset(s1.value.union(s2.value)))),
+    intersect: vforeign(curry2((s1, s2) => vset(s1.value.intersection(s2.value)))),
+    difference: vforeign(curry2((s1, s2) => vset(s1.value.difference(s2.value)))),
     toList: vforeign((s) => {
       let result = vcon("Nil");
       const values = Array.from(s.value).reverse();
@@ -3578,9 +3643,24 @@ var parseTypeAtom = (state) => {
   }
   if (at(state, 45 /* LParen */)) {
     advance2(state);
-    const inner = parseType(state);
+    const first = parseType(state);
+    if (!first) {
+      expect(state, 46 /* RParen */, "expected ')' after type");
+      return null;
+    }
+    if (at(state, 38 /* Comma */)) {
+      const elements = [first];
+      while (at(state, 38 /* Comma */)) {
+        advance2(state);
+        const elem = parseType(state);
+        if (elem)
+          elements.push(elem);
+      }
+      expect(state, 46 /* RParen */, "expected ')' after tuple type");
+      return tytuple(elements);
+    }
     expect(state, 46 /* RParen */, "expected ')' after type");
-    return inner;
+    return first;
   }
   return null;
 };
@@ -3593,15 +3673,31 @@ var parseTypeAtomSimple = (state) => {
   }
   if (at(state, 45 /* LParen */)) {
     advance2(state);
-    const inner = parseType(state);
+    const first = parseType(state);
+    if (!first) {
+      expect(state, 46 /* RParen */, "expected ')' after type");
+      return null;
+    }
+    if (at(state, 38 /* Comma */)) {
+      const elements = [first];
+      while (at(state, 38 /* Comma */)) {
+        advance2(state);
+        const elem = parseType(state);
+        if (elem)
+          elements.push(elem);
+      }
+      expect(state, 46 /* RParen */, "expected ')' after tuple type");
+      return tytuple(elements);
+    }
     expect(state, 46 /* RParen */, "expected ')' after type");
-    return inner;
+    return first;
   }
   return null;
 };
-var parseExpr = (state) => parsePrecedence(state, 0 /* None */);
-var parsePrecedence = (state, minBp) => {
-  let left = parsePrefix(state);
+var parseExpr = (state) => parsePrecedence(state, 0 /* None */, true);
+var parseExprNoLambda = (state) => parsePrecedence(state, 0 /* None */, false);
+var parsePrecedence = (state, minBp, allowLambda = true) => {
+  let left = allowLambda ? parsePrefix(state) : parsePrefixNoLambda(state);
   while (true) {
     const bp = infixBindingPower(state);
     if (bp <= minBp)
@@ -3610,7 +3706,7 @@ var parsePrecedence = (state, minBp) => {
   }
   return left;
 };
-var parsePrefix = (state) => {
+var parsePrefixImpl = (state, allowLambda) => {
   const token = state.current;
   const kind = token[0];
   const start = token[1];
@@ -3638,7 +3734,7 @@ var parsePrefix = (state) => {
       advance2(state);
       return bool(false, tokenSpan(token));
     case 5 /* Lower */: {
-      if (isLambdaStart(state)) {
+      if (allowLambda && isLambdaStart(state)) {
         return parseLambda(state);
       }
       advance2(state);
@@ -3674,6 +3770,8 @@ var parsePrefix = (state) => {
     }
   }
 };
+var parsePrefix = (state) => parsePrefixImpl(state, true);
+var parsePrefixNoLambda = (state) => parsePrefixImpl(state, false);
 var parseInfix = (state, left, bp) => {
   const kind = state.current[0];
   const start = left.span?.start ?? 0;
@@ -3762,7 +3860,7 @@ var parseInfix = (state, left, bp) => {
       return fieldAccess(left, field2, span(start, end));
     }
     default: {
-      const right = parsePrefix(state);
+      const right = parsePrefixNoLambda(state);
       const end = right.span?.end ?? state.current[1];
       return app(left, right, span(start, end));
     }
@@ -3938,7 +4036,7 @@ var parseMatch = (state) => {
     let guard;
     if (at(state, 10 /* If */)) {
       advance2(state);
-      guard = parseExpr(state);
+      guard = parseExprNoLambda(state);
     }
     expect(state, 35 /* Arrow */, "expected '->' after pattern");
     const body = parseExpr(state);
@@ -4021,6 +4119,7 @@ var PATTERN_STARTS = new Set([
   1 /* Int */,
   2 /* Float */,
   3 /* String */,
+  4 /* Char */,
   17 /* True */,
   18 /* False */,
   45 /* LParen */,
@@ -4490,6 +4589,9 @@ var stringModule = moduleDecl("String", [], [], [
   foreignBinding("concat", fn(tString, fn(tString, tString))),
   foreignBinding("substring", fn(tInt2, fn(tInt2, fn(tString, tString)))),
   foreignBinding("charAt", fn(tInt2, fn(tString, tMaybe(tChar2)))),
+  foreignBinding("head", fn(tString, tMaybe(tChar2))),
+  foreignBinding("tail", fn(tString, tString)),
+  foreignBinding("isEmpty", fn(tString, tBool2)),
   foreignBinding("toList", fn(tString, tList(tChar2))),
   foreignBinding("fromList", fn(tList(tChar2), tString)),
   foreignBinding("eq", fn(tString, fn(tString, tBool2))),
@@ -4517,7 +4619,9 @@ var charModule = moduleDecl("Char", [], [], [
   foreignBinding("isUpper", fn(tChar2, tBool2)),
   foreignBinding("isLower", fn(tChar2, tBool2)),
   foreignBinding("toUpper", fn(tChar2, tChar2)),
-  foreignBinding("toLower", fn(tChar2, tChar2))
+  foreignBinding("toLower", fn(tChar2, tChar2)),
+  foreignBinding("isIdentStart", fn(tChar2, tBool2)),
+  foreignBinding("isIdentChar", fn(tChar2, tBool2))
 ]);
 var intModule = moduleDecl("Int", [], [], [
   foreignBinding("add", fn(tInt2, fn(tInt2, tInt2))),
@@ -4590,7 +4694,9 @@ var mapModule = moduleDecl("Map", [], [], [
   foreignBinding("member", fn(tString, fn(tMap(tvar2("v")), tBool2))),
   foreignBinding("size", fn(tMap(tvar2("v")), tInt2)),
   foreignBinding("keys", fn(tMap(tvar2("v")), tList(tString))),
-  foreignBinding("values", fn(tMap(tvar2("v")), tList(tvar2("v"))))
+  foreignBinding("values", fn(tMap(tvar2("v")), tList(tvar2("v")))),
+  foreignBinding("toList", fn(tMap(tvar2("v")), tList(tytuple([tString, tvar2("v")])))),
+  foreignBinding("fromList", fn(tList(tytuple([tString, tvar2("v")])), tMap(tvar2("v"))))
 ]);
 var tSet = tycon("Set");
 var setModule = moduleDecl("Set", [], [], [
@@ -5425,6 +5531,18 @@ const $foreign = {
       return $con("Just", s[i]);
     },
 
+    // head : String -> Maybe Char
+    head: (s) => {
+      if (s.length === 0) return $con("Nothing");
+      return $con("Just", s[0]);
+    },
+
+    // tail : String -> String
+    tail: (s) => (s.length === 0 ? "" : s.slice(1)),
+
+    // isEmpty : String -> Bool
+    isEmpty: (s) => s.length === 0,
+
     // toList : String -> List Char
     toList: (s) => {
       let result = $con("Nil");
@@ -5539,6 +5657,13 @@ const $foreign = {
 
     // toLower : Char -> Char
     toLower: (c) => c.toLowerCase(),
+
+    // isIdentStart : Char -> Bool (can start identifier: alpha or underscore)
+    isIdentStart: (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c === "_",
+
+    // isIdentChar : Char -> Bool (can continue identifier: alphanumeric or underscore)
+    isIdentChar: (c) =>
+      (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c === "_",
   },
 
   // ==========================================================================
@@ -5900,13 +6025,13 @@ const $foreign = {
     },
 
     // union : Set -> Set -> Set
-    union: (s1) => (s2) => new Set([...s1, ...s2]),
+    union: (s1) => (s2) => s1.union(s2),
 
     // intersect : Set -> Set -> Set
-    intersect: (s1) => (s2) => new Set([...s1].filter(x => s2.has(x))),
+    intersect: (s1) => (s2) => s1.intersection(s2),
 
     // difference : Set -> Set -> Set
-    difference: (s1) => (s2) => new Set([...s1].filter(x => !s2.has(x))),
+    difference: (s1) => (s2) => s1.difference(s2),
   },
 };
 
@@ -5986,10 +6111,7 @@ var genBinding = (ctx, binding) => {
     case "IRAppBinding": {
       const func = genAtom(ctx, binding.func);
       const arg = genAtom(ctx, binding.arg);
-      if (binding.func.kind === "IRVar" && ctx.constructors.has(binding.func.name)) {
-        return `$apply(${func}, ${arg})`;
-      }
-      return `${func}(${arg})`;
+      return `$apply(${func}, ${arg})`;
     }
     case "IRBinOpBinding":
       return genBinOp(ctx, binding);
@@ -8245,37 +8367,118 @@ var processProgram = (program) => {
   const allUses = [...preludeUses, ...program.uses];
   if (program.modules.length > 0) {
     const moduleEnv = processModules(allModules);
-    const { localEnv, localRegistry, constructorNames, foreignFunctions } = processUseStatements(allUses, moduleEnv);
+    const {
+      localEnv: preludeEnv,
+      localRegistry: preludeRegistry,
+      constructorNames: preludeConstructors,
+      foreignFunctions: preludeForeign,
+      aliases: preludeAliases
+    } = processUseStatements(preludeUses, moduleEnv);
+    const {
+      localEnv: userEnv,
+      localRegistry: userRegistry,
+      constructorNames: userConstructors,
+      foreignFunctions: userForeign,
+      aliases: userAliases,
+      diagnostics: useDiagnostics
+    } = processUseStatements(program.uses, moduleEnv, preludeEnv);
+    const localEnv = new Map(preludeEnv);
+    for (const [k, v] of userEnv)
+      localEnv.set(k, v);
+    const localRegistry = new Map(preludeRegistry);
+    for (const [k, v] of userRegistry)
+      localRegistry.set(k, v);
+    const foreignFunctions = new Map(preludeForeign);
+    for (const [k, v] of userForeign)
+      foreignFunctions.set(k, v);
+    const aliases = new Map(preludeAliases);
+    for (const [k, v] of userAliases)
+      aliases.set(k, v);
+    const {
+      typeEnv: declEnv2,
+      registry: declRegistry2,
+      constructorNames: declConstructors2
+    } = processDeclarations(program.declarations);
+    const typeEnv2 = new Map(localEnv);
+    for (const [k, v] of declEnv2)
+      typeEnv2.set(k, v);
+    const registry2 = new Map(localRegistry);
+    for (const [k, v] of declRegistry2)
+      registry2.set(k, v);
     return {
-      typeEnv: localEnv,
-      registry: localRegistry,
-      constructorNames,
+      typeEnv: typeEnv2,
+      registry: registry2,
+      constructorNames: [...preludeConstructors, ...userConstructors, ...declConstructors2],
       allModules,
       allUses,
       moduleEnv,
-      foreignFunctions
+      aliases,
+      foreignFunctions,
+      useDiagnostics
     };
   }
   if (program.uses.length > 0) {
-    const { localEnv, localRegistry, constructorNames, foreignFunctions } = processUseStatements(allUses, preludeCache.moduleEnv);
+    const {
+      localEnv: userEnv,
+      localRegistry: userRegistry,
+      constructorNames: userConstructors,
+      foreignFunctions: userForeign,
+      aliases,
+      diagnostics: useDiagnostics
+    } = processUseStatements(program.uses, preludeCache.moduleEnv, preludeCache.typeEnv);
+    const localEnv = new Map(preludeCache.typeEnv);
+    for (const [k, v] of userEnv)
+      localEnv.set(k, v);
+    const localRegistry = new Map(preludeCache.registry);
+    for (const [k, v] of userRegistry)
+      localRegistry.set(k, v);
+    const foreignFunctions = new Map(preludeCache.foreignFunctions);
+    for (const [k, v] of userForeign)
+      foreignFunctions.set(k, v);
+    const {
+      typeEnv: declEnv2,
+      registry: declRegistry2,
+      constructorNames: declConstructors2
+    } = processDeclarations(program.declarations);
+    const typeEnv2 = new Map(localEnv);
+    for (const [k, v] of declEnv2)
+      typeEnv2.set(k, v);
+    const registry2 = new Map(localRegistry);
+    for (const [k, v] of declRegistry2)
+      registry2.set(k, v);
     return {
-      typeEnv: localEnv,
-      registry: localRegistry,
-      constructorNames,
+      typeEnv: typeEnv2,
+      registry: registry2,
+      constructorNames: [...preludeCache.constructorNames, ...userConstructors, ...declConstructors2],
       allModules,
       allUses,
       moduleEnv: preludeCache.moduleEnv,
-      foreignFunctions
+      aliases,
+      foreignFunctions,
+      useDiagnostics
     };
   }
+  const {
+    typeEnv: declEnv,
+    registry: declRegistry,
+    constructorNames: declConstructors
+  } = processDeclarations(program.declarations);
+  const typeEnv = new Map(preludeCache.typeEnv);
+  for (const [k, v] of declEnv)
+    typeEnv.set(k, v);
+  const registry = new Map(preludeCache.registry);
+  for (const [k, v] of declRegistry)
+    registry.set(k, v);
   return {
-    typeEnv: preludeCache.typeEnv,
-    registry: preludeCache.registry,
-    constructorNames: preludeCache.constructorNames,
+    typeEnv,
+    registry,
+    constructorNames: [...preludeCache.constructorNames, ...declConstructors],
     allModules,
     allUses,
     moduleEnv: preludeCache.moduleEnv,
-    foreignFunctions: preludeCache.foreignFunctions
+    aliases: new Map,
+    foreignFunctions: preludeCache.foreignFunctions,
+    useDiagnostics: []
   };
 };
 var createServer = (transport) => {
@@ -8734,8 +8937,13 @@ ${def.name}: ${typeToString(type)}
       allModules,
       allUses,
       moduleEnv,
-      foreignFunctions
+      aliases,
+      foreignFunctions,
+      useDiagnostics
     } = processProgram(parseResult.program);
+    for (const diag of useDiagnostics) {
+      lspDiagnostics.push(convertDiagnostic(text2, diag));
+    }
     const expr = programToExpr(parseResult.program, allModules, allUses);
     let symbols = null;
     let types = null;
@@ -8745,7 +8953,7 @@ ${def.name}: ${typeToString(type)}
       for (const diag of bindResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
       }
-      const checkResult = check(typeEnv, registry, expr, symbols, moduleEnv);
+      const checkResult = check(typeEnv, registry, expr, symbols, moduleEnv, aliases);
       types = checkResult.types;
       for (const diag of checkResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
