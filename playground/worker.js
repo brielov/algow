@@ -1991,6 +1991,105 @@ var vcon = (name, args = []) => ({
 var vtuple = (elements) => ({ kind: "VTuple", elements });
 var vrecord = (fields) => ({ kind: "VRecord", fields });
 var vref = () => ({ kind: "VRef", value: null });
+var vforeign = (fn) => ({ kind: "VForeign", fn });
+var curry2 = (f) => (a) => vforeign((b) => f(a, b));
+var curry3 = (f) => (a) => vforeign((b) => vforeign((c) => f(a, b, c)));
+var foreignRegistry = {
+  String: {
+    length: vforeign((s) => vint(s.value.length)),
+    concat: vforeign(curry2((a, b) => vstr(a.value + b.value))),
+    substring: vforeign(curry3((start, end, s) => vstr(s.value.substring(start.value, end.value)))),
+    charAt: vforeign(curry2((i, s) => {
+      const str2 = s.value;
+      const idx = i.value;
+      if (idx < 0 || idx >= str2.length)
+        return vcon("Nothing");
+      return vcon("Just", [vchar(str2[idx])]);
+    })),
+    toList: vforeign((s) => {
+      const str2 = s.value;
+      let result = vcon("Nil");
+      for (let i = str2.length - 1;i >= 0; i--) {
+        result = vcon("Cons", [vchar(str2[i]), result]);
+      }
+      return result;
+    }),
+    fromList: vforeign((list) => {
+      let result = "";
+      let current = list;
+      while (current.name === "Cons") {
+        result += current.args[0].value;
+        current = current.args[1];
+      }
+      return vstr(result);
+    }),
+    eq: vforeign(curry2((a, b) => vbool(a.value === b.value))),
+    lt: vforeign(curry2((a, b) => vbool(a.value < b.value))),
+    split: vforeign(curry2((delimiter, s) => {
+      const parts = s.value.split(delimiter.value);
+      let result = vcon("Nil");
+      for (let i = parts.length - 1;i >= 0; i--) {
+        result = vcon("Cons", [vstr(parts[i]), result]);
+      }
+      return result;
+    })),
+    join: vforeign(curry2((separator, list) => {
+      const parts = [];
+      let current = list;
+      while (current.name === "Cons") {
+        parts.push(current.args[0].value);
+        current = current.args[1];
+      }
+      return vstr(parts.join(separator.value));
+    })),
+    trim: vforeign((s) => vstr(s.value.trim())),
+    toUpper: vforeign((s) => vstr(s.value.toUpperCase())),
+    toLower: vforeign((s) => vstr(s.value.toLowerCase())),
+    contains: vforeign(curry2((needle, haystack) => vbool(haystack.value.includes(needle.value)))),
+    startsWith: vforeign(curry2((prefix, s) => vbool(s.value.startsWith(prefix.value)))),
+    endsWith: vforeign(curry2((suffix, s) => vbool(s.value.endsWith(suffix.value)))),
+    replace: vforeign(curry3((search, replacement, s) => vstr(s.value.replaceAll(search.value, replacement.value))))
+  },
+  Char: {
+    toInt: vforeign((c) => vint(c.value.charCodeAt(0))),
+    fromInt: vforeign((n) => {
+      const code = n.value;
+      if (code < 0 || code > 1114111)
+        return vcon("Nothing");
+      return vcon("Just", [vchar(String.fromCodePoint(code))]);
+    }),
+    toString: vforeign((c) => vstr(c.value)),
+    eq: vforeign(curry2((a, b) => vbool(a.value === b.value))),
+    lt: vforeign(curry2((a, b) => vbool(a.value < b.value))),
+    isDigit: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch >= "0" && ch <= "9");
+    }),
+    isAlpha: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z");
+    }),
+    isAlphaNum: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z" || ch >= "0" && ch <= "9");
+    }),
+    isSpace: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch === " " || ch === "\t" || ch === `
+` || ch === "\r");
+    }),
+    isUpper: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch >= "A" && ch <= "Z");
+    }),
+    isLower: vforeign((c) => {
+      const ch = c.value;
+      return vbool(ch >= "a" && ch <= "z");
+    }),
+    toUpper: vforeign((c) => vchar(c.value.toUpperCase())),
+    toLower: vforeign((c) => vchar(c.value.toLowerCase()))
+  }
+};
 var emptyEnv = new Map;
 var extendEnv = (env, name, value) => {
   const newEnv = new Map(env);
@@ -2089,9 +2188,16 @@ var evaluate = (env, expr) => {
       return value;
     }
     case "QualifiedVar": {
+      const foreignModule = foreignRegistry[expr.moduleName];
+      if (foreignModule) {
+        const foreignFn = foreignModule[expr.member];
+        if (foreignFn) {
+          return foreignFn;
+        }
+      }
       const value = env.get(expr.member);
       if (!value) {
-        throw new RuntimeError(`Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` + `Add 'use ${expr.moduleName} (..)' to import all bindings.`);
+        throw new RuntimeError(`Unknown qualified access: ${expr.moduleName}.${expr.member}`);
       }
       if (value.kind === "VRef") {
         if (value.value === null) {
@@ -2111,6 +2217,9 @@ var apply = (func, arg) => {
   if (func.kind === "VClosure") {
     const newEnv = extendEnv(func.env, func.param, arg);
     return evaluate(newEnv, func.body);
+  }
+  if (func.kind === "VForeign") {
+    return func.fn(arg);
   }
   return vcon(func.name, [...func.args, arg]);
 };
@@ -2221,6 +2330,7 @@ var valuesEqual = (a, b) => {
       return true;
     }
     case "VClosure":
+    case "VForeign":
     case "VRef":
       return false;
   }
@@ -2369,6 +2479,7 @@ var valueToString = (value) => {
     case "VBool":
       return String(value.value);
     case "VClosure":
+    case "VForeign":
       return "<function>";
     case "VCon":
       if (value.args.length === 0)

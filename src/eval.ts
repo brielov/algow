@@ -22,10 +22,17 @@ export type Value =
   | VChar
   | VBool
   | VClosure
+  | VForeign
   | VCon
   | VTuple
   | VRecord
   | VRef;
+
+/** Foreign function - a native JS function */
+export type VForeign = {
+  readonly kind: "VForeign";
+  readonly fn: (arg: Value) => Value;
+};
 
 /** Integer value */
 export type VInt = {
@@ -113,6 +120,144 @@ export const vcon = (name: string, args: readonly Value[] = []): Value => ({
 export const vtuple = (elements: readonly Value[]): Value => ({ kind: "VTuple", elements });
 export const vrecord = (fields: ReadonlyMap<string, Value>): Value => ({ kind: "VRecord", fields });
 export const vref = (): VRef => ({ kind: "VRef", value: null });
+export const vforeign = (fn: (arg: Value) => Value): VForeign => ({ kind: "VForeign", fn });
+
+// =============================================================================
+// Foreign Function Registry
+// =============================================================================
+
+/** Helper to create curried foreign functions */
+const curry2 =
+  (f: (a: Value, b: Value) => Value) =>
+  (a: Value): Value =>
+    vforeign((b) => f(a, b));
+
+const curry3 =
+  (f: (a: Value, b: Value, c: Value) => Value) =>
+  (a: Value): Value =>
+    vforeign((b) => vforeign((c) => f(a, b, c)));
+
+/**
+ * Foreign function registry for the interpreter.
+ * Maps module names to function names to implementations.
+ */
+const foreignRegistry: Record<string, Record<string, Value>> = {
+  String: {
+    length: vforeign((s) => vint((s as VStr).value.length)),
+    concat: vforeign(curry2((a, b) => vstr((a as VStr).value + (b as VStr).value))),
+    substring: vforeign(
+      curry3((start, end, s) =>
+        vstr((s as VStr).value.substring((start as VInt).value, (end as VInt).value)),
+      ),
+    ),
+    charAt: vforeign(
+      curry2((i, s) => {
+        const str = (s as VStr).value;
+        const idx = (i as VInt).value;
+        if (idx < 0 || idx >= str.length) return vcon("Nothing");
+        return vcon("Just", [vchar(str[idx]!)]);
+      }),
+    ),
+    toList: vforeign((s) => {
+      const str = (s as VStr).value;
+      let result: Value = vcon("Nil");
+      for (let i = str.length - 1; i >= 0; i--) {
+        result = vcon("Cons", [vchar(str[i]!), result]);
+      }
+      return result;
+    }),
+    fromList: vforeign((list) => {
+      let result = "";
+      let current = list as VCon;
+      while (current.name === "Cons") {
+        result += (current.args[0] as VChar).value;
+        current = current.args[1] as VCon;
+      }
+      return vstr(result);
+    }),
+    eq: vforeign(curry2((a, b) => vbool((a as VStr).value === (b as VStr).value))),
+    lt: vforeign(curry2((a, b) => vbool((a as VStr).value < (b as VStr).value))),
+    split: vforeign(
+      curry2((delimiter, s) => {
+        const parts = (s as VStr).value.split((delimiter as VStr).value);
+        let result: Value = vcon("Nil");
+        for (let i = parts.length - 1; i >= 0; i--) {
+          result = vcon("Cons", [vstr(parts[i]!), result]);
+        }
+        return result;
+      }),
+    ),
+    join: vforeign(
+      curry2((separator, list) => {
+        const parts: string[] = [];
+        let current = list as VCon;
+        while (current.name === "Cons") {
+          parts.push((current.args[0] as VStr).value);
+          current = current.args[1] as VCon;
+        }
+        return vstr(parts.join((separator as VStr).value));
+      }),
+    ),
+    trim: vforeign((s) => vstr((s as VStr).value.trim())),
+    toUpper: vforeign((s) => vstr((s as VStr).value.toUpperCase())),
+    toLower: vforeign((s) => vstr((s as VStr).value.toLowerCase())),
+    contains: vforeign(
+      curry2((needle, haystack) =>
+        vbool((haystack as VStr).value.includes((needle as VStr).value)),
+      ),
+    ),
+    startsWith: vforeign(
+      curry2((prefix, s) => vbool((s as VStr).value.startsWith((prefix as VStr).value))),
+    ),
+    endsWith: vforeign(
+      curry2((suffix, s) => vbool((s as VStr).value.endsWith((suffix as VStr).value))),
+    ),
+    replace: vforeign(
+      curry3((search, replacement, s) =>
+        vstr((s as VStr).value.replaceAll((search as VStr).value, (replacement as VStr).value)),
+      ),
+    ),
+  },
+  Char: {
+    toInt: vforeign((c) => vint((c as VChar).value.charCodeAt(0))),
+    fromInt: vforeign((n) => {
+      const code = (n as VInt).value;
+      if (code < 0 || code > 0x10ffff) return vcon("Nothing");
+      return vcon("Just", [vchar(String.fromCodePoint(code))]);
+    }),
+    toString: vforeign((c) => vstr((c as VChar).value)),
+    eq: vforeign(curry2((a, b) => vbool((a as VChar).value === (b as VChar).value))),
+    lt: vforeign(curry2((a, b) => vbool((a as VChar).value < (b as VChar).value))),
+    isDigit: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool(ch >= "0" && ch <= "9");
+    }),
+    isAlpha: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z"));
+    }),
+    isAlphaNum: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool(
+        (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9"),
+      );
+    }),
+    isSpace: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool(ch === " " || ch === "\t" || ch === "\n" || ch === "\r");
+    }),
+    isUpper: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool(ch >= "A" && ch <= "Z");
+    }),
+    isLower: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool(ch >= "a" && ch <= "z");
+    }),
+    toUpper: vforeign((c) => vchar((c as VChar).value.toUpperCase())),
+    toLower: vforeign((c) => vchar((c as VChar).value.toLowerCase())),
+  },
+};
 
 // =============================================================================
 // Environment
@@ -252,14 +397,18 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
     }
 
     case "QualifiedVar": {
-      // If the member was imported, it will be in the environment
-      // and we can access it directly by its name
+      // First check if this is a foreign module function
+      const foreignModule = foreignRegistry[expr.moduleName];
+      if (foreignModule) {
+        const foreignFn = foreignModule[expr.member];
+        if (foreignFn) {
+          return foreignFn;
+        }
+      }
+      // Otherwise check if the member was imported into the environment
       const value = env.get(expr.member);
       if (!value) {
-        throw new RuntimeError(
-          `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
-            `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
-        );
+        throw new RuntimeError(`Unknown qualified access: ${expr.moduleName}.${expr.member}`);
       }
       // Dereference if it's a ref cell (from letrec)
       if (value.kind === "VRef") {
@@ -281,12 +430,15 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
 
 /**
  * Apply a function to an argument.
- * Type checker ensures func is either a closure or constructor.
+ * Type checker ensures func is either a closure, foreign function, or constructor.
  */
 const apply = (func: Value, arg: Value): Value => {
   if (func.kind === "VClosure") {
     const newEnv = extendEnv(func.env, func.param, arg);
     return evaluate(newEnv, func.body);
+  }
+  if (func.kind === "VForeign") {
+    return func.fn(arg);
   }
   // Must be a constructor (partial application)
   return vcon((func as VCon).name, [...(func as VCon).args, arg]);
@@ -404,6 +556,7 @@ const valuesEqual = (a: Value, b: Value): boolean => {
       return true;
     }
     case "VClosure":
+    case "VForeign":
     case "VRef":
       // Functions and refs are not comparable
       return false;
@@ -600,6 +753,7 @@ export const valueToString = (value: Value): string => {
     case "VBool":
       return String(value.value);
     case "VClosure":
+    case "VForeign":
       return "<function>";
     case "VCon":
       if (value.args.length === 0) return value.name;
