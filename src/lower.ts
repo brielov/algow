@@ -125,6 +125,7 @@ const getFieldType = (type: Type, field: string): Type => {
 
 const tNum: Type = { kind: "TCon", name: "number" };
 const tStr: Type = { kind: "TCon", name: "string" };
+const tChar: Type = { kind: "TCon", name: "char" };
 const tBool: Type = { kind: "TCon", name: "boolean" };
 
 // =============================================================================
@@ -154,6 +155,8 @@ const normalize = (ctx: LowerContext, expr: ast.Expr): NormalizeResult => {
       return { bindings: [], atom: ir.irLit(expr.value, tNum) };
     case "Str":
       return { bindings: [], atom: ir.irLit(expr.value, tStr) };
+    case "Char":
+      return { bindings: [], atom: ir.irLit(expr.value, tChar) };
     case "Bool":
       return { bindings: [], atom: ir.irLit(expr.value, tBool) };
     case "Var": {
@@ -275,6 +278,9 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
 
     case "Str":
       return ir.irAtomExpr(ir.irLit(expr.value, tStr));
+
+    case "Char":
+      return ir.irAtomExpr(ir.irLit(expr.value, tChar));
 
     case "Bool":
       return ir.irAtomExpr(ir.irLit(expr.value, tBool));
@@ -685,6 +691,9 @@ const lowerPattern = (pattern: ast.Pattern, type: Type): ir.IRPattern => {
       return ir.irPLit(pattern.value, litType);
     }
 
+    case "PChar":
+      return ir.irPLit(pattern.value, tChar);
+
     case "PCon": {
       // For constructors, we need to figure out the argument types
       // This is simplified - in a full implementation we'd look up the constructor type
@@ -749,6 +758,7 @@ const extendPatternBindings = (ctx: LowerContext, pattern: ast.Pattern, type: Ty
 
     case "PWildcard":
     case "PLit":
+    case "PChar":
       // No bindings
       break;
 

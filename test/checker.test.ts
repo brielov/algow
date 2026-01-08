@@ -91,6 +91,12 @@ describe("Type Inference", () => {
       expect(typeToString(type)).toBe("string");
     });
 
+    it("infers char type", () => {
+      const { type, diagnostics } = infer(baseEnv, new Map(), ast.char("a"));
+      expect(diagnostics).toHaveLength(0);
+      expect(typeToString(type)).toBe("char");
+    });
+
     it("infers empty string type", () => {
       const { type, diagnostics } = infer(baseEnv, new Map(), ast.str(""));
       expect(diagnostics).toHaveLength(0);

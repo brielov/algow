@@ -21,6 +21,7 @@ export enum TokenKind {
   // Literals
   Number,
   String,
+  Char,
 
   // Identifiers
   Lower, // lowercase identifier (variable)
@@ -121,6 +122,7 @@ const LOWER_Z = 0x7a;
 // Special characters
 const UNDERSCORE = 0x5f; // _
 const DOUBLE_QUOTE = 0x22; // "
+const SINGLE_QUOTE = 0x27; // '
 const BACKSLASH = 0x5c; // \
 const PLUS = 0x2b; // +
 const MINUS = 0x2d; // -
@@ -316,6 +318,33 @@ const scanString = (state: LexerState, start: number): Token => {
   return [TokenKind.String, start, state.pos];
 };
 
+const scanChar = (state: LexerState, start: number): Token => {
+  advance(state); // opening '
+
+  if (peek(state) === EOF) {
+    return [TokenKind.Error, start, state.pos];
+  }
+
+  // Handle escape sequences
+  if (peek(state) === BACKSLASH) {
+    advance(state); // backslash
+    if (peek(state) === EOF) {
+      return [TokenKind.Error, start, state.pos];
+    }
+    advance(state); // escaped character (n, t, r, ', \, etc.)
+  } else {
+    advance(state); // regular character
+  }
+
+  // Expect closing quote
+  if (peek(state) !== SINGLE_QUOTE) {
+    return [TokenKind.Error, start, state.pos];
+  }
+
+  advance(state); // closing '
+  return [TokenKind.Char, start, state.pos];
+};
+
 const scanLowerOrKeyword = (state: LexerState, start: number): Token => {
   // Handle standalone underscore as wildcard
   if (peek(state) === UNDERSCORE && !isIdentContinue(peekAt(state, 1))) {
@@ -468,6 +497,11 @@ export const nextToken = (state: LexerState): Token => {
   // String literal
   if (ch === DOUBLE_QUOTE) {
     return scanString(state, start);
+  }
+
+  // Character literal
+  if (ch === SINGLE_QUOTE) {
+    return scanChar(state, start);
   }
 
   // Identifier or keyword

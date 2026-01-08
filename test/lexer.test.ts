@@ -160,6 +160,90 @@ describe("Lexer", () => {
     });
   });
 
+  describe("character literals", () => {
+    it("lexes simple character", () => {
+      const state = createLexer("'a'");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'a'");
+    });
+
+    it("lexes digit character", () => {
+      const state = createLexer("'0'");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'0'");
+    });
+
+    it("lexes space character", () => {
+      const state = createLexer("' '");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("' '");
+    });
+
+    it("lexes escaped newline", () => {
+      const state = createLexer("'\\n'");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'\\n'");
+    });
+
+    it("lexes escaped tab", () => {
+      const state = createLexer("'\\t'");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'\\t'");
+    });
+
+    it("lexes escaped single quote", () => {
+      const state = createLexer("'\\''");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'\\''");
+    });
+
+    it("lexes escaped backslash", () => {
+      const state = createLexer("'\\\\'");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'\\\\'");
+    });
+
+    it("returns error for unterminated char", () => {
+      const state = createLexer("'a");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Error);
+    });
+
+    it("returns error for empty char literal", () => {
+      const state = createLexer("''");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Error);
+    });
+
+    it("returns error for multi-character literal", () => {
+      const state = createLexer("'ab'");
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Error);
+    });
+
+    it("lexes multiple char literals", () => {
+      const state = createLexer("'a' 'b' 'c'");
+      let tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'a'");
+
+      tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'b'");
+
+      tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Char);
+      expect(slice(state, tok[1], tok[2])).toBe("'c'");
+    });
+  });
+
   describe("identifiers", () => {
     it("lexes lowercase identifiers", () => {
       const state = createLexer("foo");

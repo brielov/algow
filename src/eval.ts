@@ -15,7 +15,7 @@ const assertNever = (x: never): never => {
 // Runtime Values
 // =============================================================================
 
-export type Value = VNum | VStr | VBool | VClosure | VCon | VTuple | VRecord | VRef;
+export type Value = VNum | VStr | VChar | VBool | VClosure | VCon | VTuple | VRecord | VRef;
 
 /** Number value */
 export type VNum = {
@@ -27,6 +27,12 @@ export type VNum = {
 export type VStr = {
   readonly kind: "VStr";
   readonly value: string;
+};
+
+/** Character value */
+export type VChar = {
+  readonly kind: "VChar";
+  readonly value: string; // Single character
 };
 
 /** Boolean value */
@@ -74,6 +80,7 @@ export type VRef = {
 
 export const vnum = (value: number): Value => ({ kind: "VNum", value });
 export const vstr = (value: string): Value => ({ kind: "VStr", value });
+export const vchar = (value: string): Value => ({ kind: "VChar", value });
 export const vbool = (value: boolean): Value => ({ kind: "VBool", value });
 export const vclosure = (param: string, body: ast.Expr, env: Env): Value => ({
   kind: "VClosure",
@@ -131,6 +138,9 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
 
     case "Bool":
       return vbool(expr.value);
+
+    case "Char":
+      return vchar(expr.value);
 
     case "Var": {
       const value = env.get(expr.name);
@@ -289,18 +299,22 @@ const evalBinOp = (env: Env, expr: ast.BinOp): Value => {
       }
       return vstr((left as VStr).value + (right as VStr).value);
 
-    // Comparisons (numbers or strings - dispatch on left operand)
+    // Comparisons (numbers, strings, or chars - dispatch on left operand)
     case "<":
       if (left.kind === "VNum") return vbool(left.value < (right as VNum).value);
+      if (left.kind === "VChar") return vbool(left.value < (right as VChar).value);
       return vbool((left as VStr).value < (right as VStr).value);
     case ">":
       if (left.kind === "VNum") return vbool(left.value > (right as VNum).value);
+      if (left.kind === "VChar") return vbool(left.value > (right as VChar).value);
       return vbool((left as VStr).value > (right as VStr).value);
     case "<=":
       if (left.kind === "VNum") return vbool(left.value <= (right as VNum).value);
+      if (left.kind === "VChar") return vbool(left.value <= (right as VChar).value);
       return vbool((left as VStr).value <= (right as VStr).value);
     case ">=":
       if (left.kind === "VNum") return vbool(left.value >= (right as VNum).value);
+      if (left.kind === "VChar") return vbool(left.value >= (right as VChar).value);
       return vbool((left as VStr).value >= (right as VStr).value);
 
     // Equality
@@ -322,6 +336,8 @@ const valuesEqual = (a: Value, b: Value): boolean => {
       return a.value === (b as VNum).value;
     case "VStr":
       return a.value === (b as VStr).value;
+    case "VChar":
+      return a.value === (b as VChar).value;
     case "VBool":
       return a.value === (b as VBool).value;
     case "VCon": {
@@ -390,6 +406,13 @@ const matchPattern = (pattern: ast.Pattern, value: Value): MatchResult => {
           : { matched: false };
       }
       return { matched: false };
+    }
+
+    case "PChar": {
+      if (value.kind !== "VChar") return { matched: false };
+      return pattern.value === value.value
+        ? { matched: true, bindings: new Map() }
+        : { matched: false };
     }
 
     case "PCon": {
@@ -532,6 +555,8 @@ export const valueToString = (value: Value): string => {
       return String(value.value);
     case "VStr":
       return `"${value.value}"`;
+    case "VChar":
+      return `'${value.value}'`;
     case "VBool":
       return String(value.value);
     case "VClosure":

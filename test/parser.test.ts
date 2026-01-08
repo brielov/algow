@@ -85,6 +85,42 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(ast.str("helloxworld"));
     });
 
+    it("parses character literal", () => {
+      const result = parse("'a'");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.char("a"));
+    });
+
+    it("parses character with newline escape", () => {
+      const result = parse("'\\n'");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.char("\n"));
+    });
+
+    it("parses character with tab escape", () => {
+      const result = parse("'\\t'");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.char("\t"));
+    });
+
+    it("parses character with escaped single quote", () => {
+      const result = parse("'\\''");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.char("'"));
+    });
+
+    it("parses character with escaped backslash", () => {
+      const result = parse("'\\\\'");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.char("\\"));
+    });
+
+    it("parses character with null escape", () => {
+      const result = parse("'\\0'");
+      expect(result.diagnostics).toHaveLength(0);
+      expect(stripSpans(result.program.expr)).toEqual(ast.char("\0"));
+    });
+
     it("parses true boolean", () => {
       const result = parse("true");
       expect(result.diagnostics).toHaveLength(0);

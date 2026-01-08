@@ -366,6 +366,7 @@ const bindPattern = (ctx: BindContext, pattern: ast.Pattern): string[] => {
     }
 
     case "PLit":
+    case "PChar":
       return [];
 
     case "PTuple": {

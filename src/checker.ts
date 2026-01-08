@@ -283,6 +283,9 @@ const tStr = tcon("string");
 /** The boolean type */
 const tBool = tcon("boolean");
 
+/** The character type */
+const tChar = tcon("char");
+
 // =============================================================================
 // TYPE CLASSES (for operator overloading)
 // =============================================================================
@@ -311,10 +314,10 @@ type Constraint = {
  */
 const instances: Map<string, Set<string>> = new Map([
   // Eq: types that support equality testing (==, !=)
-  ["Eq", new Set(["number", "string", "boolean"])],
+  ["Eq", new Set(["number", "string", "boolean", "char"])],
 
   // Ord: types that support ordering comparisons (<, >, <=, >=)
-  ["Ord", new Set(["number", "string"])],
+  ["Ord", new Set(["number", "string", "char"])],
 
   // Add: types that support the + operator (addition or concatenation)
   ["Add", new Set(["number", "string"])],
@@ -1167,6 +1170,8 @@ const inferExpr = (
       return [new Map(), tNum, []];
     case "Str":
       return [new Map(), tStr, []];
+    case "Char":
+      return [new Map(), tChar, []];
     case "Tuple":
       return inferTuple(ctx, env, registry, expr);
     case "Var":
@@ -1811,6 +1816,12 @@ const inferPattern = (
       const litType =
         typeof pattern.value === "number" ? tNum : typeof pattern.value === "string" ? tStr : tBool;
       const s = unify(ctx, applySubst(subst, expectedType), litType);
+      return [composeSubst(subst, s), new Map()];
+    }
+
+    case "PChar": {
+      // Character literal pattern: expected type must be char
+      const s = unify(ctx, applySubst(subst, expectedType), tChar);
       return [composeSubst(subst, s), new Map()];
     }
 
@@ -2470,6 +2481,8 @@ const toSimplePattern = (p: ast.Pattern): SimplePattern => {
     case "PTuple":
       return { kind: "Tuple", elements: p.elements.map(toSimplePattern) };
     case "PLit":
+      return { kind: "Lit", value: p.value };
+    case "PChar":
       return { kind: "Lit", value: p.value };
     case "PAs":
       return toSimplePattern(p.pattern);

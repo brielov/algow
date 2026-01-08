@@ -746,6 +746,11 @@ const parsePrefix = (state: ParserState): ast.Expr => {
       return ast.str(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
     }
 
+    case TokenKind.Char: {
+      advance(state);
+      return ast.char(parseCharContent(state, text(state, token), token[1]), tokenSpan(token));
+    }
+
     case TokenKind.True:
       advance(state);
       return ast.bool(true, tokenSpan(token));
@@ -964,6 +969,7 @@ const infixBindingPower = (state: ParserState): number => {
     case TokenKind.Upper:
     case TokenKind.Number:
     case TokenKind.String:
+    case TokenKind.Char:
     case TokenKind.True:
     case TokenKind.False:
     case TokenKind.LParen:
@@ -1367,6 +1373,10 @@ const parsePatternCore = (state: ParserState, allowArgs = true): ast.Pattern => 
       advance(state);
       return ast.plit(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
 
+    case TokenKind.Char:
+      advance(state);
+      return ast.pchar(parseCharContent(state, text(state, token), token[1]), tokenSpan(token));
+
     case TokenKind.True:
       advance(state);
       return ast.plit(true, tokenSpan(token));
@@ -1496,6 +1506,57 @@ const parseStringContent = (state: ParserState, quoted: string, tokenStart: numb
   }
 
   return result;
+};
+
+const parseCharContent = (state: ParserState, quoted: string, tokenStart: number): string => {
+  const inner = quoted.slice(1, -1); // Remove quotes
+
+  if (inner.length === 0) {
+    state.diagnostics.push({
+      message: "Empty character literal",
+      start: tokenStart,
+      end: tokenStart + 2,
+      severity: "error",
+    });
+    return "\0";
+  }
+
+  if (inner[0] === "\\") {
+    if (inner.length < 2) {
+      state.diagnostics.push({
+        message: "Incomplete escape sequence",
+        start: tokenStart + 1,
+        end: tokenStart + 2,
+        severity: "error",
+      });
+      return "\0";
+    }
+    const escapeStart = tokenStart + 1;
+    switch (inner[1]) {
+      case "n":
+        return "\n";
+      case "t":
+        return "\t";
+      case "r":
+        return "\r";
+      case "\\":
+        return "\\";
+      case "'":
+        return "'";
+      case "0":
+        return "\0";
+      default:
+        state.diagnostics.push({
+          message: `Unknown escape sequence: \\${inner[1]}`,
+          start: escapeStart,
+          end: escapeStart + 2,
+          severity: "error",
+        });
+        return inner[1]!;
+    }
+  }
+
+  return inner[0]!;
 };
 
 // =============================================================================

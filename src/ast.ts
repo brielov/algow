@@ -79,7 +79,7 @@ export type Expr =
  * Constants are literal values that have a known type at parse time.
  * They form the leaves of the expression tree.
  */
-export type Con = Num | Bool | Str;
+export type Con = Num | Bool | Str | Char;
 
 /**
  * Numeric literal.
@@ -106,6 +106,15 @@ export interface Bool extends Node {
 export interface Str extends Node {
   readonly kind: "Str";
   readonly value: string;
+}
+
+/**
+ * Character literal.
+ * Example: 'a', '\n', '\t'
+ */
+export interface Char extends Node {
+  readonly kind: "Char";
+  readonly value: string; // Single character as string
 }
 
 // -----------------------------------------------------------------------------
@@ -382,7 +391,17 @@ export type Op = "+" | "-" | "/" | "*" | "<" | "<=" | ">" | ">=" | "==" | "!=";
  * Pattern matching is exhaustive: the type checker verifies that all possible
  * cases are covered for algebraic data types.
  */
-export type Pattern = PVar | PWildcard | PCon | QualifiedPCon | PLit | PRecord | PTuple | PAs | POr;
+export type Pattern =
+  | PVar
+  | PWildcard
+  | PCon
+  | QualifiedPCon
+  | PLit
+  | PChar
+  | PRecord
+  | PTuple
+  | PAs
+  | POr;
 
 /**
  * Variable pattern - binds the matched value to a name.
@@ -459,6 +478,17 @@ export interface QualifiedPCon extends Node {
 export interface PLit extends Node {
   readonly kind: "PLit";
   readonly value: number | string | boolean;
+}
+
+/**
+ * Character literal pattern.
+ *
+ * Syntax: 'c' where c is a character
+ * Example: match c when 'a' -> 1 when _ -> 0 end
+ */
+export interface PChar extends Node {
+  readonly kind: "PChar";
+  readonly value: string; // Single character
 }
 
 /**
@@ -761,6 +791,7 @@ export interface ImportItem {
 export const num = (value: number, span?: Span): Num => ({ kind: "Num", value, span });
 export const bool = (value: boolean, span?: Span): Bool => ({ kind: "Bool", value, span });
 export const str = (value: string, span?: Span): Str => ({ kind: "Str", value, span });
+export const char = (value: string, span?: Span): Char => ({ kind: "Char", value, span });
 
 // --- Control Flow ---
 
@@ -901,6 +932,12 @@ export const pcon = (
 
 export const plit = (value: string | number | boolean, span?: Span): PLit => ({
   kind: "PLit",
+  value,
+  span,
+});
+
+export const pchar = (value: string, span?: Span): PChar => ({
+  kind: "PChar",
   value,
   span,
 });

@@ -6,6 +6,7 @@ import {
   vcon,
   vnum,
   vstr,
+  vchar,
   vbool,
   vtuple,
   emptyEnv,
@@ -39,6 +40,12 @@ describe("Interpreter", () => {
     it("evaluates booleans", () => {
       expect(evaluate(emptyEnv, ast.bool(true))).toEqual(vbool(true));
       expect(evaluate(emptyEnv, ast.bool(false))).toEqual(vbool(false));
+    });
+
+    it("evaluates characters", () => {
+      expect(evaluate(emptyEnv, ast.char("a"))).toEqual(vchar("a"));
+      expect(evaluate(emptyEnv, ast.char("\n"))).toEqual(vchar("\n"));
+      expect(evaluate(emptyEnv, ast.char("\t"))).toEqual(vchar("\t"));
     });
   });
 
@@ -124,6 +131,25 @@ describe("Interpreter", () => {
       );
       expect(evaluate(emptyEnv, ast.binOp("+", ast.str("test"), ast.str("")))).toEqual(
         vstr("test"),
+      );
+    });
+
+    it("compares chars with <", () => {
+      expect(evaluate(emptyEnv, ast.binOp("<", ast.char("a"), ast.char("b")))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("<", ast.char("b"), ast.char("a")))).toEqual(vbool(false));
+    });
+
+    it("compares chars with ==", () => {
+      expect(evaluate(emptyEnv, ast.binOp("==", ast.char("a"), ast.char("a")))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("==", ast.char("a"), ast.char("b")))).toEqual(
+        vbool(false),
+      );
+    });
+
+    it("compares chars with !=", () => {
+      expect(evaluate(emptyEnv, ast.binOp("!=", ast.char("a"), ast.char("b")))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("!=", ast.char("a"), ast.char("a")))).toEqual(
+        vbool(false),
       );
     });
   });
@@ -378,6 +404,11 @@ describe("Interpreter", () => {
 
     it("formats strings with quotes", () => {
       expect(valueToString(vstr("hello"))).toBe('"hello"');
+    });
+
+    it("formats chars with single quotes", () => {
+      expect(valueToString(vchar("a"))).toBe("'a'");
+      expect(valueToString(vchar("\n"))).toBe("'\n'");
     });
 
     it("formats booleans", () => {
