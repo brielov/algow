@@ -64,6 +64,7 @@ import { parse, programToExpr, type Program } from "../parser";
 import { modules as preludeModules } from "../prelude";
 import { lowerToIR } from "../lower";
 import { generateJS } from "../backend/js";
+import { generateGo } from "../backend/go";
 import { printIR } from "../ir";
 
 import { positionToOffset, spanToRange } from "./positions";
@@ -253,6 +254,16 @@ type EmitIRResult = {
   readonly error?: string;
 };
 
+type CompileGoParams = {
+  readonly textDocument: TextDocumentIdentifier;
+};
+
+type CompileGoResult = {
+  readonly success: boolean;
+  readonly code?: string;
+  readonly error?: string;
+};
+
 // =============================================================================
 // SERVER CREATION
 // =============================================================================
@@ -316,6 +327,9 @@ export const createServer = (transport: Transport): void => {
           break;
         case "algow/emitIR":
           transport.send(successResponse(id, handleEmitIR(params as EmitIRParams)));
+          break;
+        case "algow/compileGo":
+          transport.send(successResponse(id, handleCompileGo(params as CompileGoParams)));
           break;
         default:
           transport.send(errorResponse(id, -32601, `Method not found: ${method}`));
@@ -791,6 +805,38 @@ export const createServer = (transport: Transport): void => {
       const irText = printIR(ir);
 
       return { success: true, ir: irText };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  };
+
+  const handleCompileGo = (params: CompileGoParams): CompileGoResult => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc || !doc.program) {
+      return { success: false, error: "No document found" };
+    }
+
+    // Don't compile if there are errors
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
+      return { success: false, error: "Cannot compile: document has errors" };
+    }
+
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
+    if (!expr) {
+      return { success: false, error: "No expression to compile" };
+    }
+
+    try {
+      // Type check to get CheckOutput (needed for lowering)
+      const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
+
+      // Lower to IR
+      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+
+      // Generate Go
+      const { code } = generateGo(ir, doc.constructorNames);
+
+      return { success: true, code };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }

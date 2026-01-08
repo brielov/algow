@@ -132,6 +132,7 @@ require(["vs/editor/editor.main"], () => {
   // Output panels
   const outputEl = document.getElementById("output")!;
   const jsEl = document.getElementById("js")!;
+  const goEl = document.getElementById("go")!;
   const irEl = document.getElementById("ir")!;
 
   // Tab switching
@@ -153,7 +154,7 @@ require(["vs/editor/editor.main"], () => {
   });
 
   // Create LSP bridge
-  const bridge = createLspBridge(worker, editor, statusEl, outputEl, jsEl, irEl);
+  const bridge = createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl);
   void bridge.start();
 });
 
@@ -185,6 +186,7 @@ function createLspBridge(
   statusEl: HTMLElement,
   outputEl: HTMLElement,
   jsEl: HTMLElement,
+  goEl: HTMLElement,
   irEl: HTMLElement,
 ) {
   const model = editor.getModel()!;
@@ -296,7 +298,9 @@ function createLspBridge(
             outputEl.textContent = result.success ? result.value! : result.error!;
           } catch {
             outputEl.className =
-              "output-content " + (outputEl.classList.contains("active") ? "active " : "") + "error";
+              "output-content " +
+              (outputEl.classList.contains("active") ? "active " : "") +
+              "error";
             outputEl.textContent = "Evaluation failed";
           }
         };
@@ -319,6 +323,24 @@ function createLspBridge(
           }
         };
 
+        const compileGo = async () => {
+          try {
+            const result = (await sendRequest("algow/compileGo", {
+              textDocument: { uri },
+            })) as { success: boolean; code?: string; error?: string };
+
+            goEl.className =
+              "output-content " +
+              (goEl.classList.contains("active") ? "active " : "") +
+              (result.success ? "code" : "error");
+            goEl.textContent = result.success ? result.code! : result.error!;
+          } catch {
+            goEl.className =
+              "output-content " + (goEl.classList.contains("active") ? "active " : "") + "error";
+            goEl.textContent = "Compilation failed";
+          }
+        };
+
         const emitIR = async () => {
           try {
             const result = (await sendRequest("algow/emitIR", {
@@ -338,7 +360,7 @@ function createLspBridge(
         };
 
         const updateAll = async () => {
-          await Promise.all([evaluate(), compile(), emitIR()]);
+          await Promise.all([evaluate(), compile(), compileGo(), emitIR()]);
         };
 
         // Update all outputs after a short delay
@@ -351,6 +373,10 @@ function createLspBridge(
           if (jsEl.classList.contains("active")) {
             jsEl.className = "output-content active pending";
             jsEl.textContent = "Compiling...";
+          }
+          if (goEl.classList.contains("active")) {
+            goEl.className = "output-content active pending";
+            goEl.textContent = "Compiling...";
           }
           if (irEl.classList.contains("active")) {
             irEl.className = "output-content active pending";

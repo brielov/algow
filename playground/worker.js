@@ -5092,6 +5092,719 @@ var generateJS = (irExpr, constructorNames) => {
   return { code, warnings: [] };
 };
 
+// src/backend/go_runtime.ts
+var GO_RUNTIME = `package main
+
+import (
+	"fmt"
+	"reflect"
+)
+
+// Value is the universal value type
+type Value = any
+
+// Func represents a callable function
+type Func interface {
+	Apply(arg Value) Value
+}
+
+// Con represents a constructor value with integer tag for efficiency
+type Con struct {
+	Tag  int
+	Args []Value
+}
+
+// Apply implements partial application for constructors
+func (c Con) Apply(arg Value) Value {
+	newArgs := make([]Value, len(c.Args)+1)
+	copy(newArgs, c.Args)
+	newArgs[len(c.Args)] = arg
+	return Con{Tag: c.Tag, Args: newArgs}
+}
+
+// Closure represents a function with captured environment
+type Closure struct {
+	Fn  func(env []Value, arg Value) Value
+	Env []Value
+}
+
+// Apply calls the closure with its environment
+func (c Closure) Apply(arg Value) Value {
+	return c.Fn(c.Env, arg)
+}
+
+// PureFunc represents a function without captured variables
+type PureFunc struct {
+	Fn func(arg Value) Value
+}
+
+// Apply calls the pure function
+func (f PureFunc) Apply(arg Value) Value {
+	return f.Fn(arg)
+}
+
+// Apply applies a function to an argument
+func Apply(fn Value, arg Value) Value {
+	switch f := fn.(type) {
+	case Func:
+		return f.Apply(arg)
+	case func(Value) Value:
+		return f(arg)
+	default:
+		panic(fmt.Sprintf("Cannot apply non-function: %T", fn))
+	}
+}
+
+// NewCon creates a new constructor value with integer tag
+func NewCon(tag int, args ...Value) Value {
+	return Con{Tag: tag, Args: args}
+}
+
+// eqInternal performs deep structural equality (returns bool for internal use)
+func eqInternal(a, b Value) bool {
+	// Same reference
+	if a == b {
+		return true
+	}
+
+	// Handle nil
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+
+	// Constructor equality
+	if ca, ok := a.(Con); ok {
+		if cb, ok := b.(Con); ok {
+			if ca.Tag != cb.Tag {
+				return false
+			}
+			if len(ca.Args) != len(cb.Args) {
+				return false
+			}
+			for i := range ca.Args {
+				if !eqInternal(ca.Args[i], cb.Args[i]) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+
+	// Slice (tuple) equality
+	if sa, ok := a.([]Value); ok {
+		if sb, ok := b.([]Value); ok {
+			if len(sa) != len(sb) {
+				return false
+			}
+			for i := range sa {
+				if !eqInternal(sa[i], sb[i]) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+
+	// Map (record) equality
+	if ma, ok := a.(map[string]Value); ok {
+		if mb, ok := b.(map[string]Value); ok {
+			if len(ma) != len(mb) {
+				return false
+			}
+			for k, v := range ma {
+				if bv, ok := mb[k]; !ok || !eqInternal(v, bv) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+
+	// Use reflect for other types
+	return reflect.DeepEqual(a, b)
+}
+
+// Eq performs deep structural equality (returns Value for use in generated code)
+func Eq(a, b Value) Value {
+	return eqInternal(a, b)
+}
+
+// Helper to convert bool to int for comparisons
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+`;
+
+// src/backend/go.ts
+var isMonomorphic = (type) => freeTypeVars(type).size === 0;
+var typeToGo = (type) => {
+  if (!isMonomorphic(type))
+    return null;
+  switch (type.kind) {
+    case "TCon":
+      switch (type.name) {
+        case "number":
+          return "float64";
+        case "string":
+          return "string";
+        case "boolean":
+          return "bool";
+        default:
+          return null;
+      }
+    case "TFun":
+    case "TTuple":
+    case "TRecord":
+    case "TApp":
+    case "TVar":
+      return null;
+  }
+};
+var assertNever4 = (x) => {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+};
+var createContext5 = (constructorNames, functions) => {
+  const constructorTags = new Map;
+  constructorNames.forEach((name, i) => constructorTags.set(name, i));
+  return {
+    indent: 0,
+    lines: [],
+    constructorTags,
+    functions,
+    typedVars: new Map
+  };
+};
+var emit2 = (ctx, code) => {
+  const indentation = "\t".repeat(ctx.indent);
+  ctx.lines.push(indentation + code);
+};
+var toGoId = (name) => {
+  if (name.startsWith("$env[")) {
+    return name;
+  }
+  let id = name.replace(/[^a-zA-Z0-9_]/g, "_");
+  if (/^[0-9]/.test(id)) {
+    id = "_" + id;
+  }
+  const goKeywords = new Set([
+    "break",
+    "case",
+    "chan",
+    "const",
+    "continue",
+    "default",
+    "defer",
+    "else",
+    "fallthrough",
+    "for",
+    "func",
+    "go",
+    "goto",
+    "if",
+    "import",
+    "interface",
+    "map",
+    "package",
+    "range",
+    "return",
+    "select",
+    "struct",
+    "switch",
+    "type",
+    "var"
+  ]);
+  if (goKeywords.has(id)) {
+    id = id + "_";
+  }
+  return id;
+};
+var getAtomGoType = (ctx, atom) => {
+  if (atom.kind === "IRLit") {
+    return typeToGo(atom.type);
+  }
+  if (atom.kind === "IRVar") {
+    return ctx.typedVars.get(atom.name) ?? null;
+  }
+  return null;
+};
+var genTypedAtom = (ctx, atom) => {
+  switch (atom.kind) {
+    case "IRLit":
+      if (typeof atom.value === "string") {
+        return JSON.stringify(atom.value);
+      }
+      if (typeof atom.value === "boolean") {
+        return atom.value ? "true" : "false";
+      }
+      return `float64(${atom.value})`;
+    case "IRVar": {
+      const name = atom.name;
+      if (name.startsWith("$env[")) {
+        return name.replace("$env", "env");
+      }
+      return toGoId(name);
+    }
+    default:
+      return assertNever4(atom);
+  }
+};
+var genExpr2 = (ctx, expr) => {
+  switch (expr.kind) {
+    case "IRAtomExpr": {
+      const goType = getAtomGoType(ctx, expr.atom);
+      if (goType) {
+        return genTypedAtom(ctx, expr.atom);
+      }
+      return genAtom2(ctx, expr.atom);
+    }
+    case "IRLet": {
+      const goName = toGoId(expr.name);
+      const bindingType = expr.binding.type;
+      const goType = typeToGo(bindingType);
+      if (goType) {
+        const binding = genTypedBinding(ctx, expr.binding);
+        emit2(ctx, `var ${goName} ${goType} = ${binding}`);
+        ctx.typedVars.set(expr.name, goType);
+      } else {
+        const binding = genBinding2(ctx, expr.binding);
+        emit2(ctx, `var ${goName} Value = ${binding}`);
+      }
+      return genExpr2(ctx, expr.body);
+    }
+    case "IRLetRec": {
+      for (const { name } of expr.bindings) {
+        emit2(ctx, `var ${toGoId(name)} Value`);
+      }
+      for (const { name, binding } of expr.bindings) {
+        const bindingCode = genBinding2(ctx, binding);
+        emit2(ctx, `${toGoId(name)} = ${bindingCode}`);
+      }
+      return genExpr2(ctx, expr.body);
+    }
+    default:
+      return assertNever4(expr);
+  }
+};
+var genAtom2 = (ctx, atom) => {
+  switch (atom.kind) {
+    case "IRLit":
+      if (typeof atom.value === "string") {
+        return JSON.stringify(atom.value);
+      }
+      if (typeof atom.value === "boolean") {
+        return atom.value ? "true" : "false";
+      }
+      return `Value(float64(${atom.value}))`;
+    case "IRVar": {
+      const name = atom.name;
+      if (name.startsWith("$env[")) {
+        return name.replace("$env", "env");
+      }
+      const tag = ctx.constructorTags.get(name);
+      if (tag !== undefined) {
+        return `NewCon(${tag})`;
+      }
+      return toGoId(name);
+    }
+    default:
+      return assertNever4(atom);
+  }
+};
+var genBinding2 = (ctx, binding) => {
+  switch (binding.kind) {
+    case "IRAtomBinding":
+      return genAtom2(ctx, binding.atom);
+    case "IRAppBinding": {
+      const func = genAtom2(ctx, binding.func);
+      const arg = genAtom2(ctx, binding.arg);
+      return `Apply(${func}, ${arg})`;
+    }
+    case "IRBinOpBinding":
+      return genBinOp2(ctx, binding, false);
+    case "IRIfBinding":
+      return genIf2(ctx, binding);
+    case "IRTupleBinding": {
+      const elements = binding.elements.map((e) => genAtom2(ctx, e));
+      return `Value([]Value{${elements.join(", ")}})`;
+    }
+    case "IRRecordBinding": {
+      const fields = binding.fields.map((f) => `"${f.name}": ${genAtom2(ctx, f.value)}`);
+      return `Value(map[string]Value{${fields.join(", ")}})`;
+    }
+    case "IRFieldAccessBinding": {
+      const record2 = genAtom2(ctx, binding.record);
+      return `${record2}.(map[string]Value)["${binding.field}"]`;
+    }
+    case "IRTupleIndexBinding": {
+      const tuple2 = genAtom2(ctx, binding.tuple);
+      return `${tuple2}.([]Value)[${binding.index}]`;
+    }
+    case "IRMatchBinding":
+      return genMatch2(ctx, binding);
+    case "IRLambdaBinding":
+      return genLambda2(ctx, binding);
+    case "IRClosureBinding": {
+      const captures = binding.captures.map((c) => genAtom2(ctx, c));
+      return `Closure{Fn: ${binding.funcId}, Env: []Value{${captures.join(", ")}}}`;
+    }
+    default:
+      return assertNever4(binding);
+  }
+};
+var genTypedBinding = (ctx, binding) => {
+  switch (binding.kind) {
+    case "IRAtomBinding":
+      return genTypedAtom(ctx, binding.atom);
+    case "IRBinOpBinding":
+      return genBinOp2(ctx, binding, true);
+    case "IRAppBinding": {
+      const funcGoType = getAtomGoType(ctx, binding.func);
+      if (funcGoType && funcGoType.startsWith("func(")) {
+        const func = genTypedAtom(ctx, binding.func);
+        const argGoType = getAtomGoType(ctx, binding.arg);
+        const arg = argGoType ? genTypedAtom(ctx, binding.arg) : genAtom2(ctx, binding.arg);
+        return `${func}(${arg})`;
+      }
+      break;
+    }
+    case "IRLambdaBinding": {
+      return genLambda2(ctx, binding);
+    }
+    default:
+      break;
+  }
+  const goType = typeToGo(binding.type);
+  const boxed = genBinding2(ctx, binding);
+  if (goType) {
+    return `${boxed}.(${goType})`;
+  }
+  return boxed;
+};
+var genBinOp2 = (ctx, binding, typed) => {
+  const leftGoType = getAtomGoType(ctx, binding.left);
+  const rightGoType = getAtomGoType(ctx, binding.right);
+  const left = leftGoType ? genTypedAtom(ctx, binding.left) : genAtom2(ctx, binding.left);
+  const right = rightGoType ? genTypedAtom(ctx, binding.right) : genAtom2(ctx, binding.right);
+  const isString = isStringType(binding.operandType);
+  const wrap = (expr) => typed ? expr : `Value(${expr})`;
+  const asNum = (v, isTyped) => isTyped ? v : `${v}.(float64)`;
+  const asStr = (v, isTyped) => isTyped ? v : `${v}.(string)`;
+  const leftTyped = leftGoType !== null;
+  const rightTyped = rightGoType !== null;
+  switch (binding.op) {
+    case "+":
+      if (isString) {
+        return wrap(`${asStr(left, leftTyped)} + ${asStr(right, rightTyped)}`);
+      }
+      return wrap(`${asNum(left, leftTyped)} + ${asNum(right, rightTyped)}`);
+    case "-":
+      return wrap(`${asNum(left, leftTyped)} - ${asNum(right, rightTyped)}`);
+    case "*":
+      return wrap(`${asNum(left, leftTyped)} * ${asNum(right, rightTyped)}`);
+    case "/":
+      return wrap(`${asNum(left, leftTyped)} / ${asNum(right, rightTyped)}`);
+    case "<":
+      return wrap(`${asNum(left, leftTyped)} < ${asNum(right, rightTyped)}`);
+    case ">":
+      return wrap(`${asNum(left, leftTyped)} > ${asNum(right, rightTyped)}`);
+    case "<=":
+      return wrap(`${asNum(left, leftTyped)} <= ${asNum(right, rightTyped)}`);
+    case ">=":
+      return wrap(`${asNum(left, leftTyped)} >= ${asNum(right, rightTyped)}`);
+    case "==":
+      if (isComplexType2(binding.operandType)) {
+        return typed ? `Eq(${left}, ${right}).(bool)` : `Eq(${left}, ${right})`;
+      }
+      return wrap(`${left} == ${right}`);
+    case "!=":
+      if (isComplexType2(binding.operandType)) {
+        return typed ? `!Eq(${left}, ${right}).(bool)` : `Value(!Eq(${left}, ${right}).(bool))`;
+      }
+      return wrap(`${left} != ${right}`);
+  }
+};
+var isStringType = (type) => {
+  return type.kind === "TCon" && type.name === "string";
+};
+var isComplexType2 = (type) => {
+  switch (type.kind) {
+    case "TCon":
+      return !["number", "string", "boolean"].includes(type.name);
+    case "TVar":
+      return true;
+    case "TFun":
+    case "TApp":
+    case "TRecord":
+    case "TTuple":
+      return true;
+  }
+};
+var genIf2 = (ctx, binding) => {
+  const condGoType = getAtomGoType(ctx, binding.cond);
+  const cond = condGoType ? genTypedAtom(ctx, binding.cond) : genAtom2(ctx, binding.cond);
+  const condExpr = condGoType === "bool" ? cond : `${cond}.(bool)`;
+  const lines = [];
+  lines.push(`func() Value {`);
+  lines.push(`	if ${condExpr} {`);
+  ctx.indent += 2;
+  const savedLines = ctx.lines;
+  ctx.lines = [];
+  const thenResult = genExpr2(ctx, binding.thenBranch);
+  const thenLines = ctx.lines;
+  ctx.lines = savedLines;
+  ctx.indent -= 2;
+  for (const line of thenLines) {
+    lines.push("\t\t" + line);
+  }
+  lines.push(`		return ${thenResult}`);
+  lines.push(`	} else {`);
+  ctx.indent += 2;
+  ctx.lines = [];
+  const elseResult = genExpr2(ctx, binding.elseBranch);
+  const elseLines = ctx.lines;
+  ctx.lines = savedLines;
+  ctx.indent -= 2;
+  for (const line of elseLines) {
+    lines.push("\t\t" + line);
+  }
+  lines.push(`		return ${elseResult}`);
+  lines.push(`	}`);
+  lines.push(`}()`);
+  return lines.join(`
+` + "\t".repeat(ctx.indent));
+};
+var genLambda2 = (ctx, binding) => {
+  const param = toGoId(binding.param);
+  const funcGoType = typeToGo(binding.type);
+  const isTypedLambda = funcGoType !== null;
+  const paramGoType = isTypedLambda ? typeToGo(binding.paramType) : null;
+  let retGoType = null;
+  if (isTypedLambda && binding.type.kind === "TFun") {
+    retGoType = typeToGo(binding.type.ret);
+  }
+  if (isTypedLambda) {
+    ctx.typedVars.set(binding.param, paramGoType);
+  }
+  ctx.indent++;
+  const savedLines = ctx.lines;
+  ctx.lines = [];
+  const bodyResult = genExpr2(ctx, binding.body);
+  const bodyLines = ctx.lines;
+  ctx.lines = savedLines;
+  ctx.indent--;
+  if (isTypedLambda) {
+    ctx.typedVars.delete(binding.param);
+  }
+  const lines = [];
+  if (isTypedLambda) {
+    lines.push(`func(${param} ${paramGoType}) ${retGoType} {`);
+  } else {
+    lines.push(`PureFunc{Fn: func(${param} Value) Value {`);
+  }
+  for (const line of bodyLines) {
+    lines.push("\t" + line);
+  }
+  lines.push(`	return ${bodyResult}`);
+  if (isTypedLambda) {
+    lines.push(`}`);
+  } else {
+    lines.push(`}}`);
+  }
+  return lines.join(`
+` + "\t".repeat(ctx.indent));
+};
+var genMatch2 = (ctx, binding) => {
+  const scrutinee = genAtom2(ctx, binding.scrutinee);
+  const lines = [];
+  lines.push(`func() Value {`);
+  lines.push(`	_s := ${scrutinee}`);
+  const isSimpleConstructorPattern = (p) => {
+    if (p.kind !== "IRPCon")
+      return false;
+    return p.args.every((arg) => arg.kind === "IRPVar" || arg.kind === "IRPWildcard" || arg.kind === "IRPLit");
+  };
+  const allSimpleConstructors = binding.cases.every((c) => isSimpleConstructorPattern(c.pattern));
+  const tags = binding.cases.filter((c) => c.pattern.kind === "IRPCon").map((c) => c.pattern.name);
+  const hasUniqueTags = new Set(tags).size === tags.length;
+  const hasGuards = binding.cases.some((c) => c.guard !== undefined);
+  if (allSimpleConstructors && hasUniqueTags && !hasGuards) {
+    lines.push(`	switch _s.(Con).Tag {`);
+    for (const case_2 of binding.cases) {
+      const pattern = case_2.pattern;
+      const tag = ctx.constructorTags.get(pattern.name) ?? 0;
+      lines.push(`	case ${tag}: // ${pattern.name}`);
+      const bindings = genPatternBindings("_s.(Con).Args", pattern);
+      for (const [name, expr] of bindings) {
+        const goName = toGoId(name);
+        lines.push(`		${goName} := ${expr}`);
+        lines.push(`		_ = ${goName}`);
+      }
+      ctx.indent += 2;
+      const savedLines = ctx.lines;
+      ctx.lines = [];
+      const bodyResult = genExpr2(ctx, case_2.body);
+      const bodyLines = ctx.lines;
+      ctx.lines = savedLines;
+      ctx.indent -= 2;
+      for (const line of bodyLines) {
+        lines.push("\t\t" + line);
+      }
+      lines.push(`		return ${bodyResult}`);
+    }
+    lines.push(`	}`);
+  } else {
+    for (let i = 0;i < binding.cases.length; i++) {
+      const case_2 = binding.cases[i];
+      const { condition, bindings } = genPatternMatch2(ctx, "_s", case_2.pattern);
+      const prefix = i === 0 ? "if" : "} else if";
+      lines.push(`	${prefix} ${condition} {`);
+      for (const [name, expr] of bindings) {
+        const goName = toGoId(name);
+        lines.push(`		${goName} := ${expr}`);
+        lines.push(`		_ = ${goName}`);
+      }
+      if (case_2.guard) {
+        ctx.indent += 2;
+        const savedLines2 = ctx.lines;
+        ctx.lines = [];
+        const guardResult = genExpr2(ctx, case_2.guard);
+        const guardLines = ctx.lines;
+        ctx.lines = savedLines2;
+        ctx.indent -= 2;
+        for (const line of guardLines) {
+          lines.push("\t\t" + line);
+        }
+        const guardGoType = typeToGo(case_2.guard.type);
+        const guardCondition = guardGoType === "bool" ? guardResult : `${guardResult}.(bool)`;
+        lines.push(`		if ${guardCondition} {`);
+      }
+      ctx.indent += 2;
+      const savedLines = ctx.lines;
+      ctx.lines = [];
+      const bodyResult = genExpr2(ctx, case_2.body);
+      const bodyLines = ctx.lines;
+      ctx.lines = savedLines;
+      ctx.indent -= 2;
+      for (const line of bodyLines) {
+        lines.push("\t\t" + (case_2.guard ? "\t" : "") + line);
+      }
+      lines.push(`		${case_2.guard ? "\t" : ""}return ${bodyResult}`);
+      if (case_2.guard) {
+        lines.push(`		}`);
+      }
+    }
+    lines.push(`	}`);
+  }
+  lines.push(`	panic("Pattern match failed")`);
+  lines.push(`}()`);
+  return lines.join(`
+` + "\t".repeat(ctx.indent));
+};
+var genPatternBindings = (argsExpr, pattern) => {
+  const bindings = [];
+  for (let i = 0;i < pattern.args.length; i++) {
+    const arg = pattern.args[i];
+    const argExpr = `${argsExpr}[${i}]`;
+    if (arg.kind === "IRPVar") {
+      bindings.push([arg.name, argExpr]);
+    } else if (arg.kind === "IRPCon") {
+      const nestedBindings = genPatternBindings(`${argExpr}.(Con).Args`, arg);
+      bindings.push(...nestedBindings);
+    }
+  }
+  return bindings;
+};
+var genPatternMatch2 = (ctx, scrutinee, pattern) => {
+  switch (pattern.kind) {
+    case "IRPVar":
+      return { condition: "true", bindings: [[pattern.name, scrutinee]] };
+    case "IRPWildcard":
+      return { condition: "true", bindings: [] };
+    case "IRPLit": {
+      const value = typeof pattern.value === "string" ? JSON.stringify(pattern.value) : typeof pattern.value === "boolean" ? pattern.value.toString() : `float64(${pattern.value})`;
+      return { condition: `${scrutinee} == ${value}`, bindings: [] };
+    }
+    case "IRPCon": {
+      const tag = ctx.constructorTags.get(pattern.name) ?? 0;
+      const conditions = [`${scrutinee}.(Con).Tag == ${tag}`];
+      const bindings = [];
+      for (let i = 0;i < pattern.args.length; i++) {
+        const argScrutinee = `${scrutinee}.(Con).Args[${i}]`;
+        const result = genPatternMatch2(ctx, argScrutinee, pattern.args[i]);
+        if (result.condition !== "true") {
+          conditions.push(result.condition);
+        }
+        bindings.push(...result.bindings);
+      }
+      return { condition: conditions.join(" && "), bindings };
+    }
+    case "IRPTuple": {
+      const conditions = [];
+      const bindings = [];
+      for (let i = 0;i < pattern.elements.length; i++) {
+        const elemScrutinee = `${scrutinee}.([]Value)[${i}]`;
+        const result = genPatternMatch2(ctx, elemScrutinee, pattern.elements[i]);
+        if (result.condition !== "true") {
+          conditions.push(result.condition);
+        }
+        bindings.push(...result.bindings);
+      }
+      return { condition: conditions.join(" && ") || "true", bindings };
+    }
+    case "IRPRecord": {
+      const conditions = [];
+      const bindings = [];
+      for (const field2 of pattern.fields) {
+        const fieldScrutinee = `${scrutinee}.(map[string]Value)["${field2.name}"]`;
+        const result = genPatternMatch2(ctx, fieldScrutinee, field2.pattern);
+        if (result.condition !== "true") {
+          conditions.push(result.condition);
+        }
+        bindings.push(...result.bindings);
+      }
+      return { condition: conditions.join(" && ") || "true", bindings };
+    }
+    case "IRPAs": {
+      const result = genPatternMatch2(ctx, scrutinee, pattern.pattern);
+      result.bindings.push([pattern.name, scrutinee]);
+      return result;
+    }
+    case "IRPOr": {
+      const conditions = [];
+      let bindings = [];
+      for (let i = 0;i < pattern.alternatives.length; i++) {
+        const result = genPatternMatch2(ctx, scrutinee, pattern.alternatives[i]);
+        conditions.push(`(${result.condition})`);
+        if (i === 0) {
+          bindings = result.bindings;
+        }
+      }
+      return { condition: conditions.join(" || "), bindings };
+    }
+  }
+};
+var generateGo = (irExpr, constructorNames) => {
+  const ctx = createContext5(constructorNames, []);
+  const result = genExpr2(ctx, irExpr);
+  const code = [
+    GO_RUNTIME,
+    "func main() {",
+    ...ctx.lines.map((l) => "\t" + l),
+    `	_result := ${result}`,
+    `	fmt.Println(_result)`,
+    "}"
+  ].join(`
+`);
+  return { code, warnings: [] };
+};
+
 // src/lsp/positions.ts
 var offsetToPosition = (source, offset) => {
   let line = 0;
@@ -5235,6 +5948,9 @@ var createServer = (transport) => {
           break;
         case "algow/emitIR":
           transport.send(successResponse(id, handleEmitIR(params)));
+          break;
+        case "algow/compileGo":
+          transport.send(successResponse(id, handleCompileGo(params)));
           break;
         default:
           transport.send(errorResponse(id, -32601, `Method not found: ${method}`));
@@ -5598,6 +6314,27 @@ ${def.name}: ${typeToString(type)}
       const ir = lowerToIR(expr, doc.typeEnv, checkResult);
       const irText = printIR(ir);
       return { success: true, ir: irText };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  };
+  const handleCompileGo = (params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc || !doc.program) {
+      return { success: false, error: "No document found" };
+    }
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
+      return { success: false, error: "Cannot compile: document has errors" };
+    }
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
+    if (!expr) {
+      return { success: false, error: "No expression to compile" };
+    }
+    try {
+      const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols, doc.moduleEnv);
+      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+      const { code } = generateGo(ir, doc.constructorNames);
+      return { success: true, code };
     } catch (err) {
       return { success: false, error: err.message };
     }
