@@ -1,8 +1,6 @@
 -- Self-Hosted Lexer
 -- A lexer for the Algow language, written in Algow
 -- Demonstrates: ADTs, pattern matching, string manipulation, recursion
---
--- Note: Use `List.map` explicitly since multiple modules export `map`.
 
 -- =============================================================================
 -- TOKEN TYPES

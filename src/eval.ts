@@ -301,7 +301,10 @@ const foreignRegistry: Record<string, Record<string, Value>> = {
     isIdentChar: vforeign((c) => {
       const ch = (c as VChar).value;
       return vbool(
-        (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch === "_",
+        (ch >= "a" && ch <= "z") ||
+          (ch >= "A" && ch <= "Z") ||
+          (ch >= "0" && ch <= "9") ||
+          ch === "_",
       );
     }),
   },
