@@ -1013,12 +1013,35 @@ var inferApp = (ctx, env, registry, expr) => {
 var inferBinOp = (ctx, env, registry, expr) => {
   const [s1, leftType, c1] = inferExpr(ctx, env, registry, expr.left);
   const [s2, rightType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.right);
-  const s3 = unify(ctx, applySubst(s2, leftType), rightType, expr.span);
-  const operandType = applySubst(s3, rightType);
-  const subst = composeSubst(composeSubst(s1, s2), s3);
-  const constraints = [...applySubstConstraints(subst, c1), ...applySubstConstraints(subst, c2)];
+  const resolvedLeft = applySubst(s2, leftType);
+  const resolvedRight = rightType;
+  const isInt = (t) => t.kind === "TCon" && t.name === "Int";
+  const isFloat = (t) => t.kind === "TCon" && t.name === "Float";
+  const isNumeric = (t) => isInt(t) || isFloat(t);
+  const widenNumeric = () => {
+    if (isNumeric(resolvedLeft) && isNumeric(resolvedRight)) {
+      if (isFloat(resolvedLeft) || isFloat(resolvedRight)) {
+        return [new Map, tFloat];
+      }
+      return [new Map, tInt];
+    }
+    if (isNumeric(resolvedLeft) && resolvedRight.kind === "TVar") {
+      const s = unify(ctx, resolvedRight, resolvedLeft, expr.span);
+      return [s, resolvedLeft];
+    }
+    if (isNumeric(resolvedRight) && resolvedLeft.kind === "TVar") {
+      const s = unify(ctx, resolvedLeft, resolvedRight, expr.span);
+      return [s, resolvedRight];
+    }
+    const s3 = unify(ctx, resolvedLeft, resolvedRight, expr.span);
+    return [s3, applySubst(s3, resolvedRight)];
+  };
+  const unifyTypes = () => {
+    const s3 = unify(ctx, resolvedLeft, resolvedRight, expr.span);
+    return [s3, applySubst(s3, resolvedRight)];
+  };
   const ensureNumeric = (type) => {
-    if (type.kind === "TCon" && (type.name === "Int" || type.name === "Float")) {
+    if (isNumeric(type)) {
       return new Map;
     }
     if (type.kind === "TVar") {
@@ -1028,12 +1051,34 @@ var inferBinOp = (ctx, env, registry, expr) => {
   };
   switch (expr.op) {
     case "+": {
+      if (isNumeric(resolvedLeft) || isNumeric(resolvedRight)) {
+        const [s32, operandType2] = widenNumeric();
+        const subst2 = composeSubst(composeSubst(s1, s2), s32);
+        const constraints2 = [
+          ...applySubstConstraints(subst2, c1),
+          ...applySubstConstraints(subst2, c2)
+        ];
+        constraints2.push({ className: "Add", type: operandType2 });
+        return [subst2, operandType2, constraints2];
+      }
+      const [s3, operandType] = unifyTypes();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2)
+      ];
       constraints.push({ className: "Add", type: operandType });
       return [subst, operandType, constraints];
     }
     case "-":
     case "/":
     case "*": {
+      const [s3, operandType] = widenNumeric();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2)
+      ];
       const s4 = ensureNumeric(operandType);
       const finalType = applySubst(s4, operandType);
       return [composeSubst(subst, s4), finalType, constraints];
@@ -1042,11 +1087,23 @@ var inferBinOp = (ctx, env, registry, expr) => {
     case ">":
     case "<=":
     case ">=": {
+      const [s3, operandType] = isNumeric(resolvedLeft) || isNumeric(resolvedRight) ? widenNumeric() : unifyTypes();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2)
+      ];
       constraints.push({ className: "Ord", type: operandType });
       return [subst, tBool, constraints];
     }
     case "==":
     case "!=": {
+      const [s3, operandType] = isNumeric(resolvedLeft) || isNumeric(resolvedRight) ? widenNumeric() : unifyTypes();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2)
+      ];
       constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }

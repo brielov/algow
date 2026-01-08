@@ -1447,56 +1447,126 @@ const inferBinOp = (
   // Infer right operand
   const [s2, rightType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.right);
 
-  // Operands must have the same type
-  const s3 = unify(ctx, applySubst(s2, leftType), rightType, expr.span);
-  const operandType = applySubst(s3, rightType);
+  const resolvedLeft = applySubst(s2, leftType);
+  const resolvedRight = rightType;
 
-  const subst = composeSubst(composeSubst(s1, s2), s3);
-  const constraints = [...applySubstConstraints(subst, c1), ...applySubstConstraints(subst, c2)];
+  // Helper to check if a type is Int
+  const isInt = (t: Type): boolean => t.kind === "TCon" && t.name === "Int";
+  // Helper to check if a type is Float
+  const isFloat = (t: Type): boolean => t.kind === "TCon" && t.name === "Float";
+  // Helper to check if a type is numeric (Int or Float)
+  const isNumeric = (t: Type): boolean => isInt(t) || isFloat(t);
 
-  // Helper to check if type is numeric and unify appropriately
+  // Type widening for numeric operations: Int + Float → Float
+  // Returns [subst, operandType] where operandType is the widened type
+  const widenNumeric = (): [Subst, Type] => {
+    // Both numeric: widen to Float if either is Float
+    if (isNumeric(resolvedLeft) && isNumeric(resolvedRight)) {
+      if (isFloat(resolvedLeft) || isFloat(resolvedRight)) {
+        return [new Map(), tFloat];
+      }
+      return [new Map(), tInt];
+    }
+    // One is numeric, other is type variable: constrain variable to match
+    if (isNumeric(resolvedLeft) && resolvedRight.kind === "TVar") {
+      const s = unify(ctx, resolvedRight, resolvedLeft, expr.span);
+      return [s, resolvedLeft];
+    }
+    if (isNumeric(resolvedRight) && resolvedLeft.kind === "TVar") {
+      const s = unify(ctx, resolvedLeft, resolvedRight, expr.span);
+      return [s, resolvedRight];
+    }
+    // Neither is numeric (or both are variables): unify and check later
+    const s3 = unify(ctx, resolvedLeft, resolvedRight, expr.span);
+    return [s3, applySubst(s3, resolvedRight)];
+  };
+
+  // For non-numeric operators, just unify types normally
+  const unifyTypes = (): [Subst, Type] => {
+    const s3 = unify(ctx, resolvedLeft, resolvedRight, expr.span);
+    return [s3, applySubst(s3, resolvedRight)];
+  };
+
+  // Helper to ensure a type is numeric
   const ensureNumeric = (type: Type): Subst => {
-    // If it's already Int or Float, no unification needed
-    if (type.kind === "TCon" && (type.name === "Int" || type.name === "Float")) {
+    if (isNumeric(type)) {
       return new Map();
     }
-    // If it's a type variable, we need to constrain it to be numeric
-    // For now, default to Int when the type is unknown
     if (type.kind === "TVar") {
       return unify(ctx, type, tInt, expr.span);
     }
-    // Otherwise, try to unify with Int (will error if incompatible)
     return unify(ctx, type, tInt, expr.span);
   };
 
   switch (expr.op) {
-    // Addition: polymorphic (Add class), returns operand type
+    // Addition: polymorphic (Add class)
+    // For numeric types, use widening; for strings, use normal unification
     case "+": {
+      // Check if we're dealing with numeric types for widening
+      if (isNumeric(resolvedLeft) || isNumeric(resolvedRight)) {
+        const [s3, operandType] = widenNumeric();
+        const subst = composeSubst(composeSubst(s1, s2), s3);
+        const constraints = [
+          ...applySubstConstraints(subst, c1),
+          ...applySubstConstraints(subst, c2),
+        ];
+        constraints.push({ className: "Add", type: operandType });
+        return [subst, operandType, constraints];
+      }
+      // Non-numeric: normal unification (e.g., string + string)
+      const [s3, operandType] = unifyTypes();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2),
+      ];
       constraints.push({ className: "Add", type: operandType });
       return [subst, operandType, constraints];
     }
 
-    // Other arithmetic: must be numeric (Int or Float), returns operand type
+    // Other arithmetic: must be numeric (Int or Float), use widening
     case "-":
     case "/":
     case "*": {
+      const [s3, operandType] = widenNumeric();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2),
+      ];
       const s4 = ensureNumeric(operandType);
       const finalType = applySubst(s4, operandType);
       return [composeSubst(subst, s4), finalType, constraints];
     }
 
     // Comparison: Ord constraint, returns boolean
+    // Use widening for numeric comparisons
     case "<":
     case ">":
     case "<=":
     case ">=": {
+      const [s3, operandType] =
+        isNumeric(resolvedLeft) || isNumeric(resolvedRight) ? widenNumeric() : unifyTypes();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2),
+      ];
       constraints.push({ className: "Ord", type: operandType });
       return [subst, tBool, constraints];
     }
 
     // Equality: Eq constraint, returns boolean
+    // Use widening for numeric equality
     case "==":
     case "!=": {
+      const [s3, operandType] =
+        isNumeric(resolvedLeft) || isNumeric(resolvedRight) ? widenNumeric() : unifyTypes();
+      const subst = composeSubst(composeSubst(s1, s2), s3);
+      const constraints = [
+        ...applySubstConstraints(subst, c1),
+        ...applySubstConstraints(subst, c2),
+      ];
       constraints.push({ className: "Eq", type: operandType });
       return [subst, tBool, constraints];
     }

@@ -283,6 +283,46 @@ describe("Type Inference", () => {
         expect(typeToString(type)).toBe("Int");
       });
 
+      it("widens Int + Float to Float", () => {
+        const { type, diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.binOp("+", ast.int(1), ast.float(2.5)),
+        );
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("Float");
+      });
+
+      it("widens Float + Int to Float", () => {
+        const { type, diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.binOp("+", ast.float(1.5), ast.int(2)),
+        );
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("Float");
+      });
+
+      it("widens Int * Float to Float", () => {
+        const { type, diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.binOp("*", ast.int(2), ast.float(3.5)),
+        );
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("Float");
+      });
+
+      it("keeps Float + Float as Float", () => {
+        const { type, diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.binOp("+", ast.float(1.5), ast.float(2.5)),
+        );
+        expect(diagnostics).toHaveLength(0);
+        expect(typeToString(type)).toBe("Float");
+      });
+
       it("infers + string concatenation", () => {
         const { type, diagnostics } = infer(
           baseEnv,
