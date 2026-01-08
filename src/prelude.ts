@@ -639,6 +639,12 @@ export const stringModule = ast.moduleDecl(
     ast.foreignBinding("substring", fn(tInt, fn(tInt, fn(tString, tString)))),
     // charAt : Int -> String -> Maybe Char
     ast.foreignBinding("charAt", fn(tInt, fn(tString, tMaybe(tChar)))),
+    // head : String -> Maybe Char
+    ast.foreignBinding("head", fn(tString, tMaybe(tChar))),
+    // tail : String -> String
+    ast.foreignBinding("tail", fn(tString, tString)),
+    // isEmpty : String -> Bool
+    ast.foreignBinding("isEmpty", fn(tString, tBool)),
     // toList : String -> List Char
     ast.foreignBinding("toList", fn(tString, tList(tChar))),
     // fromList : List Char -> String
@@ -703,6 +709,10 @@ export const charModule = ast.moduleDecl(
     ast.foreignBinding("toUpper", fn(tChar, tChar)),
     // toLower : Char -> Char
     ast.foreignBinding("toLower", fn(tChar, tChar)),
+    // isIdentStart : Char -> Bool (can start identifier: alpha or underscore)
+    ast.foreignBinding("isIdentStart", fn(tChar, tBool)),
+    // isIdentChar : Char -> Bool (can continue identifier: alphanumeric or underscore)
+    ast.foreignBinding("isIdentChar", fn(tChar, tBool)),
   ],
 );
 

@@ -88,6 +88,18 @@ const $foreign = {
       return $con("Just", s[i]);
     },
 
+    // head : String -> Maybe Char
+    head: (s) => {
+      if (s.length === 0) return $con("Nothing");
+      return $con("Just", s[0]);
+    },
+
+    // tail : String -> String
+    tail: (s) => (s.length === 0 ? "" : s.slice(1)),
+
+    // isEmpty : String -> Bool
+    isEmpty: (s) => s.length === 0,
+
     // toList : String -> List Char
     toList: (s) => {
       let result = $con("Nil");
@@ -202,6 +214,13 @@ const $foreign = {
 
     // toLower : Char -> Char
     toLower: (c) => c.toLowerCase(),
+
+    // isIdentStart : Char -> Bool (can start identifier: alpha or underscore)
+    isIdentStart: (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c === "_",
+
+    // isIdentChar : Char -> Bool (can continue identifier: alphanumeric or underscore)
+    isIdentChar: (c) =>
+      (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c === "_",
   },
 
   // ==========================================================================

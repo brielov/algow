@@ -34,48 +34,20 @@ type Token
 type LexResult = LexResult Token string
 
 -- =============================================================================
--- CHARACTER HELPERS
--- =============================================================================
-
--- Get first character of string as Maybe Char
-let stringHead s =
-  if String.length s == 0
-  then Nothing
-  else String.charAt 0 s
-
--- Get string without first character
-let stringTail s =
-  if String.length s == 0
-  then ""
-  else String.substring 1 (String.length s) s
-
--- Check if string is empty
-let stringIsEmpty s = String.length s == 0
-
--- Check if character is whitespace
-let isWhitespace c = c == ' ' || c == '\t' || c == '\n' || c == '\r'
-
--- Check if character can start an identifier
-let isIdentStart c = Char.isAlpha c || c == '_'
-
--- Check if character can continue an identifier
-let isIdentChar c = Char.isAlphaNum c || c == '_'
-
--- =============================================================================
 -- SKIP WHITESPACE AND COMMENTS
 -- =============================================================================
 
 let rec skipWhitespace s =
-  match stringHead s
-    when Just c if isWhitespace c -> skipWhitespace (stringTail s)
+  match String.head s
+    when Just c if Char.isSpace c -> skipWhitespace (String.tail s)
     when _ -> s
   end
 
 -- Skip line comment (starts with --)
 let rec skipLineComment s =
-  match stringHead s
-    when Just '\n' -> stringTail s
-    when Just _ -> skipLineComment (stringTail s)
+  match String.head s
+    when Just '\n' -> String.tail s
+    when Just _ -> skipLineComment (String.tail s)
     when Nothing -> s
   end
 
@@ -92,7 +64,7 @@ let rec skipBlockComment depth s =
     then skipBlockComment (depth + 1) (String.substring 2 (String.length s) s)
     else if c1 + c2 == "-}"
     then skipBlockComment (depth - 1) (String.substring 2 (String.length s) s)
-    else skipBlockComment depth (stringTail s)
+    else skipBlockComment depth (String.tail s)
 
 -- Skip all whitespace and comments
 let rec skipWsAndComments s =
@@ -112,31 +84,38 @@ let rec skipWsAndComments s =
 
 -- Collect identifier characters
 let rec collectIdent acc s =
-  match stringHead s
-    when Just c if isIdentChar c -> collectIdent (acc + Char.toString c) (stringTail s)
+  match String.head s
+    when Just c if Char.isIdentChar c -> collectIdent (acc + Char.toString c) (String.tail s)
     when _ -> (acc, s)
   end
 
+-- Keyword lookup table
+let keywords = Map.fromList [
+  ("let", TkLet),
+  ("rec", TkRec),
+  ("in", TkIn),
+  ("if", TkIf),
+  ("then", TkThen),
+  ("else", TkElse),
+  ("match", TkMatch),
+  ("when", TkWhen),
+  ("end", TkEnd),
+  ("type", TkType),
+  ("as", TkAs),
+  ("and", TkAnd),
+  ("true", TkTrue),
+  ("false", TkFalse),
+  ("module", TkModule),
+  ("use", TkUse),
+  ("foreign", TkForeign)
+]
+
 -- Check if identifier is a keyword and return appropriate token
 let identToToken ident =
-  if ident == "let" then TkLet
-  else if ident == "rec" then TkRec
-  else if ident == "in" then TkIn
-  else if ident == "if" then TkIf
-  else if ident == "then" then TkThen
-  else if ident == "else" then TkElse
-  else if ident == "match" then TkMatch
-  else if ident == "when" then TkWhen
-  else if ident == "end" then TkEnd
-  else if ident == "type" then TkType
-  else if ident == "as" then TkAs
-  else if ident == "and" then TkAnd
-  else if ident == "true" then TkTrue
-  else if ident == "false" then TkFalse
-  else if ident == "module" then TkModule
-  else if ident == "use" then TkUse
-  else if ident == "foreign" then TkForeign
-  else TkLower ident
+  match Map.lookup ident keywords
+    when Just tok -> tok
+    when Nothing -> TkLower ident
+  end
 
 -- =============================================================================
 -- NUMBER LEXING
@@ -144,8 +123,8 @@ let identToToken ident =
 
 -- Collect digits
 let rec collectDigits acc s =
-  match stringHead s
-    when Just c if Char.isDigit c -> collectDigits (acc + Char.toString c) (stringTail s)
+  match String.head s
+    when Just c if Char.isDigit c -> collectDigits (acc + Char.toString c) (String.tail s)
     when _ -> (acc, s)
   end
 
@@ -168,7 +147,7 @@ let lexNumber s =
     when (digits, rest) ->
       if startsWithDotDigit rest then
         -- It's a float
-        let rest2 = stringTail rest in
+        let rest2 = String.tail rest in
         match collectDigits "" rest2
           when (frac, rest3) ->
             match Float.fromString (digits + "." + frac)
@@ -190,29 +169,29 @@ let lexNumber s =
 
 -- Lex escape sequence, returns the escaped character
 let lexEscape s =
-  match stringHead s
+  match String.head s
     when Nothing -> (Nothing, s)
     when Just c ->
-      if c == 'n' then (Just '\n', stringTail s)
-      else if c == 't' then (Just '\t', stringTail s)
-      else if c == 'r' then (Just '\r', stringTail s)
-      else if c == '\\' then (Just '\\', stringTail s)
-      else if c == '"' then (Just '"', stringTail s)
-      else if c == '\'' then (Just '\'', stringTail s)
+      if c == 'n' then (Just '\n', String.tail s)
+      else if c == 't' then (Just '\t', String.tail s)
+      else if c == 'r' then (Just '\r', String.tail s)
+      else if c == '\\' then (Just '\\', String.tail s)
+      else if c == '"' then (Just '"', String.tail s)
+      else if c == '\'' then (Just '\'', String.tail s)
       else (Nothing, s)
   end
 
 -- Collect string contents until closing quote
 let rec collectString acc s =
-  match stringHead s
+  match String.head s
     when Nothing -> (Nothing, s)  -- Unterminated string
-    when Just '"' -> (Just acc, stringTail s)
+    when Just '"' -> (Just acc, String.tail s)
     when Just '\\' ->
-      match lexEscape (stringTail s)
+      match lexEscape (String.tail s)
         when (Just escaped, rest) -> collectString (acc + Char.toString escaped) rest
         when (Nothing, rest) -> (Nothing, rest)  -- Invalid escape
       end
-    when Just c -> collectString (acc + Char.toString c) (stringTail s)
+    when Just c -> collectString (acc + Char.toString c) (String.tail s)
   end
 
 -- =============================================================================
@@ -221,25 +200,25 @@ let rec collectString acc s =
 
 -- Check if next char is closing single quote
 let nextIsClosingQuote s =
-  match stringHead s
+  match String.head s
     when Just c -> c == '\''
     when Nothing -> false
   end
 
 let lexChar s =
-  match stringHead s
+  match String.head s
     when Nothing -> LexResult (TkError "Unterminated char") s
     when Just '\\' ->
-      match lexEscape (stringTail s)
+      match lexEscape (String.tail s)
         when (Just escaped, rest) if nextIsClosingQuote rest ->
-          LexResult (TkChar escaped) (stringTail rest)
+          LexResult (TkChar escaped) (String.tail rest)
         when (Just _, rest) -> LexResult (TkError "Unterminated char") rest
         when (Nothing, rest) -> LexResult (TkError "Invalid escape in char") rest
       end
     when Just c ->
-      let rest = stringTail s in
+      let rest = String.tail s in
       if nextIsClosingQuote rest
-      then LexResult (TkChar c) (stringTail rest)
+      then LexResult (TkChar c) (String.tail rest)
       else LexResult (TkError "Unterminated char") rest
   end
 
@@ -249,17 +228,17 @@ let lexChar s =
 
 -- Helper to lex two-char operator or fallback to single-char
 let lexTwoCharOp secondChar twoCharTok oneCharTok rest =
-  match stringHead rest
+  match String.head rest
     when Just c ->
       if c == secondChar
-      then LexResult twoCharTok (stringTail rest)
+      then LexResult twoCharTok (String.tail rest)
       else LexResult oneCharTok rest
     when Nothing -> LexResult oneCharTok rest
   end
 
 let lexToken s =
   let s2 = skipWsAndComments s in
-  match stringHead s2
+  match String.head s2
     when Nothing -> LexResult TkEof s2
     when Just c ->
       -- Identifiers and keywords (lowercase or underscore)
@@ -276,34 +255,34 @@ let lexToken s =
       else if Char.isDigit c then lexNumber s2
       -- Strings
       else if c == '"' then
-        match collectString "" (stringTail s2)
+        match collectString "" (String.tail s2)
           when (Just str, rest) -> LexResult (TkString str) rest
           when (Nothing, rest) -> LexResult (TkError "Unterminated string") rest
         end
       -- Characters
-      else if c == '\'' then lexChar (stringTail s2)
+      else if c == '\'' then lexChar (String.tail s2)
       -- Two-character operators
-      else if c == '-' then lexTwoCharOp '>' TkArrow TkMinus (stringTail s2)
-      else if c == '=' then lexTwoCharOp '=' TkEqEq TkEq (stringTail s2)
-      else if c == '!' then lexTwoCharOp '=' TkNe (TkError "Unexpected '!'") (stringTail s2)
-      else if c == '<' then lexTwoCharOp '=' TkLe TkLt (stringTail s2)
-      else if c == '>' then lexTwoCharOp '=' TkGe TkGt (stringTail s2)
-      else if c == '|' then lexTwoCharOp '>' TkPipe TkBar (stringTail s2)
-      else if c == ':' then lexTwoCharOp ':' TkColonColon TkColon (stringTail s2)
+      else if c == '-' then lexTwoCharOp '>' TkArrow TkMinus (String.tail s2)
+      else if c == '=' then lexTwoCharOp '=' TkEqEq TkEq (String.tail s2)
+      else if c == '!' then lexTwoCharOp '=' TkNe (TkError "Unexpected '!'") (String.tail s2)
+      else if c == '<' then lexTwoCharOp '=' TkLe TkLt (String.tail s2)
+      else if c == '>' then lexTwoCharOp '=' TkGe TkGt (String.tail s2)
+      else if c == '|' then lexTwoCharOp '>' TkPipe TkBar (String.tail s2)
+      else if c == ':' then lexTwoCharOp ':' TkColonColon TkColon (String.tail s2)
       -- Single-character tokens
-      else if c == '+' then LexResult TkPlus (stringTail s2)
-      else if c == '*' then LexResult TkStar (stringTail s2)
-      else if c == '/' then LexResult TkSlash (stringTail s2)
-      else if c == ',' then LexResult TkComma (stringTail s2)
-      else if c == '.' then LexResult TkDot (stringTail s2)
-      else if c == '(' then LexResult TkLParen (stringTail s2)
-      else if c == ')' then LexResult TkRParen (stringTail s2)
-      else if c == '{' then LexResult TkLBrace (stringTail s2)
-      else if c == '}' then LexResult TkRBrace (stringTail s2)
-      else if c == '[' then LexResult TkLBracket (stringTail s2)
-      else if c == ']' then LexResult TkRBracket (stringTail s2)
+      else if c == '+' then LexResult TkPlus (String.tail s2)
+      else if c == '*' then LexResult TkStar (String.tail s2)
+      else if c == '/' then LexResult TkSlash (String.tail s2)
+      else if c == ',' then LexResult TkComma (String.tail s2)
+      else if c == '.' then LexResult TkDot (String.tail s2)
+      else if c == '(' then LexResult TkLParen (String.tail s2)
+      else if c == ')' then LexResult TkRParen (String.tail s2)
+      else if c == '{' then LexResult TkLBrace (String.tail s2)
+      else if c == '}' then LexResult TkRBrace (String.tail s2)
+      else if c == '[' then LexResult TkLBracket (String.tail s2)
+      else if c == ']' then LexResult TkRBracket (String.tail s2)
       -- Unknown character
-      else LexResult (TkError ("Unexpected character: " + Char.toString c)) (stringTail s2)
+      else LexResult (TkError ("Unexpected character: " + Char.toString c)) (String.tail s2)
   end
 
 -- =============================================================================

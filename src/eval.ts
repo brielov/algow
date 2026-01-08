@@ -186,6 +186,16 @@ const foreignRegistry: Record<string, Record<string, Value>> = {
         return vcon("Just", [vchar(str[idx]!)]);
       }),
     ),
+    head: vforeign((s) => {
+      const str = (s as VStr).value;
+      if (str.length === 0) return vcon("Nothing");
+      return vcon("Just", [vchar(str[0]!)]);
+    }),
+    tail: vforeign((s) => {
+      const str = (s as VStr).value;
+      return vstr(str.length === 0 ? "" : str.slice(1));
+    }),
+    isEmpty: vforeign((s) => vbool((s as VStr).value.length === 0)),
     toList: vforeign((s) => {
       const str = (s as VStr).value;
       let result: Value = vcon("Nil");
@@ -284,6 +294,16 @@ const foreignRegistry: Record<string, Record<string, Value>> = {
     }),
     toUpper: vforeign((c) => vchar((c as VChar).value.toUpperCase())),
     toLower: vforeign((c) => vchar((c as VChar).value.toLowerCase())),
+    isIdentStart: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_");
+    }),
+    isIdentChar: vforeign((c) => {
+      const ch = (c as VChar).value;
+      return vbool(
+        (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch === "_",
+      );
+    }),
   },
   Int: {
     add: vforeign(curry2((a, b) => vint((a as VInt).value + (b as VInt).value))),
