@@ -50,6 +50,7 @@ import {
 import {
   check,
   type ConstructorRegistry,
+  type ForeignMap,
   type ModuleTypeEnv,
   processModules,
   processUseStatements,
@@ -66,6 +67,7 @@ import { lowerToIR } from "../lower";
 import { generateJS } from "../backend/js";
 import { generateGo } from "../backend/go";
 import { printIR } from "../ir";
+import { optimize } from "../optimize";
 
 import { positionToOffset, spanToRange } from "./positions";
 import {
@@ -94,7 +96,7 @@ const preludeUses: ast.UseDecl[] = preludeModules.map((mod) =>
  */
 const preludeCache = (() => {
   const moduleEnv = processModules(preludeModules);
-  const { localEnv, localRegistry, constructorNames } = processUseStatements(
+  const { localEnv, localRegistry, constructorNames, foreignFunctions } = processUseStatements(
     preludeUses,
     moduleEnv,
   );
@@ -103,6 +105,7 @@ const preludeCache = (() => {
     typeEnv: localEnv,
     registry: localRegistry,
     constructorNames: [...constructorNames],
+    foreignFunctions,
   };
 })();
 
@@ -116,7 +119,10 @@ const processProgram = (program: Program) => {
   if (program.modules.length > 0) {
     // User has custom modules - need to reprocess all
     const moduleEnv = processModules(allModules);
-    const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
+    const { localEnv, localRegistry, constructorNames, foreignFunctions } = processUseStatements(
+      allUses,
+      moduleEnv,
+    );
     return {
       typeEnv: localEnv,
       registry: localRegistry,
@@ -124,12 +130,13 @@ const processProgram = (program: Program) => {
       allModules,
       allUses,
       moduleEnv,
+      foreignFunctions,
     };
   }
 
   // No user modules - use cached prelude, only process user use statements
   if (program.uses.length > 0) {
-    const { localEnv, localRegistry, constructorNames } = processUseStatements(
+    const { localEnv, localRegistry, constructorNames, foreignFunctions } = processUseStatements(
       allUses,
       preludeCache.moduleEnv,
     );
@@ -140,6 +147,7 @@ const processProgram = (program: Program) => {
       allModules,
       allUses,
       moduleEnv: preludeCache.moduleEnv,
+      foreignFunctions,
     };
   }
 
@@ -151,6 +159,7 @@ const processProgram = (program: Program) => {
     allModules,
     allUses,
     moduleEnv: preludeCache.moduleEnv,
+    foreignFunctions: preludeCache.foreignFunctions,
   };
 };
 
@@ -172,6 +181,7 @@ type DocumentState = {
   readonly allModules: readonly ast.ModuleDecl[];
   readonly allUses: readonly ast.UseDecl[];
   readonly moduleEnv: ModuleTypeEnv;
+  readonly foreignFunctions: ForeignMap;
 };
 
 // =============================================================================
@@ -236,6 +246,7 @@ type EvaluateResult = {
 
 type CompileParams = {
   readonly textDocument: TextDocumentIdentifier;
+  readonly optimize?: boolean;
 };
 
 type CompileResult = {
@@ -246,6 +257,7 @@ type CompileResult = {
 
 type EmitIRParams = {
   readonly textDocument: TextDocumentIdentifier;
+  readonly optimize?: boolean;
 };
 
 type EmitIRResult = {
@@ -256,6 +268,7 @@ type EmitIRResult = {
 
 type CompileGoParams = {
   readonly textDocument: TextDocumentIdentifier;
+  readonly optimize?: boolean;
 };
 
 type CompileGoResult = {
@@ -767,7 +780,12 @@ export const createServer = (transport: Transport): void => {
       const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
 
       // Lower to IR
-      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions);
+
+      // Optimize if requested
+      if (params.optimize) {
+        ir = optimize(ir);
+      }
 
       // Generate JavaScript
       const { code } = generateJS(ir, doc.constructorNames);
@@ -799,7 +817,12 @@ export const createServer = (transport: Transport): void => {
       const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
 
       // Lower to IR
-      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions);
+
+      // Optimize if requested
+      if (params.optimize) {
+        ir = optimize(ir);
+      }
 
       // Print IR
       const irText = printIR(ir);
@@ -831,7 +854,12 @@ export const createServer = (transport: Transport): void => {
       const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
 
       // Lower to IR
-      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions);
+
+      // Optimize if requested
+      if (params.optimize) {
+        ir = optimize(ir);
+      }
 
       // Generate Go
       const { code } = generateGo(ir, doc.constructorNames);
@@ -853,9 +881,15 @@ export const createServer = (transport: Transport): void => {
     }
 
     // Process prelude + user modules
-    const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv } = processProgram(
-      parseResult.program,
-    );
+    const {
+      typeEnv,
+      registry,
+      constructorNames,
+      allModules,
+      allUses,
+      moduleEnv,
+      foreignFunctions,
+    } = processProgram(parseResult.program);
 
     // Convert to expression (includes module bindings)
     const expr = programToExpr(parseResult.program, allModules, allUses);
@@ -894,6 +928,7 @@ export const createServer = (transport: Transport): void => {
       allModules,
       allUses,
       moduleEnv,
+      foreignFunctions,
     };
   };
 

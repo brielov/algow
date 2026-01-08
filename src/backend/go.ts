@@ -195,6 +195,10 @@ const genTypedAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
       return toGoId(name);
     }
 
+    case "IRForeignVar":
+      // Foreign function: access from Foreign registry
+      return `Foreign["${atom.module}"]["${atom.name}"]`;
+
     default:
       return assertNever(atom);
   }
@@ -281,6 +285,10 @@ const genAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
       }
       return toGoId(name);
     }
+
+    case "IRForeignVar":
+      // Foreign function: access from Foreign registry
+      return `Foreign["${atom.module}"]["${atom.name}"]`;
 
     default:
       return assertNever(atom);

@@ -160,6 +160,22 @@ export interface LetRec extends Node {
   readonly body: Expr;
 }
 
+/**
+ * Foreign binding - declares a value with a known type but no implementation.
+ *
+ * Syntax: foreign name : type
+ * Example: foreign length : String -> Int
+ *
+ * Foreign bindings are used to declare functions that are provided by the runtime.
+ * The type is trusted by the compiler - no implementation is required in Algow.
+ * Each backend (JS, Go) must provide the actual implementation.
+ */
+export interface ForeignBinding extends Node {
+  readonly name: string;
+  readonly nameSpan?: Span;
+  readonly type: TypeExpr;
+}
+
 // -----------------------------------------------------------------------------
 // Variables and Functions
 // -----------------------------------------------------------------------------
@@ -676,6 +692,7 @@ export interface ModuleDecl extends Node {
   readonly nameSpan?: Span;
   readonly declarations: readonly DataDecl[];
   readonly bindings: readonly RecBinding[];
+  readonly foreignBindings: readonly ForeignBinding[];
 }
 
 /**
@@ -1009,6 +1026,7 @@ export const moduleDecl = (
   name: string,
   declarations: readonly DataDecl[],
   bindings: readonly RecBinding[],
+  foreignBindings: readonly ForeignBinding[] = [],
   span?: Span,
   nameSpan?: Span,
 ): ModuleDecl => ({
@@ -1017,6 +1035,19 @@ export const moduleDecl = (
   nameSpan,
   declarations,
   bindings,
+  foreignBindings,
+  span,
+});
+
+export const foreignBinding = (
+  name: string,
+  type: TypeExpr,
+  span?: Span,
+  nameSpan?: Span,
+): ForeignBinding => ({
+  name,
+  nameSpan,
+  type,
   span,
 });
 

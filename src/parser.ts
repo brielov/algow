@@ -447,6 +447,7 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
 
   const declarations: ast.DataDecl[] = [];
   const bindings: ast.RecBinding[] = [];
+  const foreignBindings: ast.ForeignBinding[] = [];
 
   while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
     if (at(state, TokenKind.Type)) {
@@ -455,8 +456,11 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
     } else if (at(state, TokenKind.Let)) {
       const binding = parseModuleBinding(state);
       if (binding) bindings.push(binding);
+    } else if (at(state, TokenKind.Foreign)) {
+      const foreign = parseForeignBinding(state);
+      if (foreign) foreignBindings.push(foreign);
     } else {
-      error(state, "expected 'data' or 'let' declaration in module");
+      error(state, "expected 'type', 'let', or 'foreign' declaration in module");
       advance(state);
     }
   }
@@ -464,7 +468,37 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
   const endToken = expect(state, TokenKind.End, "expected 'end' after module body");
   const end = endToken ? endToken[2] : state.current[1];
 
-  return ast.moduleDecl(name, declarations, bindings, span(start, end), nameSpan);
+  return ast.moduleDecl(name, declarations, bindings, foreignBindings, span(start, end), nameSpan);
+};
+
+/**
+ * Parse a foreign declaration: foreign name : type
+ */
+const parseForeignBinding = (state: ParserState): ast.ForeignBinding | null => {
+  const start = state.current[1];
+  advance(state); // 'foreign'
+
+  const nameToken = expect(state, TokenKind.Lower, "expected foreign function name");
+  if (!nameToken) {
+    synchronize(state);
+    return null;
+  }
+  const name = text(state, nameToken);
+  const nameSpan = tokenSpan(nameToken);
+
+  if (!expect(state, TokenKind.Colon, "expected ':' after foreign function name")) {
+    synchronize(state);
+    return null;
+  }
+
+  const type = parseType(state);
+  if (!type) {
+    error(state, "expected type after ':'");
+    synchronize(state);
+    return null;
+  }
+
+  return ast.foreignBinding(name, type, span(start, state.current[1]), nameSpan);
 };
 
 /**
@@ -651,7 +685,7 @@ const parseTypeAtom = (state: ParserState): ast.TypeExpr | null => {
 
   if (at(state, TokenKind.LParen)) {
     advance(state);
-    const inner = parseTypeAtom(state);
+    const inner = parseType(state); // Use parseType to handle function types inside parens
     expect(state, TokenKind.RParen, "expected ')' after type");
     return inner;
   }
@@ -670,7 +704,7 @@ const parseTypeAtomSimple = (state: ParserState): ast.TypeExpr | null => {
 
   if (at(state, TokenKind.LParen)) {
     advance(state);
-    const inner = parseTypeAtom(state);
+    const inner = parseType(state); // Use parseType to handle function types inside parens
     expect(state, TokenKind.RParen, "expected ')' after type");
     return inner;
   }

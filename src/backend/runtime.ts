@@ -63,4 +63,11 @@ const $eq = (a, b) => {
   return keysA.every(k => k in b && $eq(a[k], b[k]));
 };
 
+/**
+ * Foreign function registry.
+ * Modules provide their foreign function implementations here.
+ * Structure: { ModuleName: { functionName: implementation } }
+ */
+const $foreign = {};
+
 `;

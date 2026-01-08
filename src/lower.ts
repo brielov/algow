@@ -19,7 +19,17 @@
 
 import * as ast from "./ast";
 import * as ir from "./ir";
-import { applySubst, type CheckOutput, type Subst, type Type, type TypeEnv } from "./checker";
+import {
+  applySubst,
+  type CheckOutput,
+  type ForeignMap,
+  type Subst,
+  type Type,
+  type TypeEnv,
+} from "./checker";
+
+// Re-export ForeignMap for consumers
+export type { ForeignMap };
 
 /** Helper for exhaustive switch checking - TypeScript will error if called with non-never */
 const assertNever = (x: never): never => {
@@ -39,13 +49,20 @@ type LowerContext = {
   subst: Subst;
   /** Direct span to type mapping from type checker */
   spanTypes: ReadonlyMap<string, Type>;
+  /** Map from local names to foreign function info */
+  foreignFunctions: ForeignMap;
 };
 
-const createContext = (typeEnv: TypeEnv, checkOutput: CheckOutput): LowerContext => ({
+const createContext = (
+  typeEnv: TypeEnv,
+  checkOutput: CheckOutput,
+  foreignFunctions: ForeignMap = new Map(),
+): LowerContext => ({
   varCounter: 0,
   typeEnv: new Map(typeEnv),
   subst: checkOutput.subst,
   spanTypes: checkOutput.spanTypes,
+  foreignFunctions,
 });
 
 /** Generate a fresh variable name */
@@ -141,6 +158,11 @@ const normalize = (ctx: LowerContext, expr: ast.Expr): NormalizeResult => {
       return { bindings: [], atom: ir.irLit(expr.value, tBool) };
     case "Var": {
       const type = lookupType(ctx, expr.name);
+      // Check if this is a foreign function
+      const foreignInfo = ctx.foreignFunctions.get(expr.name);
+      if (foreignInfo) {
+        return { bindings: [], atom: ir.irForeignVar(foreignInfo.module, foreignInfo.name, type) };
+      }
       return { bindings: [], atom: ir.irVar(expr.name, type) };
     }
   }
@@ -259,6 +281,11 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
 
     case "Var": {
       const type = lookupType(ctx, expr.name);
+      // Check if this is a foreign function
+      const foreignInfo = ctx.foreignFunctions.get(expr.name);
+      if (foreignInfo) {
+        return ir.irAtomExpr(ir.irForeignVar(foreignInfo.module, foreignInfo.name, type));
+      }
       return ir.irAtomExpr(ir.irVar(expr.name, type));
     }
 
@@ -785,13 +812,15 @@ const extendPatternBindings = (ctx: LowerContext, pattern: ast.Pattern, type: Ty
  * @param expr The AST expression to lower
  * @param typeEnv The type environment (includes constructors and prelude)
  * @param checkOutput The output from type checking
+ * @param foreignFunctions Map of local names to foreign function info
  * @returns The IR expression in ANF
  */
 export const lowerToIR = (
   expr: ast.Expr,
   typeEnv: TypeEnv,
   checkOutput: CheckOutput,
+  foreignFunctions: ForeignMap = new Map(),
 ): ir.IRExpr => {
-  const ctx = createContext(typeEnv, checkOutput);
+  const ctx = createContext(typeEnv, checkOutput, foreignFunctions);
   return lowerExpr(ctx, expr);
 };

@@ -9,6 +9,7 @@ import {
   mergeRegistries,
   processDataDecl,
   processDeclarations,
+  processModule,
   type TypeEnv,
   type ConstructorRegistry,
   typeToString,
@@ -2264,6 +2265,88 @@ describe("Type Inference", () => {
       );
       const { diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("foreign bindings", () => {
+    it("processes module with foreign binding", () => {
+      const mod = ast.moduleDecl(
+        "String",
+        [],
+        [],
+        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("number")))],
+      );
+      const info = processModule(mod);
+      expect(info.typeEnv.has("length")).toBe(true);
+      const lengthScheme = info.typeEnv.get("length")!;
+      expect(typeToString(lengthScheme.type)).toBe("string -> number");
+    });
+
+    it("processes foreign binding with type parameters", () => {
+      // foreign map : (a -> b) -> List a -> List b
+      const mod = ast.moduleDecl(
+        "List",
+        [],
+        [],
+        [
+          ast.foreignBinding(
+            "map",
+            ast.tyfun(
+              ast.tyfun(ast.tyvar("a"), ast.tyvar("b")),
+              ast.tyfun(
+                ast.tyapp(ast.tycon("List"), ast.tyvar("a")),
+                ast.tyapp(ast.tycon("List"), ast.tyvar("b")),
+              ),
+            ),
+          ),
+        ],
+      );
+      const info = processModule(mod);
+      expect(info.typeEnv.has("map")).toBe(true);
+      const mapScheme = info.typeEnv.get("map")!;
+      // Should have quantified type variables
+      expect(mapScheme.vars.length).toBe(2);
+    });
+
+    it("allows regular bindings to use foreign bindings", () => {
+      // module String
+      //   foreign length : string -> number
+      //   let isEmpty s = length s == 0
+      // end
+      const mod = ast.moduleDecl(
+        "String",
+        [],
+        [
+          ast.recBinding(
+            "isEmpty",
+            ast.abs("s", ast.binOp("==", ast.app(ast.var_("length"), ast.var_("s")), ast.num(0))),
+          ),
+        ],
+        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("number")))],
+      );
+      const info = processModule(mod);
+      expect(info.typeEnv.has("isEmpty")).toBe(true);
+      const isEmptyScheme = info.typeEnv.get("isEmpty")!;
+      expect(typeToString(isEmptyScheme.type)).toBe("string -> boolean");
+    });
+
+    it("processes multiple foreign bindings", () => {
+      const mod = ast.moduleDecl(
+        "String",
+        [],
+        [],
+        [
+          ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("number"))),
+          ast.foreignBinding(
+            "concat",
+            ast.tyfun(ast.tycon("string"), ast.tyfun(ast.tycon("string"), ast.tycon("string"))),
+          ),
+        ],
+      );
+      const info = processModule(mod);
+      expect(info.typeEnv.has("length")).toBe(true);
+      expect(info.typeEnv.has("concat")).toBe(true);
+      expect(typeToString(info.typeEnv.get("concat")!.type)).toBe("string -> string -> string");
     });
   });
 });

@@ -160,4 +160,8 @@ func boolToInt(b bool) int64 {
 	return 0
 }
 
+// Foreign is the registry for foreign function implementations.
+// Structure: Foreign["ModuleName"]["functionName"] = implementation
+var Foreign = map[string]map[string]Value{}
+
 `;

@@ -63,6 +63,9 @@ const freeVarsAtom = (atom: ir.IRAtom, bound: Set<string>): Set<string> => {
       return new Set();
     case "IRVar":
       return bound.has(atom.name) ? new Set() : new Set([atom.name]);
+    case "IRForeignVar":
+      // Foreign variables are provided by runtime, not free variables
+      return new Set();
   }
 };
 

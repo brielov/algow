@@ -594,6 +594,48 @@ describe("Runtime", () => {
   });
 });
 
+describe("Foreign Functions", () => {
+  it("generates foreign function reference with $foreign lookup", () => {
+    const fnType_ = funType(strType, numType);
+    const foreignVar = ir.irForeignVar("String", "length", fnType_);
+    const expr = ir.irAtomExpr(foreignVar);
+    const result = generateJS(expr, []);
+    expect(result.code).toContain('$foreign["String"]["length"]');
+  });
+
+  it("generates foreign function application", () => {
+    const fnType_ = funType(strType, numType);
+    const foreignVar = ir.irForeignVar("String", "length", fnType_);
+    const binding = ir.irAppBinding(foreignVar, ir.irLit("hello", strType), numType);
+    const body = ir.irAtomExpr(ir.irVar("_t", numType));
+    const expr = ir.irLet("_t", binding, body);
+    const result = generateJS(expr, []);
+    expect(result.code).toContain('$foreign["String"]["length"]("hello")');
+  });
+
+  it("generates curried foreign function applications", () => {
+    // slice "hello" 0 - returns a function
+    const sliceType = funType(strType, funType(numType, funType(numType, strType)));
+    const partialSliceType = funType(numType, funType(numType, strType));
+
+    const foreignVar = ir.irForeignVar("String", "slice", sliceType);
+
+    // First application: slice "hello"
+    const binding1 = ir.irAppBinding(foreignVar, ir.irLit("hello", strType), partialSliceType);
+    const body1 = ir.irAtomExpr(ir.irVar("_t1", partialSliceType));
+    const expr = ir.irLet("_t1", binding1, body1);
+
+    const result = generateJS(expr, []);
+    expect(result.code).toContain('$foreign["String"]["slice"]("hello")');
+  });
+
+  it("includes $foreign in runtime", () => {
+    const expr = ir.irAtomExpr(ir.irLit(42, numType));
+    const result = generateJS(expr, []);
+    expect(result.code).toContain("const $foreign = {};");
+  });
+});
+
 describe("TCO (Tail Call Optimization)", () => {
   it("generates valid JS for recursive function with pattern matching", () => {
     // This is a simpler test that just verifies the code is syntactically valid

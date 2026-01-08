@@ -124,6 +124,10 @@ const genAtom = (ctx: CodeGenContext, atom: ir.IRAtom): string => {
       return toJsId(atom.name);
     }
 
+    case "IRForeignVar":
+      // Foreign function: look up in the $foreign runtime object
+      return `$foreign["${atom.module}"]["${atom.name}"]`;
+
     default:
       return assertNever(atom);
   }

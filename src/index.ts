@@ -111,10 +111,8 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
 
   // Process modules and use statements
   const moduleEnv = processModules(allModules);
-  const { localEnv, localRegistry, constructorNames, aliases } = processUseStatements(
-    allUses,
-    moduleEnv,
-  );
+  const { localEnv, localRegistry, constructorNames, aliases, foreignFunctions } =
+    processUseStatements(allUses, moduleEnv);
 
   // Process top-level type declarations
   const {
@@ -140,6 +138,7 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
     allUses,
     moduleEnv,
     aliases,
+    foreignFunctions,
   };
 };
 
@@ -212,8 +211,16 @@ const emitIR = (source: string, filename: string): void => {
     process.exit(1);
   }
 
-  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
-    processProgram(parseResult);
+  const {
+    typeEnv,
+    registry,
+    constructorNames,
+    allModules,
+    allUses,
+    moduleEnv,
+    aliases,
+    foreignFunctions,
+  } = processProgram(parseResult);
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
@@ -232,7 +239,7 @@ const emitIR = (source: string, filename: string): void => {
   }
 
   // Lower to IR
-  const ir = lowerToIR(expr, typeEnv, checkResult);
+  const ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions);
   console.log(JSON.stringify(ir, null, 2));
 };
 
@@ -244,8 +251,16 @@ const compile = (source: string, filename: string): void => {
     process.exit(1);
   }
 
-  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
-    processProgram(parseResult);
+  const {
+    typeEnv,
+    registry,
+    constructorNames,
+    allModules,
+    allUses,
+    moduleEnv,
+    aliases,
+    foreignFunctions,
+  } = processProgram(parseResult);
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
@@ -264,7 +279,7 @@ const compile = (source: string, filename: string): void => {
   }
 
   // Lower to IR, optimize, and generate JS
-  let ir = lowerToIR(expr, typeEnv, checkResult);
+  let ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions);
   ir = optimize(ir);
   const output = generateJS(ir, constructorNames);
 
@@ -284,8 +299,16 @@ const compileToGo = (source: string, filename: string): void => {
     process.exit(1);
   }
 
-  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
-    processProgram(parseResult);
+  const {
+    typeEnv,
+    registry,
+    constructorNames,
+    allModules,
+    allUses,
+    moduleEnv,
+    aliases,
+    foreignFunctions,
+  } = processProgram(parseResult);
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
@@ -304,7 +327,7 @@ const compileToGo = (source: string, filename: string): void => {
   }
 
   // Lower to IR, optimize, and generate Go
-  let ir = lowerToIR(expr, typeEnv, checkResult);
+  let ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions);
   ir = optimize(ir);
   const output = generateGo(ir, constructorNames);
 

@@ -277,6 +277,19 @@ describe("Lexer", () => {
       expect(tok[0]).toBe(TokenKind.Lower);
       expect(slice(state, tok[1], tok[2])).toBe("lettuce");
     });
+
+    it("lexes 'foreign' keyword", () => {
+      const state = createLexer("foreign");
+      expect(nextToken(state)[0]).toBe(TokenKind.Foreign);
+    });
+
+    it("distinguishes 'foreign' from similar identifiers", () => {
+      const state = createLexer("foreign foreigner");
+      expect(nextToken(state)[0]).toBe(TokenKind.Foreign);
+      const tok = nextToken(state);
+      expect(tok[0]).toBe(TokenKind.Lower);
+      expect(slice(state, tok[1], tok[2])).toBe("foreigner");
+    });
   });
 
   describe("operators", () => {

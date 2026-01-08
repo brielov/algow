@@ -412,6 +412,8 @@ export type ModuleTypeInfo = {
   readonly typeEnv: TypeEnv;
   readonly registry: ConstructorRegistry;
   readonly constructorNames: readonly string[];
+  /** Names of foreign functions declared in this module */
+  readonly foreignNames: ReadonlySet<string>;
 };
 
 /**
@@ -2997,6 +2999,16 @@ export const processModule = (
   const fullRegistry: ConstructorRegistry = new Map(baseRegistry);
   for (const [k, v] of registry) fullRegistry.set(k, v);
 
+  // Process foreign bindings - these have declared types but no implementation
+  const foreignNames = new Set<string>();
+  for (const foreign of mod.foreignBindings) {
+    const type = typeExprToType(foreign.type);
+    // Generalize over all free type variables (empty env = quantify over all)
+    const foreignScheme = generalize(new Map(), type);
+    env.set(foreign.name, foreignScheme);
+    foreignNames.add(foreign.name);
+  }
+
   // Type-check module bindings using the same algorithm as inferLetRec
   if (mod.bindings.length > 0) {
     // Use empty symbol table for module type-checking (no LSP features needed)
@@ -3042,7 +3054,7 @@ export const processModule = (
     }
   }
 
-  return { typeEnv: env, registry: fullRegistry, constructorNames };
+  return { typeEnv: env, registry: fullRegistry, constructorNames, foreignNames };
 };
 
 /**
@@ -3068,6 +3080,15 @@ export const processModules = (modules: readonly ast.ModuleDecl[]): ModuleTypeEn
   return result;
 };
 
+/** Info about a foreign function for code generation */
+export type ForeignInfo = {
+  readonly module: string;
+  readonly name: string;
+};
+
+/** Map from local name to foreign function info */
+export type ForeignMap = ReadonlyMap<string, ForeignInfo>;
+
 /**
  * Process use statements to build local type environment and aliases.
  */
@@ -3079,11 +3100,13 @@ export const processUseStatements = (
   localRegistry: ConstructorRegistry;
   constructorNames: string[];
   aliases: Map<string, string>;
+  foreignFunctions: ForeignMap;
 } => {
   const localEnv: TypeEnv = new Map();
   const localRegistry: ConstructorRegistry = new Map();
   const constructorNames: string[] = [];
   const aliases = new Map<string, string>();
+  const foreignFunctions = new Map<string, ForeignInfo>();
 
   for (const use of uses) {
     // Track alias
@@ -3103,6 +3126,10 @@ export const processUseStatements = (
       // Import everything unqualified
       for (const [name, scheme] of mod.typeEnv) {
         localEnv.set(name, scheme);
+        // Track if this is a foreign function
+        if (mod.foreignNames.has(name)) {
+          foreignFunctions.set(name, { module: use.moduleName, name });
+        }
       }
       for (const [typeName, cons] of mod.registry) {
         localRegistry.set(typeName, cons);
@@ -3114,6 +3141,10 @@ export const processUseStatements = (
         const scheme = mod.typeEnv.get(item.name);
         if (scheme) {
           localEnv.set(item.name, scheme);
+          // Track if this is a foreign function
+          if (mod.foreignNames.has(item.name)) {
+            foreignFunctions.set(item.name, { module: use.moduleName, name: item.name });
+          }
         }
 
         // Handle constructor imports for types
@@ -3147,7 +3178,7 @@ export const processUseStatements = (
     // If imports is null, only qualified access is available (no unqualified imports)
   }
 
-  return { localEnv, localRegistry, constructorNames, aliases };
+  return { localEnv, localRegistry, constructorNames, aliases, foreignFunctions };
 };
 
 // =============================================================================

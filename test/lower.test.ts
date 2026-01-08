@@ -656,4 +656,95 @@ describe("lowerToIR", () => {
       );
     });
   });
+
+  describe("Foreign functions", () => {
+    it("lowers foreign function reference to IRForeignVar", () => {
+      // Simulate a foreign function 'length' from 'String' module
+      const expr = ast.var_("length");
+      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const foreignFunctions = new Map([["length", { module: "String", name: "length" }]]);
+
+      const ir = lowerToIR(expr, env, makeCheckOutput(), foreignFunctions);
+
+      expect(ir.kind).toBe("IRAtomExpr");
+      if (ir.kind === "IRAtomExpr") {
+        expect(ir.atom.kind).toBe("IRForeignVar");
+        if (ir.atom.kind === "IRForeignVar") {
+          expect(ir.atom.module).toBe("String");
+          expect(ir.atom.name).toBe("length");
+        }
+      }
+    });
+
+    it("lowers foreign function application", () => {
+      // length "hello" where length is a foreign function
+      const expr = ast.app(ast.var_("length"), ast.str("hello"));
+      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const foreignFunctions = new Map([["length", { module: "String", name: "length" }]]);
+
+      const ir = lowerToIR(expr, env, makeCheckOutput(), foreignFunctions);
+
+      // Should produce: let _fn0 = length in let _t1 = _fn0 "hello" in _t1
+      // Where length is an IRForeignVar
+      expect(ir.kind).toBe("IRLet");
+    });
+
+    it("lowers multiple foreign functions in same expression", () => {
+      // concat (slice "hello" 0 3) " world"
+      const sliceType = funType(strType, funType(numType, funType(numType, strType)));
+      const concatType = funType(strType, funType(strType, strType));
+
+      const env = makeTypeEnv({
+        slice: sliceType,
+        concat: concatType,
+      });
+      const foreignFunctions = new Map([
+        ["slice", { module: "String", name: "slice" }],
+        ["concat", { module: "String", name: "concat" }],
+      ]);
+
+      // slice "hello" 0
+      const slicePartial = ast.app(ast.app(ast.var_("slice"), ast.str("hello")), ast.num(0));
+      // slice "hello" 0 3
+      const sliceResult = ast.app(slicePartial, ast.num(3));
+      // concat (slice "hello" 0 3) " world"
+      const expr = ast.app(ast.app(ast.var_("concat"), sliceResult), ast.str(" world"));
+
+      const ir = lowerToIR(expr, env, makeCheckOutput(), foreignFunctions);
+
+      // Should compile without errors
+      expect(ir.kind).toBe("IRLet");
+    });
+
+    it("mixes foreign and regular functions", () => {
+      // let double x = x + x in double (length "hi")
+      const doubleBody = ast.binOp("+", ast.var_("x"), ast.var_("x"));
+      const doubleFn = ast.abs("x", doubleBody);
+      const lengthApp = ast.app(ast.var_("length"), ast.str("hi"));
+      const expr = ast.let_("double", doubleFn, ast.app(ast.var_("double"), lengthApp));
+
+      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const foreignFunctions = new Map([["length", { module: "String", name: "length" }]]);
+
+      const ir = lowerToIR(expr, env, makeCheckOutput(), foreignFunctions);
+
+      expect(ir.kind).toBe("IRLet");
+    });
+
+    it("foreign function without ForeignMap falls back to regular variable", () => {
+      // When no foreignFunctions map is provided, 'length' is treated as regular var
+      const expr = ast.var_("length");
+      const env = makeTypeEnv({ length: funType(strType, numType) });
+
+      const ir = lowerToIR(expr, env, makeCheckOutput());
+
+      expect(ir.kind).toBe("IRAtomExpr");
+      if (ir.kind === "IRAtomExpr") {
+        expect(ir.atom.kind).toBe("IRVar");
+        if (ir.atom.kind === "IRVar") {
+          expect(ir.atom.name).toBe("length");
+        }
+      }
+    });
+  });
 });

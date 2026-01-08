@@ -1969,6 +1969,81 @@ describe("Parser", () => {
         expect(result.program.modules[0]?.declarations).toHaveLength(1);
         expect(result.program.modules[0]?.bindings).toHaveLength(2);
       });
+
+      it("parses module with foreign declaration", () => {
+        const result = parse(`
+          module String
+            foreign length : string -> number
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.foreignBindings).toHaveLength(1);
+        expect(result.program.modules[0]?.foreignBindings[0]?.name).toBe("length");
+      });
+
+      it("parses module with multiple foreign declarations", () => {
+        const result = parse(`
+          module String
+            foreign length : string -> number
+            foreign concat : string -> string -> string
+            foreign charAt : number -> string -> string
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.foreignBindings).toHaveLength(3);
+        expect(result.program.modules[0]?.foreignBindings[0]?.name).toBe("length");
+        expect(result.program.modules[0]?.foreignBindings[1]?.name).toBe("concat");
+        expect(result.program.modules[0]?.foreignBindings[2]?.name).toBe("charAt");
+      });
+
+      it("parses module with mixed declarations, bindings, and foreign", () => {
+        const result = parse(`
+          module String
+            foreign length : string -> number
+            foreign concat : string -> string -> string
+            let isEmpty s = length s == 0
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.foreignBindings).toHaveLength(2);
+        expect(result.program.modules[0]?.bindings).toHaveLength(1);
+        expect(result.program.modules[0]?.bindings[0]?.name).toBe("isEmpty");
+      });
+
+      it("parses foreign with function type", () => {
+        const result = parse(`
+          module Core
+            foreign map : (a -> b) -> List a -> List b
+          end
+        `);
+        expect(result.diagnostics).toHaveLength(0);
+        expect(result.program.modules).toHaveLength(1);
+        expect(result.program.modules[0]?.foreignBindings).toHaveLength(1);
+        const foreign = result.program.modules[0]?.foreignBindings[0];
+        expect(foreign?.name).toBe("map");
+        expect(foreign?.type.kind).toBe("TyFun");
+      });
+
+      it("reports error for foreign without type", () => {
+        const result = parse(`
+          module Bad
+            foreign foo
+          end
+        `);
+        expect(result.diagnostics.length).toBeGreaterThan(0);
+      });
+
+      it("reports error for foreign without colon", () => {
+        const result = parse(`
+          module Bad
+            foreign foo number
+          end
+        `);
+        expect(result.diagnostics.length).toBeGreaterThan(0);
+      });
     });
 
     describe("use statements", () => {

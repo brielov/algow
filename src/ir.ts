@@ -29,7 +29,7 @@ import type { Type } from "./checker";
  * Atomic values require no computation - just a lookup or constant.
  * In ANF, arguments to operations must be atomic.
  */
-export type IRAtom = IRLit | IRVar;
+export type IRAtom = IRLit | IRVar | IRForeignVar;
 
 /**
  * Literal value with its type.
@@ -45,6 +45,17 @@ export type IRLit = {
  */
 export type IRVar = {
   readonly kind: "IRVar";
+  readonly name: string;
+  readonly type: Type;
+};
+
+/**
+ * Foreign function reference.
+ * The module and name are used by the backend to look up the runtime implementation.
+ */
+export type IRForeignVar = {
+  readonly kind: "IRForeignVar";
+  readonly module: string;
   readonly name: string;
   readonly type: Type;
 };
@@ -379,6 +390,13 @@ export const irVar = (name: string, type: Type): IRVar => ({
   type,
 });
 
+export const irForeignVar = (module: string, name: string, type: Type): IRForeignVar => ({
+  kind: "IRForeignVar",
+  module,
+  name,
+  type,
+});
+
 // --- Expressions ---
 
 export const irAtomExpr = (atom: IRAtom): IRAtomExpr => ({
@@ -651,6 +669,8 @@ const printAtom = (atom: IRAtom): string => {
       return typeof atom.value === "string" ? `"${atom.value}"` : String(atom.value);
     case "IRVar":
       return atom.name;
+    case "IRForeignVar":
+      return `foreign(${atom.module}.${atom.name})`;
   }
 };
 
