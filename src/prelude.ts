@@ -240,9 +240,10 @@ export const coreModule = ast.moduleDecl(
 // STRING MODULE (with foreign functions)
 // =============================================================================
 
-// Type helpers
+// Type helpers (must match types in checker.ts)
 const tString = ast.tycon("string");
-const tInt = ast.tycon("number");
+const tInt = ast.tycon("Int");
+const tFloat = ast.tycon("Float");
 const tBool = ast.tycon("boolean");
 const tChar = ast.tycon("char");
 const tMaybe = (t: ast.TypeExpr) => ast.tyapp(ast.tycon("Maybe"), t);
