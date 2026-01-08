@@ -566,14 +566,16 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
         }
       }
       // Otherwise check if the member was imported into the environment
-      const value = env.get(expr.member);
+      // Module bindings are prefixed with module name to avoid conflicts
+      const qualifiedName = `${expr.moduleName}.${expr.member}`;
+      const value = env.get(qualifiedName);
       if (!value) {
-        throw new RuntimeError(`Unknown qualified access: ${expr.moduleName}.${expr.member}`);
+        throw new RuntimeError(`Unknown qualified access: ${qualifiedName}`);
       }
       // Dereference if it's a ref cell (from letrec)
       if (value.kind === "VRef") {
         if (value.value === null) {
-          throw new RuntimeError(`Uninitialized recursive binding: ${expr.member}`);
+          throw new RuntimeError(`Uninitialized recursive binding: ${qualifiedName}`);
         }
         return value.value;
       }

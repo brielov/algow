@@ -1612,7 +1612,9 @@ export const programToExpr = (
   // Wrap with module bindings
   // For qualified access to work at runtime, we need ALL module bindings in scope,
   // regardless of the import style (use Module, use Module (..), or use Module (items))
-  const importedBindings: ast.RecBinding[] = [];
+  // IMPORTANT: Each module's bindings must be in a separate letRec block to avoid
+  // incorrectly unifying functions with the same name across modules (e.g., Maybe.map vs Either.map)
+  // We also add qualified aliases (Module.name) for external access.
   const seenModules = new Set<string>();
 
   for (const use of uses) {
@@ -1621,14 +1623,28 @@ export const programToExpr = (
     seenModules.add(use.moduleName);
 
     const mod = modules.find((m) => m.name === use.moduleName);
-    if (!mod) continue;
+    if (!mod || mod.bindings.length === 0) continue;
 
-    // Always import ALL bindings from the module for runtime qualified access
-    importedBindings.push(...mod.bindings);
-  }
+    // Create qualified aliases for external access (e.g., Either.map = map)
+    // These go in the outer scope so they can reference the inner bindings
+    const qualifiedBindings: ast.RecBinding[] = [];
+    for (const binding of mod.bindings) {
+      qualifiedBindings.push(
+        ast.recBinding(
+          `${mod.name}.${binding.name}`,
+          ast.var_(binding.name), // reference the unqualified name
+          binding.nameSpan,
+          binding.returnType,
+        ),
+      );
+    }
 
-  if (importedBindings.length > 0) {
-    expr = ast.letRec(importedBindings, expr);
+    // Wrap: first qualified aliases (inner, can see original from outer),
+    // then original bindings (outer)
+    if (qualifiedBindings.length > 0) {
+      expr = ast.letRec(qualifiedBindings, expr);
+    }
+    expr = ast.letRec(mod.bindings, expr);
   }
 
   return expr;

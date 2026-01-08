@@ -226,12 +226,196 @@ const boolEqExpr = ast.abs(
 );
 
 // =============================================================================
+// MAYBE HELPER EXPRESSIONS
+// =============================================================================
+
+// Maybe.isJust : Maybe a -> Bool
+const isJustExpr = ast.abs(
+  "m",
+  ast.match(ast.var_("m"), [
+    ast.case_(ast.pcon("Nothing", []), ast.bool(false)),
+    ast.case_(ast.pcon("Just", [ast.pwildcard()]), ast.bool(true)),
+  ]),
+);
+
+// Maybe.isNothing : Maybe a -> Bool
+const isNothingExpr = ast.abs(
+  "m",
+  ast.match(ast.var_("m"), [
+    ast.case_(ast.pcon("Nothing", []), ast.bool(true)),
+    ast.case_(ast.pcon("Just", [ast.pwildcard()]), ast.bool(false)),
+  ]),
+);
+
+// Maybe.map : (a -> b) -> Maybe a -> Maybe b
+const maybeMapExpr = ast.abs(
+  "f",
+  ast.abs(
+    "m",
+    ast.match(ast.var_("m"), [
+      ast.case_(ast.pcon("Nothing", []), ast.var_("Nothing")),
+      ast.case_(
+        ast.pcon("Just", [ast.pvar("x")]),
+        ast.app(ast.var_("Just"), ast.app(ast.var_("f"), ast.var_("x"))),
+      ),
+    ]),
+  ),
+);
+
+// Maybe.flatMap : (a -> Maybe b) -> Maybe a -> Maybe b
+const maybeFlatMapExpr = ast.abs(
+  "f",
+  ast.abs(
+    "m",
+    ast.match(ast.var_("m"), [
+      ast.case_(ast.pcon("Nothing", []), ast.var_("Nothing")),
+      ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.app(ast.var_("f"), ast.var_("x"))),
+    ]),
+  ),
+);
+
+// Maybe.withDefault : a -> Maybe a -> a
+const maybeWithDefaultExpr = ast.abs(
+  "def",
+  ast.abs(
+    "m",
+    ast.match(ast.var_("m"), [
+      ast.case_(ast.pcon("Nothing", []), ast.var_("def")),
+      ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
+    ]),
+  ),
+);
+
+// Maybe.toList : Maybe a -> List a
+const maybeToListExpr = ast.abs(
+  "m",
+  ast.match(ast.var_("m"), [
+    ast.case_(ast.pcon("Nothing", []), ast.var_("Nil")),
+    ast.case_(
+      ast.pcon("Just", [ast.pvar("x")]),
+      ast.app(ast.app(ast.var_("Cons"), ast.var_("x")), ast.var_("Nil")),
+    ),
+  ]),
+);
+
+// =============================================================================
+// EITHER HELPER EXPRESSIONS
+// =============================================================================
+
+// Either.isLeft : Either a b -> Bool
+const isLeftExpr = ast.abs(
+  "e",
+  ast.match(ast.var_("e"), [
+    ast.case_(ast.pcon("Left", [ast.pwildcard()]), ast.bool(true)),
+    ast.case_(ast.pcon("Right", [ast.pwildcard()]), ast.bool(false)),
+  ]),
+);
+
+// Either.isRight : Either a b -> Bool
+const isRightExpr = ast.abs(
+  "e",
+  ast.match(ast.var_("e"), [
+    ast.case_(ast.pcon("Left", [ast.pwildcard()]), ast.bool(false)),
+    ast.case_(ast.pcon("Right", [ast.pwildcard()]), ast.bool(true)),
+  ]),
+);
+
+// Either.map : (b -> c) -> Either a b -> Either a c
+const eitherMapExpr = ast.abs(
+  "f",
+  ast.abs(
+    "e",
+    ast.match(ast.var_("e"), [
+      ast.case_(ast.pcon("Left", [ast.pvar("a")]), ast.app(ast.var_("Left"), ast.var_("a"))),
+      ast.case_(
+        ast.pcon("Right", [ast.pvar("b")]),
+        ast.app(ast.var_("Right"), ast.app(ast.var_("f"), ast.var_("b"))),
+      ),
+    ]),
+  ),
+);
+
+// Either.mapLeft : (a -> c) -> Either a b -> Either c b
+const eitherMapLeftExpr = ast.abs(
+  "f",
+  ast.abs(
+    "e",
+    ast.match(ast.var_("e"), [
+      ast.case_(
+        ast.pcon("Left", [ast.pvar("a")]),
+        ast.app(ast.var_("Left"), ast.app(ast.var_("f"), ast.var_("a"))),
+      ),
+      ast.case_(ast.pcon("Right", [ast.pvar("b")]), ast.app(ast.var_("Right"), ast.var_("b"))),
+    ]),
+  ),
+);
+
+// Either.flatMap : (b -> Either a c) -> Either a b -> Either a c
+const eitherFlatMapExpr = ast.abs(
+  "f",
+  ast.abs(
+    "e",
+    ast.match(ast.var_("e"), [
+      ast.case_(ast.pcon("Left", [ast.pvar("a")]), ast.app(ast.var_("Left"), ast.var_("a"))),
+      ast.case_(ast.pcon("Right", [ast.pvar("b")]), ast.app(ast.var_("f"), ast.var_("b"))),
+    ]),
+  ),
+);
+
+// Either.withDefault : b -> Either a b -> b
+const eitherWithDefaultExpr = ast.abs(
+  "def",
+  ast.abs(
+    "e",
+    ast.match(ast.var_("e"), [
+      ast.case_(ast.pcon("Left", [ast.pwildcard()]), ast.var_("def")),
+      ast.case_(ast.pcon("Right", [ast.pvar("b")]), ast.var_("b")),
+    ]),
+  ),
+);
+
+// Either.fromMaybe : a -> Maybe b -> Either a b
+const eitherFromMaybeExpr = ast.abs(
+  "err",
+  ast.abs(
+    "m",
+    ast.match(ast.var_("m"), [
+      ast.case_(ast.pcon("Nothing", []), ast.app(ast.var_("Left"), ast.var_("err"))),
+      ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.app(ast.var_("Right"), ast.var_("x"))),
+    ]),
+  ),
+);
+
+// =============================================================================
 // MODULES
 // =============================================================================
 
-export const maybeModule = ast.moduleDecl("Maybe", [maybe], []);
+export const maybeModule = ast.moduleDecl(
+  "Maybe",
+  [maybe],
+  [
+    ast.recBinding("isJust", isJustExpr),
+    ast.recBinding("isNothing", isNothingExpr),
+    ast.recBinding("map", maybeMapExpr),
+    ast.recBinding("flatMap", maybeFlatMapExpr),
+    ast.recBinding("withDefault", maybeWithDefaultExpr),
+    ast.recBinding("toList", maybeToListExpr),
+  ],
+);
 
-export const eitherModule = ast.moduleDecl("Either", [either], []);
+export const eitherModule = ast.moduleDecl(
+  "Either",
+  [either],
+  [
+    ast.recBinding("isLeft", isLeftExpr),
+    ast.recBinding("isRight", isRightExpr),
+    ast.recBinding("map", eitherMapExpr),
+    ast.recBinding("mapLeft", eitherMapLeftExpr),
+    ast.recBinding("flatMap", eitherFlatMapExpr),
+    ast.recBinding("withDefault", eitherWithDefaultExpr),
+    ast.recBinding("fromMaybe", eitherFromMaybeExpr),
+  ],
+);
 
 export const unitModule = ast.moduleDecl("Unit", [unit], []);
 
