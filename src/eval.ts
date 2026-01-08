@@ -138,6 +138,18 @@ const curry3 =
     vforeign((b) => vforeign((c) => f(a, b, c)));
 
 /**
+ * Helper to convert Node.js errors to IOError values.
+ */
+const toIOError = (err: NodeJS.ErrnoException, path: string): Value => {
+  const code = err.code;
+  if (code === "ENOENT") return vcon("FileNotFound", [vstr(path)]);
+  if (code === "EACCES" || code === "EPERM") return vcon("PermissionDenied", [vstr(path)]);
+  if (code === "EISDIR") return vcon("IsDirectory", [vstr(path)]);
+  if (code === "EEXIST") return vcon("AlreadyExists", [vstr(path)]);
+  return vcon("UnknownError", [vstr(err.message ?? "Unknown error")]);
+};
+
+/**
  * Foreign function registry for the interpreter.
  * Maps module names to function names to implementations.
  */
@@ -305,6 +317,104 @@ const foreignRegistry: Record<string, Record<string, Value>> = {
       const n = parseFloat((s as VStr).value);
       if (Number.isNaN(n)) return vcon("Nothing");
       return vcon("Just", [vfloat(n)]);
+    }),
+  },
+  IO: {
+    print: vforeign((s) => {
+      process.stdout.write((s as VStr).value);
+      return vcon("Unit");
+    }),
+    printLine: vforeign((s) => {
+      console.log((s as VStr).value);
+      return vcon("Unit");
+    }),
+    readLine: vforeign((_) => {
+      try {
+        const fs = require("fs");
+        const buf = Buffer.alloc(1024);
+        const n = fs.readSync(0, buf, 0, buf.length);
+        return vcon("Right", [vstr(buf.toString("utf8", 0, n).replace(/\r?\n$/, ""))]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err as NodeJS.ErrnoException, "<stdin>")]);
+      }
+    }),
+    readFile: vforeign((path) => {
+      const pathStr = (path as VStr).value;
+      try {
+        const fs = require("fs");
+        return vcon("Right", [vstr(fs.readFileSync(pathStr, "utf8"))]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err as NodeJS.ErrnoException, pathStr)]);
+      }
+    }),
+    writeFile: vforeign(
+      curry2((path, content) => {
+        const pathStr = (path as VStr).value;
+        try {
+          const fs = require("fs");
+          fs.writeFileSync(pathStr, (content as VStr).value, "utf8");
+          return vcon("Right", [vcon("Unit")]);
+        } catch (err) {
+          return vcon("Left", [toIOError(err as NodeJS.ErrnoException, pathStr)]);
+        }
+      }),
+    ),
+    appendFile: vforeign(
+      curry2((path, content) => {
+        const pathStr = (path as VStr).value;
+        try {
+          const fs = require("fs");
+          fs.appendFileSync(pathStr, (content as VStr).value, "utf8");
+          return vcon("Right", [vcon("Unit")]);
+        } catch (err) {
+          return vcon("Left", [toIOError(err as NodeJS.ErrnoException, pathStr)]);
+        }
+      }),
+    ),
+    fileExists: vforeign((path) => {
+      const fs = require("fs");
+      return vbool(fs.existsSync((path as VStr).value));
+    }),
+    deleteFile: vforeign((path) => {
+      const pathStr = (path as VStr).value;
+      try {
+        const fs = require("fs");
+        fs.unlinkSync(pathStr);
+        return vcon("Right", [vcon("Unit")]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err as NodeJS.ErrnoException, pathStr)]);
+      }
+    }),
+    args: vforeign((_) => {
+      const args = process.argv.slice(2);
+      let result: Value = vcon("Nil");
+      for (let i = args.length - 1; i >= 0; i--) {
+        result = vcon("Cons", [vstr(args[i]!), result]);
+      }
+      return result;
+    }),
+    exit: vforeign((code) => {
+      process.exit((code as VInt).value);
+    }),
+    getEnv: vforeign((name) => {
+      const value = process.env[(name as VStr).value];
+      if (value === undefined) return vcon("Nothing");
+      return vcon("Just", [vstr(value)]);
+    }),
+  },
+  Debug: {
+    log: vforeign((x) => {
+      console.log(valueToString(x));
+      return x;
+    }),
+    trace: vforeign(
+      curry2((label, x) => {
+        console.log(`${(label as VStr).value}:`, valueToString(x));
+        return x;
+      }),
+    ),
+    panic: vforeign((msg) => {
+      throw new RuntimeError((msg as VStr).value);
     }),
   },
 };

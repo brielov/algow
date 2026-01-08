@@ -335,6 +335,122 @@ const $foreign = {
       return $con("Just", n);
     },
   },
+
+  // ==========================================================================
+  // IO Module
+  // ==========================================================================
+  IO: {
+    // Helper to convert Node.js errors to IOError
+    _toIOError: (err, path) => {
+      const code = err.code;
+      if (code === "ENOENT") return $con("FileNotFound", path);
+      if (code === "EACCES" || code === "EPERM") return $con("PermissionDenied", path);
+      if (code === "EISDIR") return $con("IsDirectory", path);
+      if (code === "EEXIST") return $con("AlreadyExists", path);
+      return $con("UnknownError", err.message || String(err));
+    },
+
+    // print : String -> Unit
+    print: (s) => { process.stdout.write(s); return $con("Unit"); },
+
+    // printLine : String -> Unit
+    printLine: (s) => { console.log(s); return $con("Unit"); },
+
+    // readLine : Unit -> Either IOError String
+    readLine: (_) => {
+      try {
+        const fs = require("fs");
+        const buf = Buffer.alloc(1024);
+        const n = fs.readSync(0, buf, 0, buf.length);
+        return $con("Right", buf.toString("utf8", 0, n).replace(/\\r?\\n$/, ""));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, "<stdin>"));
+      }
+    },
+
+    // readFile : String -> Either IOError String
+    readFile: (path) => {
+      try {
+        const fs = require("fs");
+        return $con("Right", fs.readFileSync(path, "utf8"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // writeFile : String -> String -> Either IOError Unit
+    writeFile: (path) => (content) => {
+      try {
+        const fs = require("fs");
+        fs.writeFileSync(path, content, "utf8");
+        return $con("Right", $con("Unit"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // appendFile : String -> String -> Either IOError Unit
+    appendFile: (path) => (content) => {
+      try {
+        const fs = require("fs");
+        fs.appendFileSync(path, content, "utf8");
+        return $con("Right", $con("Unit"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // fileExists : String -> Bool
+    fileExists: (path) => {
+      const fs = require("fs");
+      return fs.existsSync(path);
+    },
+
+    // deleteFile : String -> Either IOError Unit
+    deleteFile: (path) => {
+      try {
+        const fs = require("fs");
+        fs.unlinkSync(path);
+        return $con("Right", $con("Unit"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // args : Unit -> List String
+    args: (_) => {
+      const args = process.argv.slice(2);
+      let result = $con("Nil");
+      for (let i = args.length - 1; i >= 0; i--) {
+        result = $con("Cons", args[i], result);
+      }
+      return result;
+    },
+
+    // exit : Int -> Unit
+    exit: (code) => { process.exit(code); },
+
+    // getEnv : String -> Maybe String
+    getEnv: (name) => {
+      const value = process.env[name];
+      if (value === undefined) return $con("Nothing");
+      return $con("Just", value);
+    },
+  },
+
+  // ==========================================================================
+  // Debug Module
+  // ==========================================================================
+  Debug: {
+    // log : a -> a (prints value, returns it)
+    log: (x) => { console.log(x); return x; },
+
+    // trace : String -> a -> a (prints label + value, returns value)
+    trace: (label) => (x) => { console.log(label + ":", x); return x; },
+
+    // panic : String -> a (crashes with message)
+    panic: (msg) => { throw new Error(msg); },
+  },
 };
 
 `;

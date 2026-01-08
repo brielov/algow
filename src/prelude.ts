@@ -35,6 +35,20 @@ const list = ast.dataDecl(
   ],
 );
 
+const unit = ast.dataDecl("Unit", [], [ast.conDecl("Unit", [])]);
+
+const ioError = ast.dataDecl(
+  "IOError",
+  [],
+  [
+    ast.conDecl("FileNotFound", [ast.tycon("string")]),
+    ast.conDecl("PermissionDenied", [ast.tycon("string")]),
+    ast.conDecl("IsDirectory", [ast.tycon("string")]),
+    ast.conDecl("AlreadyExists", [ast.tycon("string")]),
+    ast.conDecl("UnknownError", [ast.tycon("string")]),
+  ],
+);
+
 // =============================================================================
 // FUNCTION EXPRESSIONS
 // =============================================================================
@@ -200,6 +214,17 @@ const flipExpr = ast.abs(
   ast.abs("a", ast.abs("b", ast.app(ast.app(ast.var_("f"), ast.var_("b")), ast.var_("a")))),
 );
 
+// Bool.not : Bool -> Bool
+// let not b = if b then false else true
+const notExpr = ast.abs("b", ast.if_(ast.var_("b"), ast.bool(false), ast.bool(true)));
+
+// Bool.eq : Bool -> Bool -> Bool
+// let eq a b = if a then b else not b
+const boolEqExpr = ast.abs(
+  "a",
+  ast.abs("b", ast.if_(ast.var_("a"), ast.var_("b"), ast.app(ast.var_("not"), ast.var_("b")))),
+);
+
 // =============================================================================
 // MODULES
 // =============================================================================
@@ -207,6 +232,8 @@ const flipExpr = ast.abs(
 export const maybeModule = ast.moduleDecl("Maybe", [maybe], []);
 
 export const eitherModule = ast.moduleDecl("Either", [either], []);
+
+export const unitModule = ast.moduleDecl("Unit", [unit], []);
 
 export const listModule = ast.moduleDecl(
   "List",
@@ -246,9 +273,14 @@ const tInt = ast.tycon("Int");
 const tFloat = ast.tycon("Float");
 const tBool = ast.tycon("boolean");
 const tChar = ast.tycon("char");
+const tUnit = ast.tycon("Unit");
+const tIOError = ast.tycon("IOError");
 const tMaybe = (t: ast.TypeExpr) => ast.tyapp(ast.tycon("Maybe"), t);
 const tList = (t: ast.TypeExpr) => ast.tyapp(ast.tycon("List"), t);
+const tEither = (a: ast.TypeExpr, b: ast.TypeExpr) =>
+  ast.tyapp(ast.tyapp(ast.tycon("Either"), a), b);
 const fn = (a: ast.TypeExpr, b: ast.TypeExpr) => ast.tyfun(a, b);
+const tvar = (name: string) => ast.tyvar(name);
 
 export const stringModule = ast.moduleDecl(
   "String",
@@ -430,6 +462,68 @@ export const floatModule = ast.moduleDecl(
   ],
 );
 
+// =============================================================================
+// BOOL MODULE (pure Algow functions)
+// =============================================================================
+
+export const boolModule = ast.moduleDecl(
+  "Bool",
+  [],
+  [ast.recBinding("not", notExpr), ast.recBinding("eq", boolEqExpr)],
+);
+
+// =============================================================================
+// IO MODULE (with foreign functions)
+// =============================================================================
+
+export const ioModule = ast.moduleDecl(
+  "IO",
+  [ioError],
+  [],
+  [
+    // print : String -> Unit
+    ast.foreignBinding("print", fn(tString, tUnit)),
+    // printLine : String -> Unit
+    ast.foreignBinding("printLine", fn(tString, tUnit)),
+    // readLine : Unit -> Either IOError String
+    ast.foreignBinding("readLine", fn(tUnit, tEither(tIOError, tString))),
+    // readFile : String -> Either IOError String
+    ast.foreignBinding("readFile", fn(tString, tEither(tIOError, tString))),
+    // writeFile : String -> String -> Either IOError Unit
+    ast.foreignBinding("writeFile", fn(tString, fn(tString, tEither(tIOError, tUnit)))),
+    // appendFile : String -> String -> Either IOError Unit
+    ast.foreignBinding("appendFile", fn(tString, fn(tString, tEither(tIOError, tUnit)))),
+    // fileExists : String -> Bool
+    ast.foreignBinding("fileExists", fn(tString, tBool)),
+    // deleteFile : String -> Either IOError Unit
+    ast.foreignBinding("deleteFile", fn(tString, tEither(tIOError, tUnit))),
+    // args : Unit -> List String
+    ast.foreignBinding("args", fn(tUnit, tList(tString))),
+    // exit : Int -> Unit
+    ast.foreignBinding("exit", fn(tInt, tUnit)),
+    // getEnv : String -> Maybe String
+    ast.foreignBinding("getEnv", fn(tString, tMaybe(tString))),
+  ],
+);
+
+// =============================================================================
+// DEBUG MODULE (with polymorphic foreign functions)
+// =============================================================================
+
+export const debugModule = ast.moduleDecl(
+  "Debug",
+  [],
+  [],
+  [
+    // log : a -> a (prints value, returns it)
+    ast.foreignBinding("log", fn(tvar("a"), tvar("a"))),
+    // trace : String -> a -> a (prints label + value, returns value)
+    ast.foreignBinding("trace", fn(tString, fn(tvar("a"), tvar("a")))),
+    // panic : String -> a (crashes with message)
+    ast.foreignBinding("panic", fn(tString, tvar("a"))),
+  ],
+);
+
 /** All prelude modules */
 export const modules = [
   maybeModule,
@@ -440,4 +534,8 @@ export const modules = [
   charModule,
   intModule,
   floatModule,
+  unitModule,
+  boolModule,
+  ioModule,
+  debugModule,
 ] as const;
