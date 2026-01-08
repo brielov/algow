@@ -23,6 +23,7 @@ import {
   applySubst,
   type CheckOutput,
   type ForeignMap,
+  type ModuleTypeEnv,
   type Subst,
   type Type,
   type TypeEnv,
@@ -51,18 +52,22 @@ type LowerContext = {
   spanTypes: ReadonlyMap<string, Type>;
   /** Map from local names to foreign function info */
   foreignFunctions: ForeignMap;
+  /** Module environment for resolving qualified access */
+  moduleEnv: ModuleTypeEnv;
 };
 
 const createContext = (
   typeEnv: TypeEnv,
   checkOutput: CheckOutput,
   foreignFunctions: ForeignMap = new Map(),
+  moduleEnv: ModuleTypeEnv = new Map(),
 ): LowerContext => ({
   varCounter: 0,
   typeEnv: new Map(typeEnv),
   subst: checkOutput.subst,
   spanTypes: checkOutput.spanTypes,
   foreignFunctions,
+  moduleEnv,
 });
 
 /** Generate a fresh variable name */
@@ -329,13 +334,37 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
       return lowerMatch(ctx, expr);
 
     case "QualifiedVar": {
-      // If the member was imported, it will be in the type environment
-      // and we can access it directly by its name
+      // Look up the module to check if this is a foreign function
+      const mod = ctx.moduleEnv.get(expr.moduleName);
+      if (mod) {
+        // Check if this is a foreign function in that module
+        if (mod.foreignNames.has(expr.member)) {
+          // Get the type from the module's type environment
+          const scheme = mod.typeEnv.get(expr.member);
+          if (scheme) {
+            const type = applySubst(ctx.subst, scheme.type);
+            return ir.irAtomExpr(ir.irForeignVar(expr.moduleName, expr.member, type));
+          }
+        }
+        // Non-foreign function in the module - use the module's type environment
+        const scheme = mod.typeEnv.get(expr.member);
+        if (scheme) {
+          return ir.irAtomExpr(ir.irVar(expr.member, applySubst(ctx.subst, scheme.type)));
+        }
+      }
+      // Fall back to checking the local type environment (for imported names)
       const scheme = ctx.typeEnv.get(expr.member);
       if (scheme) {
+        // Check if this is an imported foreign function
+        const foreignInfo = ctx.foreignFunctions.get(expr.member);
+        if (foreignInfo && foreignInfo.module === expr.moduleName) {
+          return ir.irAtomExpr(
+            ir.irForeignVar(foreignInfo.module, foreignInfo.name, applySubst(ctx.subst, scheme.type)),
+          );
+        }
         return ir.irAtomExpr(ir.irVar(expr.member, applySubst(ctx.subst, scheme.type)));
       }
-      // Member not imported - require explicit import
+      // Member not found
       throw new Error(
         `Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` +
           `Add 'use ${expr.moduleName} (..)' to import all bindings.`,
@@ -823,6 +852,7 @@ const extendPatternBindings = (ctx: LowerContext, pattern: ast.Pattern, type: Ty
  * @param typeEnv The type environment (includes constructors and prelude)
  * @param checkOutput The output from type checking
  * @param foreignFunctions Map of local names to foreign function info
+ * @param moduleEnv Module environment for resolving qualified access
  * @returns The IR expression in ANF
  */
 export const lowerToIR = (
@@ -830,7 +860,8 @@ export const lowerToIR = (
   typeEnv: TypeEnv,
   checkOutput: CheckOutput,
   foreignFunctions: ForeignMap = new Map(),
+  moduleEnv: ModuleTypeEnv = new Map(),
 ): ir.IRExpr => {
-  const ctx = createContext(typeEnv, checkOutput, foreignFunctions);
+  const ctx = createContext(typeEnv, checkOutput, foreignFunctions, moduleEnv);
   return lowerExpr(ctx, expr);
 };

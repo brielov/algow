@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as ast from "../src/ast";
-import type { CheckOutput, Type, TypeEnv } from "../src/checker";
+import type { CheckOutput, ModuleTypeEnv, Type, TypeEnv } from "../src/checker";
 import { lowerToIR } from "../src/lower";
 
 // Create a minimal CheckOutput with empty substitution
@@ -737,6 +737,69 @@ describe("lowerToIR", () => {
       const env = makeTypeEnv({ length: funType(strType, numType) });
 
       const ir = lowerToIR(expr, env, makeCheckOutput());
+
+      expect(ir.kind).toBe("IRAtomExpr");
+      if (ir.kind === "IRAtomExpr") {
+        expect(ir.atom.kind).toBe("IRVar");
+        if (ir.atom.kind === "IRVar") {
+          expect(ir.atom.name).toBe("length");
+        }
+      }
+    });
+
+    // Regression test: QualifiedVar should correctly resolve foreign functions
+    // even when another module exports the same name
+    it("qualified access to foreign function works when same name exists in another module", () => {
+      // Bug: String.length was incorrectly resolving to List.length because
+      // the lowering code only looked up the member name in the global type env
+      const expr = ast.qualifiedVar("String", "length");
+
+      // Global env has 'length' from List module (non-foreign)
+      const env = makeTypeEnv({ length: funType(strType, numType) });
+
+      // Module environment with String module that has foreign 'length'
+      const moduleEnv: ModuleTypeEnv = new Map([
+        [
+          "String",
+          {
+            typeEnv: new Map([["length", { vars: [], constraints: [], type: funType(strType, numType) }]]),
+            registry: new Map(),
+            constructorNames: [],
+            foreignNames: new Set(["length"]),
+          },
+        ],
+      ]);
+
+      const ir = lowerToIR(expr, env, makeCheckOutput(), new Map(), moduleEnv);
+
+      // Should generate IRForeignVar for String.length, not IRVar
+      expect(ir.kind).toBe("IRAtomExpr");
+      if (ir.kind === "IRAtomExpr") {
+        expect(ir.atom.kind).toBe("IRForeignVar");
+        if (ir.atom.kind === "IRForeignVar") {
+          expect(ir.atom.module).toBe("String");
+          expect(ir.atom.name).toBe("length");
+        }
+      }
+    });
+
+    it("qualified access to non-foreign function uses IRVar", () => {
+      // When the qualified access is to a non-foreign function, use IRVar
+      const expr = ast.qualifiedVar("List", "length");
+
+      const moduleEnv: ModuleTypeEnv = new Map([
+        [
+          "List",
+          {
+            typeEnv: new Map([["length", { vars: [], constraints: [], type: funType(strType, numType) }]]),
+            registry: new Map(),
+            constructorNames: [],
+            foreignNames: new Set(), // Not foreign
+          },
+        ],
+      ]);
+
+      const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput(), new Map(), moduleEnv);
 
       expect(ir.kind).toBe("IRAtomExpr");
       if (ir.kind === "IRAtomExpr") {

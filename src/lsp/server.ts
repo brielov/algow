@@ -780,7 +780,7 @@ export const createServer = (transport: Transport): void => {
       const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
 
       // Lower to IR
-      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions);
+      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions, doc.moduleEnv);
 
       // Optimize if requested
       if (params.optimize) {
@@ -817,7 +817,7 @@ export const createServer = (transport: Transport): void => {
       const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
 
       // Lower to IR
-      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions);
+      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions, doc.moduleEnv);
 
       // Optimize if requested
       if (params.optimize) {
@@ -854,7 +854,7 @@ export const createServer = (transport: Transport): void => {
       const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
 
       // Lower to IR
-      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions);
+      let ir = lowerToIR(expr, doc.typeEnv, checkResult, doc.foreignFunctions, doc.moduleEnv);
 
       // Optimize if requested
       if (params.optimize) {

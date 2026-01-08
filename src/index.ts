@@ -239,7 +239,7 @@ const emitIR = (source: string, filename: string): void => {
   }
 
   // Lower to IR
-  const ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions);
+  const ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions, moduleEnv);
   console.log(JSON.stringify(ir, null, 2));
 };
 
@@ -279,7 +279,7 @@ const compile = (source: string, filename: string): void => {
   }
 
   // Lower to IR, optimize, and generate JS
-  let ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions);
+  let ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions, moduleEnv);
   ir = optimize(ir);
   const output = generateJS(ir, constructorNames);
 
@@ -327,7 +327,7 @@ const compileToGo = (source: string, filename: string): void => {
   }
 
   // Lower to IR, optimize, and generate Go
-  let ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions);
+  let ir = lowerToIR(expr, typeEnv, checkResult, foreignFunctions, moduleEnv);
   ir = optimize(ir);
   const output = generateGo(ir, constructorNames);
 

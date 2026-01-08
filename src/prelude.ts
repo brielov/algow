@@ -236,5 +236,105 @@ export const coreModule = ast.moduleDecl(
   ],
 );
 
+// =============================================================================
+// STRING MODULE (with foreign functions)
+// =============================================================================
+
+// Type helpers
+const tString = ast.tycon("string");
+const tInt = ast.tycon("number");
+const tBool = ast.tycon("boolean");
+const tChar = ast.tycon("char");
+const tMaybe = (t: ast.TypeExpr) => ast.tyapp(ast.tycon("Maybe"), t);
+const tList = (t: ast.TypeExpr) => ast.tyapp(ast.tycon("List"), t);
+const fn = (a: ast.TypeExpr, b: ast.TypeExpr) => ast.tyfun(a, b);
+
+export const stringModule = ast.moduleDecl(
+  "String",
+  [],
+  [],
+  [
+    // length : String -> Int
+    ast.foreignBinding("length", fn(tString, tInt)),
+    // concat : String -> String -> String
+    ast.foreignBinding("concat", fn(tString, fn(tString, tString))),
+    // substring : Int -> Int -> String -> String
+    ast.foreignBinding("substring", fn(tInt, fn(tInt, fn(tString, tString)))),
+    // charAt : Int -> String -> Maybe Char
+    ast.foreignBinding("charAt", fn(tInt, fn(tString, tMaybe(tChar)))),
+    // toList : String -> List Char
+    ast.foreignBinding("toList", fn(tString, tList(tChar))),
+    // fromList : List Char -> String
+    ast.foreignBinding("fromList", fn(tList(tChar), tString)),
+    // eq : String -> String -> Bool
+    ast.foreignBinding("eq", fn(tString, fn(tString, tBool))),
+    // lt : String -> String -> Bool
+    ast.foreignBinding("lt", fn(tString, fn(tString, tBool))),
+    // split : String -> String -> List String
+    ast.foreignBinding("split", fn(tString, fn(tString, tList(tString)))),
+    // join : String -> List String -> String
+    ast.foreignBinding("join", fn(tString, fn(tList(tString), tString))),
+    // trim : String -> String
+    ast.foreignBinding("trim", fn(tString, tString)),
+    // toUpper : String -> String
+    ast.foreignBinding("toUpper", fn(tString, tString)),
+    // toLower : String -> String
+    ast.foreignBinding("toLower", fn(tString, tString)),
+    // contains : String -> String -> Bool
+    ast.foreignBinding("contains", fn(tString, fn(tString, tBool))),
+    // startsWith : String -> String -> Bool
+    ast.foreignBinding("startsWith", fn(tString, fn(tString, tBool))),
+    // endsWith : String -> String -> Bool
+    ast.foreignBinding("endsWith", fn(tString, fn(tString, tBool))),
+    // replace : String -> String -> String -> String
+    ast.foreignBinding("replace", fn(tString, fn(tString, fn(tString, tString)))),
+  ],
+);
+
+// =============================================================================
+// CHAR MODULE (with foreign functions)
+// =============================================================================
+
+export const charModule = ast.moduleDecl(
+  "Char",
+  [],
+  [],
+  [
+    // toInt : Char -> Int
+    ast.foreignBinding("toInt", fn(tChar, tInt)),
+    // fromInt : Int -> Maybe Char
+    ast.foreignBinding("fromInt", fn(tInt, tMaybe(tChar))),
+    // toString : Char -> String
+    ast.foreignBinding("toString", fn(tChar, tString)),
+    // eq : Char -> Char -> Bool
+    ast.foreignBinding("eq", fn(tChar, fn(tChar, tBool))),
+    // lt : Char -> Char -> Bool
+    ast.foreignBinding("lt", fn(tChar, fn(tChar, tBool))),
+    // isDigit : Char -> Bool
+    ast.foreignBinding("isDigit", fn(tChar, tBool)),
+    // isAlpha : Char -> Bool
+    ast.foreignBinding("isAlpha", fn(tChar, tBool)),
+    // isAlphaNum : Char -> Bool
+    ast.foreignBinding("isAlphaNum", fn(tChar, tBool)),
+    // isSpace : Char -> Bool
+    ast.foreignBinding("isSpace", fn(tChar, tBool)),
+    // isUpper : Char -> Bool
+    ast.foreignBinding("isUpper", fn(tChar, tBool)),
+    // isLower : Char -> Bool
+    ast.foreignBinding("isLower", fn(tChar, tBool)),
+    // toUpper : Char -> Char
+    ast.foreignBinding("toUpper", fn(tChar, tChar)),
+    // toLower : Char -> Char
+    ast.foreignBinding("toLower", fn(tChar, tChar)),
+  ],
+);
+
 /** All prelude modules */
-export const modules = [maybeModule, eitherModule, listModule, coreModule] as const;
+export const modules = [
+  maybeModule,
+  eitherModule,
+  listModule,
+  coreModule,
+  stringModule,
+  charModule,
+] as const;

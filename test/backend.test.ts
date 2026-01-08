@@ -592,6 +592,21 @@ describe("Runtime", () => {
     expect(RUNTIME).toContain("$con");
     expect(RUNTIME).toContain("$eq");
   });
+
+  // Regression test: escape sequences in runtime should be properly escaped
+  // so they appear as literal \t, \n, \r in the output JavaScript
+  it("contains properly escaped sequences in isSpace function", () => {
+    // Bug: The template string in runtime.ts was interpreting escape sequences
+    // like \t, \n, \r as actual tab/newline/carriage-return characters,
+    // which caused syntax errors when the output was parsed as JavaScript
+    expect(RUNTIME).toContain('c === "\\t"');
+    expect(RUNTIME).toContain('c === "\\n"');
+    expect(RUNTIME).toContain('c === "\\r"');
+    // Should NOT contain literal tab/newline in the string comparison
+    expect(RUNTIME).not.toMatch(/c === "\t"/);
+    expect(RUNTIME).not.toMatch(/c === "\n"/);
+    expect(RUNTIME).not.toMatch(/c === "\r"/);
+  });
 });
 
 describe("Foreign Functions", () => {
@@ -632,7 +647,10 @@ describe("Foreign Functions", () => {
   it("includes $foreign in runtime", () => {
     const expr = ir.irAtomExpr(ir.irLit(42, numType));
     const result = generateJS(expr, []);
-    expect(result.code).toContain("const $foreign = {};");
+    expect(result.code).toContain("const $foreign = {");
+    // Should contain String and Char modules
+    expect(result.code).toContain("String: {");
+    expect(result.code).toContain("Char: {");
   });
 });
 

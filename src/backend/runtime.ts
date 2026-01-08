@@ -68,6 +68,141 @@ const $eq = (a, b) => {
  * Modules provide their foreign function implementations here.
  * Structure: { ModuleName: { functionName: implementation } }
  */
-const $foreign = {};
+const $foreign = {
+  // ==========================================================================
+  // String Module
+  // ==========================================================================
+  String: {
+    // length : String -> Int
+    length: (s) => s.length,
+
+    // concat : String -> String -> String
+    concat: (a) => (b) => a + b,
+
+    // substring : Int -> Int -> String -> String
+    substring: (start) => (end) => (s) => s.substring(start, end),
+
+    // charAt : Int -> String -> Maybe Char
+    charAt: (i) => (s) => {
+      if (i < 0 || i >= s.length) return $con("Nothing");
+      return $con("Just", s[i]);
+    },
+
+    // toList : String -> List Char
+    toList: (s) => {
+      let result = $con("Nil");
+      for (let i = s.length - 1; i >= 0; i--) {
+        result = $con("Cons", s[i], result);
+      }
+      return result;
+    },
+
+    // fromList : List Char -> String
+    fromList: (list) => {
+      let result = "";
+      let current = list;
+      while (current.$tag === "Cons") {
+        result += current.$args[0];
+        current = current.$args[1];
+      }
+      return result;
+    },
+
+    // eq : String -> String -> Bool
+    eq: (a) => (b) => a === b,
+
+    // lt : String -> String -> Bool
+    lt: (a) => (b) => a < b,
+
+    // split : String -> String -> List String
+    split: (delimiter) => (s) => {
+      const parts = s.split(delimiter);
+      let result = $con("Nil");
+      for (let i = parts.length - 1; i >= 0; i--) {
+        result = $con("Cons", parts[i], result);
+      }
+      return result;
+    },
+
+    // join : String -> List String -> String
+    join: (separator) => (list) => {
+      const parts = [];
+      let current = list;
+      while (current.$tag === "Cons") {
+        parts.push(current.$args[0]);
+        current = current.$args[1];
+      }
+      return parts.join(separator);
+    },
+
+    // trim : String -> String
+    trim: (s) => s.trim(),
+
+    // toUpper : String -> String
+    toUpper: (s) => s.toUpperCase(),
+
+    // toLower : String -> String
+    toLower: (s) => s.toLowerCase(),
+
+    // contains : String -> String -> Bool
+    contains: (needle) => (haystack) => haystack.includes(needle),
+
+    // startsWith : String -> String -> Bool
+    startsWith: (prefix) => (s) => s.startsWith(prefix),
+
+    // endsWith : String -> String -> Bool
+    endsWith: (suffix) => (s) => s.endsWith(suffix),
+
+    // replace : String -> String -> String -> String
+    replace: (search) => (replacement) => (s) => s.replaceAll(search, replacement),
+  },
+
+  // ==========================================================================
+  // Char Module
+  // ==========================================================================
+  Char: {
+    // toInt : Char -> Int
+    toInt: (c) => c.charCodeAt(0),
+
+    // fromInt : Int -> Maybe Char
+    fromInt: (n) => {
+      if (n < 0 || n > 0x10FFFF) return $con("Nothing");
+      return $con("Just", String.fromCodePoint(n));
+    },
+
+    // toString : Char -> String
+    toString: (c) => c,
+
+    // eq : Char -> Char -> Bool
+    eq: (a) => (b) => a === b,
+
+    // lt : Char -> Char -> Bool
+    lt: (a) => (b) => a < b,
+
+    // isDigit : Char -> Bool
+    isDigit: (c) => c >= "0" && c <= "9",
+
+    // isAlpha : Char -> Bool
+    isAlpha: (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z"),
+
+    // isAlphaNum : Char -> Bool
+    isAlphaNum: (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9"),
+
+    // isSpace : Char -> Bool
+    isSpace: (c) => c === " " || c === "\\t" || c === "\\n" || c === "\\r",
+
+    // isUpper : Char -> Bool
+    isUpper: (c) => c >= "A" && c <= "Z",
+
+    // isLower : Char -> Bool
+    isLower: (c) => c >= "a" && c <= "z",
+
+    // toUpper : Char -> Char
+    toUpper: (c) => c.toUpperCase(),
+
+    // toLower : Char -> Char
+    toLower: (c) => c.toLowerCase(),
+  },
+};
 
 `;
