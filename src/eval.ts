@@ -257,6 +257,56 @@ const foreignRegistry: Record<string, Record<string, Value>> = {
     toUpper: vforeign((c) => vchar((c as VChar).value.toUpperCase())),
     toLower: vforeign((c) => vchar((c as VChar).value.toLowerCase())),
   },
+  Int: {
+    add: vforeign(curry2((a, b) => vint((a as VInt).value + (b as VInt).value))),
+    sub: vforeign(curry2((a, b) => vint((a as VInt).value - (b as VInt).value))),
+    mul: vforeign(curry2((a, b) => vint((a as VInt).value * (b as VInt).value))),
+    div: vforeign(curry2((a, b) => vint(Math.trunc((a as VInt).value / (b as VInt).value)))),
+    mod: vforeign(curry2((a, b) => vint((a as VInt).value % (b as VInt).value))),
+    neg: vforeign((a) => vint(-(a as VInt).value)),
+    abs: vforeign((a) => vint(Math.abs((a as VInt).value))),
+    eq: vforeign(curry2((a, b) => vbool((a as VInt).value === (b as VInt).value))),
+    lt: vforeign(curry2((a, b) => vbool((a as VInt).value < (b as VInt).value))),
+    le: vforeign(curry2((a, b) => vbool((a as VInt).value <= (b as VInt).value))),
+    gt: vforeign(curry2((a, b) => vbool((a as VInt).value > (b as VInt).value))),
+    ge: vforeign(curry2((a, b) => vbool((a as VInt).value >= (b as VInt).value))),
+    toFloat: vforeign((a) => vfloat((a as VInt).value)),
+    toString: vforeign((a) => vstr(String((a as VInt).value))),
+    fromString: vforeign((s) => {
+      const n = parseInt((s as VStr).value, 10);
+      if (Number.isNaN(n)) return vcon("Nothing");
+      return vcon("Just", [vint(n)]);
+    }),
+  },
+  Float: {
+    add: vforeign(curry2((a, b) => vfloat((a as VFloat).value + (b as VFloat).value))),
+    sub: vforeign(curry2((a, b) => vfloat((a as VFloat).value - (b as VFloat).value))),
+    mul: vforeign(curry2((a, b) => vfloat((a as VFloat).value * (b as VFloat).value))),
+    div: vforeign(curry2((a, b) => vfloat((a as VFloat).value / (b as VFloat).value))),
+    neg: vforeign((a) => vfloat(-(a as VFloat).value)),
+    abs: vforeign((a) => vfloat(Math.abs((a as VFloat).value))),
+    eq: vforeign(curry2((a, b) => vbool((a as VFloat).value === (b as VFloat).value))),
+    lt: vforeign(curry2((a, b) => vbool((a as VFloat).value < (b as VFloat).value))),
+    le: vforeign(curry2((a, b) => vbool((a as VFloat).value <= (b as VFloat).value))),
+    gt: vforeign(curry2((a, b) => vbool((a as VFloat).value > (b as VFloat).value))),
+    ge: vforeign(curry2((a, b) => vbool((a as VFloat).value >= (b as VFloat).value))),
+    floor: vforeign((a) => vint(Math.floor((a as VFloat).value))),
+    ceil: vforeign((a) => vint(Math.ceil((a as VFloat).value))),
+    round: vforeign((a) => vint(Math.round((a as VFloat).value))),
+    sqrt: vforeign((a) => vfloat(Math.sqrt((a as VFloat).value))),
+    pow: vforeign(curry2((a, b) => vfloat(Math.pow((a as VFloat).value, (b as VFloat).value)))),
+    sin: vforeign((a) => vfloat(Math.sin((a as VFloat).value))),
+    cos: vforeign((a) => vfloat(Math.cos((a as VFloat).value))),
+    tan: vforeign((a) => vfloat(Math.tan((a as VFloat).value))),
+    log: vforeign((a) => vfloat(Math.log((a as VFloat).value))),
+    exp: vforeign((a) => vfloat(Math.exp((a as VFloat).value))),
+    toString: vforeign((a) => vstr(String((a as VFloat).value))),
+    fromString: vforeign((s) => {
+      const n = parseFloat((s as VStr).value);
+      if (Number.isNaN(n)) return vcon("Nothing");
+      return vcon("Just", [vfloat(n)]);
+    }),
+  },
 };
 
 // =============================================================================

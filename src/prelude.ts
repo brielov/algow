@@ -330,6 +330,106 @@ export const charModule = ast.moduleDecl(
   ],
 );
 
+// =============================================================================
+// INT MODULE (with foreign functions)
+// =============================================================================
+
+export const intModule = ast.moduleDecl(
+  "Int",
+  [],
+  [],
+  [
+    // add : Int -> Int -> Int
+    ast.foreignBinding("add", fn(tInt, fn(tInt, tInt))),
+    // sub : Int -> Int -> Int
+    ast.foreignBinding("sub", fn(tInt, fn(tInt, tInt))),
+    // mul : Int -> Int -> Int
+    ast.foreignBinding("mul", fn(tInt, fn(tInt, tInt))),
+    // div : Int -> Int -> Int (truncating division)
+    ast.foreignBinding("div", fn(tInt, fn(tInt, tInt))),
+    // mod : Int -> Int -> Int
+    ast.foreignBinding("mod", fn(tInt, fn(tInt, tInt))),
+    // neg : Int -> Int
+    ast.foreignBinding("neg", fn(tInt, tInt)),
+    // abs : Int -> Int
+    ast.foreignBinding("abs", fn(tInt, tInt)),
+    // eq : Int -> Int -> Bool
+    ast.foreignBinding("eq", fn(tInt, fn(tInt, tBool))),
+    // lt : Int -> Int -> Bool
+    ast.foreignBinding("lt", fn(tInt, fn(tInt, tBool))),
+    // le : Int -> Int -> Bool
+    ast.foreignBinding("le", fn(tInt, fn(tInt, tBool))),
+    // gt : Int -> Int -> Bool
+    ast.foreignBinding("gt", fn(tInt, fn(tInt, tBool))),
+    // ge : Int -> Int -> Bool
+    ast.foreignBinding("ge", fn(tInt, fn(tInt, tBool))),
+    // toFloat : Int -> Float
+    ast.foreignBinding("toFloat", fn(tInt, tFloat)),
+    // toString : Int -> String
+    ast.foreignBinding("toString", fn(tInt, tString)),
+    // fromString : String -> Maybe Int
+    ast.foreignBinding("fromString", fn(tString, tMaybe(tInt))),
+  ],
+);
+
+// =============================================================================
+// FLOAT MODULE (with foreign functions)
+// =============================================================================
+
+export const floatModule = ast.moduleDecl(
+  "Float",
+  [],
+  [],
+  [
+    // add : Float -> Float -> Float
+    ast.foreignBinding("add", fn(tFloat, fn(tFloat, tFloat))),
+    // sub : Float -> Float -> Float
+    ast.foreignBinding("sub", fn(tFloat, fn(tFloat, tFloat))),
+    // mul : Float -> Float -> Float
+    ast.foreignBinding("mul", fn(tFloat, fn(tFloat, tFloat))),
+    // div : Float -> Float -> Float
+    ast.foreignBinding("div", fn(tFloat, fn(tFloat, tFloat))),
+    // neg : Float -> Float
+    ast.foreignBinding("neg", fn(tFloat, tFloat)),
+    // abs : Float -> Float
+    ast.foreignBinding("abs", fn(tFloat, tFloat)),
+    // eq : Float -> Float -> Bool
+    ast.foreignBinding("eq", fn(tFloat, fn(tFloat, tBool))),
+    // lt : Float -> Float -> Bool
+    ast.foreignBinding("lt", fn(tFloat, fn(tFloat, tBool))),
+    // le : Float -> Float -> Bool
+    ast.foreignBinding("le", fn(tFloat, fn(tFloat, tBool))),
+    // gt : Float -> Float -> Bool
+    ast.foreignBinding("gt", fn(tFloat, fn(tFloat, tBool))),
+    // ge : Float -> Float -> Bool
+    ast.foreignBinding("ge", fn(tFloat, fn(tFloat, tBool))),
+    // floor : Float -> Int
+    ast.foreignBinding("floor", fn(tFloat, tInt)),
+    // ceil : Float -> Int
+    ast.foreignBinding("ceil", fn(tFloat, tInt)),
+    // round : Float -> Int
+    ast.foreignBinding("round", fn(tFloat, tInt)),
+    // sqrt : Float -> Float
+    ast.foreignBinding("sqrt", fn(tFloat, tFloat)),
+    // pow : Float -> Float -> Float
+    ast.foreignBinding("pow", fn(tFloat, fn(tFloat, tFloat))),
+    // sin : Float -> Float
+    ast.foreignBinding("sin", fn(tFloat, tFloat)),
+    // cos : Float -> Float
+    ast.foreignBinding("cos", fn(tFloat, tFloat)),
+    // tan : Float -> Float
+    ast.foreignBinding("tan", fn(tFloat, tFloat)),
+    // log : Float -> Float
+    ast.foreignBinding("log", fn(tFloat, tFloat)),
+    // exp : Float -> Float
+    ast.foreignBinding("exp", fn(tFloat, tFloat)),
+    // toString : Float -> String
+    ast.foreignBinding("toString", fn(tFloat, tString)),
+    // fromString : String -> Maybe Float
+    ast.foreignBinding("fromString", fn(tString, tMaybe(tFloat))),
+  ],
+);
+
 /** All prelude modules */
 export const modules = [
   maybeModule,
@@ -338,4 +438,6 @@ export const modules = [
   coreModule,
   stringModule,
   charModule,
+  intModule,
+  floatModule,
 ] as const;

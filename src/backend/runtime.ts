@@ -203,6 +203,138 @@ const $foreign = {
     // toLower : Char -> Char
     toLower: (c) => c.toLowerCase(),
   },
+
+  // ==========================================================================
+  // Int Module
+  // ==========================================================================
+  Int: {
+    // add : Int -> Int -> Int
+    add: (a) => (b) => a + b,
+
+    // sub : Int -> Int -> Int
+    sub: (a) => (b) => a - b,
+
+    // mul : Int -> Int -> Int
+    mul: (a) => (b) => a * b,
+
+    // div : Int -> Int -> Int (truncating division)
+    div: (a) => (b) => Math.trunc(a / b),
+
+    // mod : Int -> Int -> Int
+    mod: (a) => (b) => a % b,
+
+    // neg : Int -> Int
+    neg: (a) => -a,
+
+    // abs : Int -> Int
+    abs: (a) => Math.abs(a),
+
+    // eq : Int -> Int -> Bool
+    eq: (a) => (b) => a === b,
+
+    // lt : Int -> Int -> Bool
+    lt: (a) => (b) => a < b,
+
+    // le : Int -> Int -> Bool
+    le: (a) => (b) => a <= b,
+
+    // gt : Int -> Int -> Bool
+    gt: (a) => (b) => a > b,
+
+    // ge : Int -> Int -> Bool
+    ge: (a) => (b) => a >= b,
+
+    // toFloat : Int -> Float
+    toFloat: (a) => a,
+
+    // toString : Int -> String
+    toString: (a) => String(a),
+
+    // fromString : String -> Maybe Int
+    fromString: (s) => {
+      const n = parseInt(s, 10);
+      if (Number.isNaN(n)) return $con("Nothing");
+      return $con("Just", n);
+    },
+  },
+
+  // ==========================================================================
+  // Float Module
+  // ==========================================================================
+  Float: {
+    // add : Float -> Float -> Float
+    add: (a) => (b) => a + b,
+
+    // sub : Float -> Float -> Float
+    sub: (a) => (b) => a - b,
+
+    // mul : Float -> Float -> Float
+    mul: (a) => (b) => a * b,
+
+    // div : Float -> Float -> Float
+    div: (a) => (b) => a / b,
+
+    // neg : Float -> Float
+    neg: (a) => -a,
+
+    // abs : Float -> Float
+    abs: (a) => Math.abs(a),
+
+    // eq : Float -> Float -> Bool
+    eq: (a) => (b) => a === b,
+
+    // lt : Float -> Float -> Bool
+    lt: (a) => (b) => a < b,
+
+    // le : Float -> Float -> Bool
+    le: (a) => (b) => a <= b,
+
+    // gt : Float -> Float -> Bool
+    gt: (a) => (b) => a > b,
+
+    // ge : Float -> Float -> Bool
+    ge: (a) => (b) => a >= b,
+
+    // floor : Float -> Int
+    floor: (a) => Math.floor(a),
+
+    // ceil : Float -> Int
+    ceil: (a) => Math.ceil(a),
+
+    // round : Float -> Int
+    round: (a) => Math.round(a),
+
+    // sqrt : Float -> Float
+    sqrt: (a) => Math.sqrt(a),
+
+    // pow : Float -> Float -> Float
+    pow: (a) => (b) => Math.pow(a, b),
+
+    // sin : Float -> Float
+    sin: (a) => Math.sin(a),
+
+    // cos : Float -> Float
+    cos: (a) => Math.cos(a),
+
+    // tan : Float -> Float
+    tan: (a) => Math.tan(a),
+
+    // log : Float -> Float
+    log: (a) => Math.log(a),
+
+    // exp : Float -> Float
+    exp: (a) => Math.exp(a),
+
+    // toString : Float -> String
+    toString: (a) => String(a),
+
+    // fromString : String -> Maybe Float
+    fromString: (s) => {
+      const n = parseFloat(s);
+      if (Number.isNaN(n)) return $con("Nothing");
+      return $con("Just", n);
+    },
+  },
 };
 
 `;
