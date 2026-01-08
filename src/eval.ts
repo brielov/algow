@@ -15,11 +15,27 @@ const assertNever = (x: never): never => {
 // Runtime Values
 // =============================================================================
 
-export type Value = VNum | VStr | VChar | VBool | VClosure | VCon | VTuple | VRecord | VRef;
+export type Value =
+  | VInt
+  | VFloat
+  | VStr
+  | VChar
+  | VBool
+  | VClosure
+  | VCon
+  | VTuple
+  | VRecord
+  | VRef;
 
-/** Number value */
-export type VNum = {
-  readonly kind: "VNum";
+/** Integer value */
+export type VInt = {
+  readonly kind: "VInt";
+  readonly value: number;
+};
+
+/** Floating-point value */
+export type VFloat = {
+  readonly kind: "VFloat";
   readonly value: number;
 };
 
@@ -78,7 +94,8 @@ export type VRef = {
 // Value Constructors
 // =============================================================================
 
-export const vnum = (value: number): Value => ({ kind: "VNum", value });
+export const vint = (value: number): Value => ({ kind: "VInt", value });
+export const vfloat = (value: number): Value => ({ kind: "VFloat", value });
 export const vstr = (value: string): Value => ({ kind: "VStr", value });
 export const vchar = (value: string): Value => ({ kind: "VChar", value });
 export const vbool = (value: boolean): Value => ({ kind: "VBool", value });
@@ -130,8 +147,11 @@ export class RuntimeError extends Error {
  */
 export const evaluate = (env: Env, expr: ast.Expr): Value => {
   switch (expr.kind) {
-    case "Num":
-      return vnum(expr.value);
+    case "Int":
+      return vint(expr.value);
+
+    case "Float":
+      return vfloat(expr.value);
 
     case "Str":
       return vstr(expr.value);
@@ -272,48 +292,60 @@ const apply = (func: Value, arg: Value): Value => {
   return vcon((func as VCon).name, [...(func as VCon).args, arg]);
 };
 
-/**
- * Evaluate a binary operation.
- * Assumes the program has been type-checked, so types are correct.
- */
+/** Helper to get numeric value and determine if result should be float */
+const numericOp = (left: Value, right: Value, op: (a: number, b: number) => number): Value => {
+  const l = (left as VInt | VFloat).value;
+  const r = (right as VInt | VFloat).value;
+  const result = op(l, r);
+  // Result is Float if either operand is Float
+  if (left.kind === "VFloat" || right.kind === "VFloat") {
+    return vfloat(result);
+  }
+  return vint(result);
+};
+
 const evalBinOp = (env: Env, expr: ast.BinOp): Value => {
   const left = evaluate(env, expr.left);
   const right = evaluate(env, expr.right);
 
   switch (expr.op) {
-    // Arithmetic (type checker ensures numbers)
+    // Arithmetic (type checker ensures numeric types)
     case "-":
-      return vnum((left as VNum).value - (right as VNum).value);
+      return numericOp(left, right, (a, b) => a - b);
     case "*":
-      return vnum((left as VNum).value * (right as VNum).value);
+      return numericOp(left, right, (a, b) => a * b);
     case "/": {
-      const divisor = (right as VNum).value;
+      const divisor = (right as VInt | VFloat).value;
       if (divisor === 0) throw new RuntimeError("Division by zero");
-      return vnum((left as VNum).value / divisor);
+      return numericOp(left, right, (a, b) => a / b);
     }
 
     // Addition (numbers or strings - dispatch on left operand)
     case "+":
-      if (left.kind === "VNum") {
-        return vnum(left.value + (right as VNum).value);
+      if (left.kind === "VInt" || left.kind === "VFloat") {
+        return numericOp(left, right, (a, b) => a + b);
       }
       return vstr((left as VStr).value + (right as VStr).value);
 
     // Comparisons (numbers, strings, or chars - dispatch on left operand)
     case "<":
-      if (left.kind === "VNum") return vbool(left.value < (right as VNum).value);
+      if (left.kind === "VInt" || left.kind === "VFloat")
+        return vbool((left as VInt | VFloat).value < (right as VInt | VFloat).value);
       if (left.kind === "VChar") return vbool(left.value < (right as VChar).value);
       return vbool((left as VStr).value < (right as VStr).value);
     case ">":
-      if (left.kind === "VNum") return vbool(left.value > (right as VNum).value);
+      if (left.kind === "VInt" || left.kind === "VFloat")
+        return vbool((left as VInt | VFloat).value > (right as VInt | VFloat).value);
       if (left.kind === "VChar") return vbool(left.value > (right as VChar).value);
       return vbool((left as VStr).value > (right as VStr).value);
     case "<=":
-      if (left.kind === "VNum") return vbool(left.value <= (right as VNum).value);
+      if (left.kind === "VInt" || left.kind === "VFloat")
+        return vbool((left as VInt | VFloat).value <= (right as VInt | VFloat).value);
       if (left.kind === "VChar") return vbool(left.value <= (right as VChar).value);
       return vbool((left as VStr).value <= (right as VStr).value);
     case ">=":
-      if (left.kind === "VNum") return vbool(left.value >= (right as VNum).value);
+      if (left.kind === "VInt" || left.kind === "VFloat")
+        return vbool((left as VInt | VFloat).value >= (right as VInt | VFloat).value);
       if (left.kind === "VChar") return vbool(left.value >= (right as VChar).value);
       return vbool((left as VStr).value >= (right as VStr).value);
 
@@ -329,11 +361,17 @@ const evalBinOp = (env: Env, expr: ast.BinOp): Value => {
  * Check structural equality of values.
  */
 const valuesEqual = (a: Value, b: Value): boolean => {
+  // Allow Int == Float comparisons (comparing numeric values)
+  if ((a.kind === "VInt" || a.kind === "VFloat") && (b.kind === "VInt" || b.kind === "VFloat")) {
+    return (a as VInt | VFloat).value === (b as VInt | VFloat).value;
+  }
   if (a.kind !== b.kind) return false;
 
   switch (a.kind) {
-    case "VNum":
-      return a.value === (b as VNum).value;
+    case "VInt":
+      return a.value === (b as VInt).value;
+    case "VFloat":
+      return a.value === (b as VFloat).value;
     case "VStr":
       return a.value === (b as VStr).value;
     case "VChar":
@@ -390,7 +428,7 @@ const matchPattern = (pattern: ast.Pattern, value: Value): MatchResult => {
       return { matched: true, bindings: new Map([[pattern.name, value]]) };
 
     case "PLit": {
-      if (typeof pattern.value === "number" && value.kind === "VNum") {
+      if (typeof pattern.value === "number" && (value.kind === "VInt" || value.kind === "VFloat")) {
         return pattern.value === value.value
           ? { matched: true, bindings: new Map() }
           : { matched: false };
@@ -551,7 +589,9 @@ const evalMatch = (env: Env, expr: ast.Match): Value => {
  */
 export const valueToString = (value: Value): string => {
   switch (value.kind) {
-    case "VNum":
+    case "VInt":
+      return String(value.value);
+    case "VFloat":
       return String(value.value);
     case "VStr":
       return `"${value.value}"`;

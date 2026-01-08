@@ -17,7 +17,7 @@ describe("Binder", () => {
       // let x = 1 in x
       const expr = ast.let_(
         "x",
-        ast.num(1),
+        ast.int(1),
         ast.var_("x", { start: 13, end: 14 }),
         { start: 0, end: 14 },
         { start: 4, end: 5 },
@@ -46,12 +46,12 @@ describe("Binder", () => {
       // let x = 1 in let x = 2 in x
       const inner = ast.let_(
         "x",
-        ast.num(2),
+        ast.int(2),
         ast.var_("x", { start: 25, end: 26 }),
         { start: 13, end: 26 },
         { start: 17, end: 18 },
       );
-      const expr = ast.let_("x", ast.num(1), inner, { start: 0, end: 26 }, { start: 4, end: 5 });
+      const expr = ast.let_("x", ast.int(1), inner, { start: 0, end: 26 }, { start: 4, end: 5 });
       const result = bind(expr);
 
       expect(result.diagnostics).toHaveLength(0);
@@ -85,7 +85,7 @@ describe("Binder", () => {
       const fn = ast.abs("x", body, undefined, { start: 10, end: 11 });
       const expr = ast.letRec(
         [ast.recBinding("f", fn, { start: 8, end: 9 })],
-        ast.app(ast.var_("f", { start: 21, end: 22 }), ast.num(1)),
+        ast.app(ast.var_("f", { start: 21, end: 22 }), ast.int(1)),
         { start: 0, end: 25 },
       );
       const result = bind(expr);
@@ -99,31 +99,31 @@ describe("Binder", () => {
     });
 
     it("binds if expression", () => {
-      const expr = ast.if_(ast.bool(true), ast.num(1), ast.num(2));
+      const expr = ast.if_(ast.bool(true), ast.int(1), ast.int(2));
       const result = bind(expr);
       expect(result.diagnostics).toHaveLength(0);
     });
 
     it("binds binary operation", () => {
-      const expr = ast.binOp("+", ast.num(1), ast.num(2));
+      const expr = ast.binOp("+", ast.int(1), ast.int(2));
       const result = bind(expr);
       expect(result.diagnostics).toHaveLength(0);
     });
 
     it("binds tuple", () => {
-      const expr = ast.tuple([ast.num(1), ast.num(2)]);
+      const expr = ast.tuple([ast.int(1), ast.int(2)]);
       const result = bind(expr);
       expect(result.diagnostics).toHaveLength(0);
     });
 
     it("binds record", () => {
-      const expr = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
+      const expr = ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]);
       const result = bind(expr);
       expect(result.diagnostics).toHaveLength(0);
     });
 
     it("binds field access", () => {
-      const rec = ast.record([ast.field("x", ast.num(1))]);
+      const rec = ast.record([ast.field("x", ast.int(1))]);
       const expr = ast.fieldAccess(rec, "x");
       const result = bind(expr);
       expect(result.diagnostics).toHaveLength(0);
@@ -134,7 +134,7 @@ describe("Binder", () => {
       const x = ast.var_("x", { start: 6, end: 7 });
       const yRef = ast.var_("y", { start: 18, end: 19 });
       const yPat = ast.pvar("y", { start: 13, end: 14 });
-      const expr = ast.let_("x", ast.num(1), ast.match(x, [ast.case_(yPat, yRef)]), undefined, {
+      const expr = ast.let_("x", ast.int(1), ast.match(x, [ast.case_(yPat, yRef)]), undefined, {
         start: 4,
         end: 5,
       });
@@ -149,8 +149,8 @@ describe("Binder", () => {
     it("binds match expression with wildcard pattern", () => {
       const expr = ast.let_(
         "x",
-        ast.num(1),
-        ast.match(ast.var_("x", { start: 10, end: 11 }), [ast.case_(ast.pwildcard(), ast.num(0))]),
+        ast.int(1),
+        ast.match(ast.var_("x", { start: 10, end: 11 }), [ast.case_(ast.pwildcard(), ast.int(0))]),
         undefined,
         { start: 4, end: 5 },
       );
@@ -161,9 +161,9 @@ describe("Binder", () => {
     it("binds match expression with literal pattern", () => {
       const expr = ast.let_(
         "x",
-        ast.num(1),
+        ast.int(1),
         ast.match(ast.var_("x", { start: 10, end: 11 }), [
-          ast.case_(ast.plit(0), ast.num(0)),
+          ast.case_(ast.plit(0), ast.int(0)),
           ast.case_(ast.pvar("n"), ast.var_("n", { start: 30, end: 31 })),
         ]),
         undefined,
@@ -176,7 +176,7 @@ describe("Binder", () => {
     it("binds match expression with tuple pattern", () => {
       const expr = ast.let_(
         "p",
-        ast.tuple([ast.num(1), ast.num(2)]),
+        ast.tuple([ast.int(1), ast.int(2)]),
         ast.match(ast.var_("p", { start: 20, end: 21 }), [
           ast.case_(
             ast.ptuple([
@@ -200,7 +200,7 @@ describe("Binder", () => {
     it("binds match expression with record pattern", () => {
       const expr = ast.let_(
         "r",
-        ast.record([ast.field("x", ast.num(1))]),
+        ast.record([ast.field("x", ast.int(1))]),
         ast.match(ast.var_("r", { start: 20, end: 21 }), [
           ast.case_(
             ast.precord([ast.pfield("x", ast.pvar("val", { start: 30, end: 33 }))]),
@@ -243,7 +243,7 @@ describe("Binder", () => {
           ),
           ast.case_(
             ast.pcon("Nothing", [], { start: 41, end: 48 }, { start: 41, end: 48 }),
-            ast.num(0),
+            ast.int(0),
           ),
         ]),
         undefined,
@@ -261,7 +261,7 @@ describe("Binder", () => {
       const expr = ast.match(ast.var_("x", { start: 6, end: 7 }), [
         ast.case_(
           ast.pcon("Nothing", [], { start: 13, end: 20 }), // No nameSpan, uses span
-          ast.num(0),
+          ast.int(0),
         ),
       ]);
       const result = bindWithConstructors(["Nothing", "x"], expr);
@@ -272,7 +272,7 @@ describe("Binder", () => {
       const expr = ast.match(ast.var_("x", { start: 6, end: 7 }), [
         ast.case_(
           ast.pcon("Nothing", []), // No span at all
-          ast.num(0),
+          ast.int(0),
         ),
       ]);
       const result = bindWithConstructors(["Nothing", "x"], expr);
@@ -286,7 +286,7 @@ describe("Binder", () => {
       // let x = 1 in let y = x in y
       const expr = ast.let_(
         "x",
-        ast.num(1),
+        ast.int(1),
         ast.let_(
           "y",
           ast.var_("x", { start: 17, end: 18 }),
@@ -340,7 +340,7 @@ describe("Binder", () => {
       });
 
       it("returns empty array for definition with no references", () => {
-        const expr = ast.let_("x", ast.num(1), ast.num(2), undefined, { start: 4, end: 5 });
+        const expr = ast.let_("x", ast.int(1), ast.int(2), undefined, { start: 4, end: 5 });
         const result = bind(expr);
         const xDef = result.symbols.definitions[0]!;
         const refs = findReferences(result.symbols, xDef);

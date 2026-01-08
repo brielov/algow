@@ -135,6 +135,9 @@ require(["vs/editor/editor.main"], () => {
   const goEl = document.getElementById("go")!;
   const irEl = document.getElementById("ir")!;
 
+  // Optimize toggle
+  const optimizeEl = document.getElementById("optimize") as HTMLInputElement;
+
   // Tab switching
   const tabs = document.querySelectorAll<HTMLButtonElement>(".output-tab");
   const contents = document.querySelectorAll<HTMLElement>(".output-content");
@@ -154,7 +157,7 @@ require(["vs/editor/editor.main"], () => {
   });
 
   // Create LSP bridge
-  const bridge = createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl);
+  const bridge = createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl, optimizeEl);
   void bridge.start();
 });
 
@@ -188,6 +191,7 @@ function createLspBridge(
   jsEl: HTMLElement,
   goEl: HTMLElement,
   irEl: HTMLElement,
+  optimizeEl: HTMLInputElement,
 ) {
   const model = editor.getModel()!;
   const uri = model.uri.toString();
@@ -309,6 +313,7 @@ function createLspBridge(
           try {
             const result = (await sendRequest("algow/compile", {
               textDocument: { uri },
+              optimize: optimizeEl.checked,
             })) as { success: boolean; code?: string; error?: string };
 
             jsEl.className =
@@ -327,6 +332,7 @@ function createLspBridge(
           try {
             const result = (await sendRequest("algow/compileGo", {
               textDocument: { uri },
+              optimize: optimizeEl.checked,
             })) as { success: boolean; code?: string; error?: string };
 
             goEl.className =
@@ -345,6 +351,7 @@ function createLspBridge(
           try {
             const result = (await sendRequest("algow/emitIR", {
               textDocument: { uri },
+              optimize: optimizeEl.checked,
             })) as { success: boolean; ir?: string; error?: string };
 
             irEl.className =
@@ -396,6 +403,11 @@ function createLspBridge(
             textDocument: { uri, version },
             contentChanges: [{ text: model.getValue() }],
           });
+          scheduleEvaluate();
+        });
+
+        // Re-evaluate when optimize toggle changes
+        optimizeEl.addEventListener("change", () => {
           scheduleEvaluate();
         });
 

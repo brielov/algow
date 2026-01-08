@@ -5,24 +5,24 @@ import * as ast from "../src/ast";
 
 describe("AST Helper Functions", () => {
   describe("literal constructors", () => {
-    it("creates number literal", () => {
-      const node = ast.num(42);
-      expect(node).toEqual({ kind: "Num", value: 42 });
+    it("creates int literal", () => {
+      const node = ast.int(42);
+      expect(node).toEqual({ kind: "Int", value: 42 });
     });
 
-    it("creates number literal with float", () => {
-      const node = ast.num(3.14);
-      expect(node).toEqual({ kind: "Num", value: 3.14 });
+    it("creates float literal", () => {
+      const node = ast.float(3.14);
+      expect(node).toEqual({ kind: "Float", value: 3.14 });
     });
 
-    it("creates number literal with zero", () => {
-      const node = ast.num(0);
-      expect(node).toEqual({ kind: "Num", value: 0 });
+    it("creates int literal with zero", () => {
+      const node = ast.int(0);
+      expect(node).toEqual({ kind: "Int", value: 0 });
     });
 
-    it("creates number literal with negative", () => {
-      const node = ast.num(-5);
-      expect(node).toEqual({ kind: "Num", value: -5 });
+    it("creates int literal with negative", () => {
+      const node = ast.int(-5);
+      expect(node).toEqual({ kind: "Int", value: -5 });
     });
 
     it("creates boolean true", () => {
@@ -73,23 +73,23 @@ describe("AST Helper Functions", () => {
 
   describe("control flow constructors", () => {
     it("creates if expression", () => {
-      const node = ast.if_(ast.bool(true), ast.num(1), ast.num(0));
+      const node = ast.if_(ast.bool(true), ast.int(1), ast.int(0));
       expect(node).toEqual({
         kind: "If",
         cond: { kind: "Bool", value: true },
-        then: { kind: "Num", value: 1 },
-        else: { kind: "Num", value: 0 },
+        then: { kind: "Int", value: 1 },
+        else: { kind: "Int", value: 0 },
       });
     });
   });
 
   describe("binding constructors", () => {
     it("creates let expression", () => {
-      const node = ast.let_("x", ast.num(42), ast.var_("x"));
+      const node = ast.let_("x", ast.int(42), ast.var_("x"));
       expect(node).toEqual({
         kind: "Let",
         name: "x",
-        value: { kind: "Num", value: 42 },
+        value: { kind: "Int", value: 42 },
         body: { kind: "Var", name: "x" },
       });
     });
@@ -106,19 +106,19 @@ describe("AST Helper Functions", () => {
 
   describe("operator constructors", () => {
     it("creates binary operator", () => {
-      const node = ast.binOp("+", ast.num(1), ast.num(2));
+      const node = ast.binOp("+", ast.int(1), ast.int(2));
       expect(node).toEqual({
         kind: "BinOp",
         op: "+",
-        left: { kind: "Num", value: 1 },
-        right: { kind: "Num", value: 2 },
+        left: { kind: "Int", value: 1 },
+        right: { kind: "Int", value: 2 },
       });
     });
 
     it("creates all operators", () => {
       const ops: ast.Op[] = ["+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!="];
       for (const op of ops) {
-        const node = ast.binOp(op, ast.num(1), ast.num(2));
+        const node = ast.binOp(op, ast.int(1), ast.int(2));
         expect(node.op).toBe(op);
       }
     });
@@ -132,17 +132,17 @@ describe("AST Helper Functions", () => {
     });
 
     it("creates single element tuple", () => {
-      const node = ast.tuple([ast.num(1)]);
+      const node = ast.tuple([ast.int(1)]);
       expect(node.kind).toBe("Tuple");
       expect(node.elements.length).toBe(1);
-      expect(node.elements[0]?.kind).toBe("Num");
+      expect(node.elements[0]?.kind).toBe("Int");
     });
 
     it("creates multi-element tuple", () => {
-      const node = ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]);
+      const node = ast.tuple([ast.int(1), ast.str("hello"), ast.bool(true)]);
       expect(node.kind).toBe("Tuple");
       expect(node.elements.length).toBe(3);
-      expect(node.elements[0]?.kind).toBe("Num");
+      expect(node.elements[0]?.kind).toBe("Int");
       expect(node.elements[1]?.kind).toBe("Str");
       expect(node.elements[2]?.kind).toBe("Bool");
     });
@@ -153,12 +153,12 @@ describe("AST Helper Functions", () => {
     });
 
     it("creates record with fields", () => {
-      const node = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
+      const node = ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]);
       expect(node).toEqual({
         kind: "Record",
         fields: [
-          { name: "x", value: { kind: "Num", value: 1 } },
-          { name: "y", value: { kind: "Num", value: 2 } },
+          { name: "x", value: { kind: "Int", value: 1 } },
+          { name: "y", value: { kind: "Int", value: 2 } },
         ],
       });
     });
@@ -406,10 +406,10 @@ describe("AST Helper Functions", () => {
 
     it("builds complex match expression", () => {
       const node = ast.match(ast.var_("xs"), [
-        ast.case_(ast.pcon("Nil", []), ast.num(0)),
+        ast.case_(ast.pcon("Nil", []), ast.int(0)),
         ast.case_(
           ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
-          ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
+          ast.binOp("+", ast.int(1), ast.app(ast.var_("length"), ast.var_("rest"))),
         ),
       ]);
       expect(node.cases).toHaveLength(2);
@@ -420,8 +420,8 @@ describe("AST Helper Functions", () => {
     it("builds nested let expressions", () => {
       const node = ast.let_(
         "x",
-        ast.num(1),
-        ast.let_("y", ast.num(2), ast.let_("z", ast.num(3), ast.var_("z"))),
+        ast.int(1),
+        ast.let_("y", ast.int(2), ast.let_("z", ast.int(3), ast.var_("z"))),
       );
       expect(node.kind).toBe("Let");
       expect((node.body as ast.Let).kind).toBe("Let");
@@ -439,8 +439,8 @@ describe("AST Helper Functions", () => {
       // (1 + 2) * (3 - 4)
       const node = ast.binOp(
         "*",
-        ast.binOp("+", ast.num(1), ast.num(2)),
-        ast.binOp("-", ast.num(3), ast.num(4)),
+        ast.binOp("+", ast.int(1), ast.int(2)),
+        ast.binOp("-", ast.int(3), ast.int(4)),
       );
       expect(node.op).toBe("*");
       expect((node.left as ast.BinOp).op).toBe("+");
@@ -455,18 +455,18 @@ describe("AST Helper Functions", () => {
             ast.abs(
               "n",
               ast.if_(
-                ast.binOp("==", ast.var_("n"), ast.num(0)),
-                ast.num(1),
+                ast.binOp("==", ast.var_("n"), ast.int(0)),
+                ast.int(1),
                 ast.binOp(
                   "*",
                   ast.var_("n"),
-                  ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                  ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.int(1))),
                 ),
               ),
             ),
           ),
         ],
-        ast.app(ast.var_("fact"), ast.num(5)),
+        ast.app(ast.var_("fact"), ast.int(5)),
       );
       expect(node.kind).toBe("LetRec");
       expect(node.bindings[0]?.name).toBe("fact");
@@ -475,7 +475,7 @@ describe("AST Helper Functions", () => {
 
   describe("readonly immutability", () => {
     it("produces readonly expression structures", () => {
-      const node = ast.tuple([ast.num(1), ast.num(2)]);
+      const node = ast.tuple([ast.int(1), ast.int(2)]);
       // TypeScript would error if we try to modify:
       // node.elements = []; // Error: Cannot assign to 'elements'
       expect(node.elements).toHaveLength(2);

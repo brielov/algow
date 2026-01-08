@@ -5,7 +5,7 @@ import { lowerToIR } from "../src/lower";
 
 // Create a minimal CheckOutput with empty substitution
 const makeCheckOutput = (subst: Map<string, Type> = new Map()): CheckOutput => ({
-  type: { kind: "TCon", name: "number" },
+  type: { kind: "TCon", name: "Int" },
   subst,
   diagnostics: [],
   constraints: [],
@@ -23,7 +23,7 @@ const makeTypeEnv = (bindings: Record<string, Type> = {}): TypeEnv => {
 };
 
 // Type helpers
-const numType: Type = { kind: "TCon", name: "number" };
+const intType: Type = { kind: "TCon", name: "Int" };
 const strType: Type = { kind: "TCon", name: "string" };
 const boolType: Type = { kind: "TCon", name: "boolean" };
 const funType = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret });
@@ -31,7 +31,7 @@ const funType = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret })
 describe("lowerToIR", () => {
   describe("Literals", () => {
     it("lowers number literals", () => {
-      const expr = ast.num(42);
+      const expr = ast.int(42);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRAtomExpr");
@@ -73,7 +73,7 @@ describe("lowerToIR", () => {
   describe("Variables", () => {
     it("lowers variable references", () => {
       const expr = ast.var_("x");
-      const env = makeTypeEnv({ x: numType });
+      const env = makeTypeEnv({ x: intType });
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
       expect(ir.kind).toBe("IRAtomExpr");
@@ -96,7 +96,7 @@ describe("lowerToIR", () => {
   describe("Let bindings", () => {
     it("lowers simple let binding", () => {
       // let x = 1 in x
-      const expr = ast.let_("x", ast.num(1), ast.var_("x"));
+      const expr = ast.let_("x", ast.int(1), ast.var_("x"));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -108,7 +108,7 @@ describe("lowerToIR", () => {
 
     it("lowers nested let bindings", () => {
       // let x = 1 in let y = 2 in x
-      const expr = ast.let_("x", ast.num(1), ast.let_("y", ast.num(2), ast.var_("x")));
+      const expr = ast.let_("x", ast.int(1), ast.let_("y", ast.int(2), ast.var_("x")));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -184,8 +184,8 @@ describe("lowerToIR", () => {
   describe("Function application", () => {
     it("lowers simple application", () => {
       // f 1
-      const expr = ast.app(ast.var_("f"), ast.num(1));
-      const env = makeTypeEnv({ f: funType(numType, numType) });
+      const expr = ast.app(ast.var_("f"), ast.int(1));
+      const env = makeTypeEnv({ f: funType(intType, intType) });
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
       // Should produce a let with IRAppBinding
@@ -197,9 +197,9 @@ describe("lowerToIR", () => {
 
     it("lowers curried application", () => {
       // f 1 2
-      const expr = ast.app(ast.app(ast.var_("f"), ast.num(1)), ast.num(2));
-      const innerFnType = funType(numType, numType);
-      const outerFnType = funType(numType, innerFnType);
+      const expr = ast.app(ast.app(ast.var_("f"), ast.int(1)), ast.int(2));
+      const innerFnType = funType(intType, intType);
+      const outerFnType = funType(intType, innerFnType);
       const env = makeTypeEnv({ f: outerFnType });
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
@@ -211,7 +211,7 @@ describe("lowerToIR", () => {
   describe("Binary operations", () => {
     it("lowers addition", () => {
       // 1 + 2
-      const expr = ast.binOp("+", ast.num(1), ast.num(2));
+      const expr = ast.binOp("+", ast.int(1), ast.int(2));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -225,7 +225,7 @@ describe("lowerToIR", () => {
 
     it("lowers comparison operators", () => {
       // 1 < 2
-      const expr = ast.binOp("<", ast.num(1), ast.num(2));
+      const expr = ast.binOp("<", ast.int(1), ast.int(2));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -252,8 +252,8 @@ describe("lowerToIR", () => {
 
     it("normalizes complex operands to atoms", () => {
       // (1 + 2) + 3
-      const left = ast.binOp("+", ast.num(1), ast.num(2));
-      const expr = ast.binOp("+", left, ast.num(3));
+      const left = ast.binOp("+", ast.int(1), ast.int(2));
+      const expr = ast.binOp("+", left, ast.int(3));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       // First let should bind the result of (1 + 2)
@@ -269,7 +269,7 @@ describe("lowerToIR", () => {
   describe("If expressions", () => {
     it("lowers if expression", () => {
       // if true then 1 else 2
-      const expr = ast.if_(ast.bool(true), ast.num(1), ast.num(2));
+      const expr = ast.if_(ast.bool(true), ast.int(1), ast.int(2));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -284,8 +284,8 @@ describe("lowerToIR", () => {
 
     it("normalizes complex condition", () => {
       // if 1 < 2 then 3 else 4
-      const cond = ast.binOp("<", ast.num(1), ast.num(2));
-      const expr = ast.if_(cond, ast.num(3), ast.num(4));
+      const cond = ast.binOp("<", ast.int(1), ast.int(2));
+      const expr = ast.if_(cond, ast.int(3), ast.int(4));
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       // First binding should be the comparison, then the if
@@ -303,7 +303,7 @@ describe("lowerToIR", () => {
   describe("Tuples", () => {
     it("lowers tuple", () => {
       // (1, 2)
-      const expr = ast.tuple([ast.num(1), ast.num(2)]);
+      const expr = ast.tuple([ast.int(1), ast.int(2)]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -317,7 +317,7 @@ describe("lowerToIR", () => {
 
     it("unwraps single-element tuple", () => {
       // (1) => 1
-      const expr = ast.tuple([ast.num(1)]);
+      const expr = ast.tuple([ast.int(1)]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRAtomExpr");
@@ -325,7 +325,7 @@ describe("lowerToIR", () => {
 
     it("normalizes complex tuple elements", () => {
       // (1 + 2, 3)
-      const expr = ast.tuple([ast.binOp("+", ast.num(1), ast.num(2)), ast.num(3)]);
+      const expr = ast.tuple([ast.binOp("+", ast.int(1), ast.int(2)), ast.int(3)]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       // First binding for 1 + 2, then tuple binding
@@ -339,7 +339,7 @@ describe("lowerToIR", () => {
   describe("Records", () => {
     it("lowers record", () => {
       // { x = 1, y = 2 }
-      const expr = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
+      const expr = ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -355,7 +355,7 @@ describe("lowerToIR", () => {
 
     it("lowers field access", () => {
       // r.x
-      const recordType: Type = { kind: "TRecord", fields: new Map([["x", numType]]), row: null };
+      const recordType: Type = { kind: "TRecord", fields: new Map([["x", intType]]), row: null };
       const expr = ast.fieldAccess(ast.var_("r"), "x");
       const env = makeTypeEnv({ r: recordType });
       const ir = lowerToIR(expr, env, makeCheckOutput());
@@ -373,7 +373,7 @@ describe("lowerToIR", () => {
   describe("Pattern matching", () => {
     it("lowers match with variable pattern", () => {
       // match 1 with x => x end
-      const expr = ast.match(ast.num(1), [ast.case_(ast.pvar("x"), ast.var_("x"))]);
+      const expr = ast.match(ast.int(1), [ast.case_(ast.pvar("x"), ast.var_("x"))]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -388,7 +388,7 @@ describe("lowerToIR", () => {
 
     it("lowers match with wildcard pattern", () => {
       // match 1 with _ => 0 end
-      const expr = ast.match(ast.num(1), [ast.case_(ast.pwildcard(), ast.num(0))]);
+      const expr = ast.match(ast.int(1), [ast.case_(ast.pwildcard(), ast.int(0))]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
       expect(ir.kind).toBe("IRLet");
@@ -399,7 +399,7 @@ describe("lowerToIR", () => {
 
     it("lowers match with literal patterns", () => {
       // match 1 with 0 => "zero" | _ => "other" end
-      const expr = ast.match(ast.num(1), [
+      const expr = ast.match(ast.int(1), [
         ast.case_(ast.plit(0), ast.str("zero")),
         ast.case_(ast.pwildcard(), ast.str("other")),
       ]);
@@ -415,11 +415,11 @@ describe("lowerToIR", () => {
 
     it("lowers match with constructor pattern", () => {
       // match x with Just n => n | Nothing => 0 end
-      const maybeType: Type = { kind: "TApp", con: { kind: "TCon", name: "Maybe" }, arg: numType };
+      const maybeType: Type = { kind: "TApp", con: { kind: "TCon", name: "Maybe" }, arg: intType };
       const env = makeTypeEnv({ x: maybeType });
       const expr = ast.match(ast.var_("x"), [
         ast.case_(ast.pcon("Just", [ast.pvar("n")]), ast.var_("n")),
-        ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+        ast.case_(ast.pcon("Nothing", []), ast.int(0)),
       ]);
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
@@ -435,8 +435,8 @@ describe("lowerToIR", () => {
 
     it("lowers match with tuple pattern", () => {
       // match (1, 2) with (a, b) => a end
-      const _tupleType: Type = { kind: "TTuple", elements: [numType, numType] };
-      const expr = ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+      const _tupleType: Type = { kind: "TTuple", elements: [intType, intType] };
+      const expr = ast.match(ast.tuple([ast.int(1), ast.int(2)]), [
         ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), ast.var_("a")),
       ]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
@@ -457,8 +457,8 @@ describe("lowerToIR", () => {
 
     it("lowers match with record pattern", () => {
       // match { x = 1 } with { x = n } => n end
-      const _recordType: Type = { kind: "TRecord", fields: new Map([["x", numType]]), row: null };
-      const expr = ast.match(ast.record([ast.field("x", ast.num(1))]), [
+      const _recordType: Type = { kind: "TRecord", fields: new Map([["x", intType]]), row: null };
+      const expr = ast.match(ast.record([ast.field("x", ast.int(1))]), [
         ast.case_(ast.precord([ast.pfield("x", ast.pvar("n"))]), ast.var_("n")),
       ]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
@@ -485,10 +485,10 @@ describe("lowerToIR", () => {
       const right = ast.app(ast.var_("g"), ast.var_("y"));
       const expr = ast.binOp("+", left, right);
       const env = makeTypeEnv({
-        f: funType(numType, numType),
-        g: funType(numType, numType),
-        x: numType,
-        y: numType,
+        f: funType(intType, intType),
+        g: funType(intType, intType),
+        x: intType,
+        y: intType,
       });
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
@@ -506,9 +506,9 @@ describe("lowerToIR", () => {
 
     it("ensures all application arguments are atoms", () => {
       // f (1 + 2)
-      const arg = ast.binOp("+", ast.num(1), ast.num(2));
+      const arg = ast.binOp("+", ast.int(1), ast.int(2));
       const expr = ast.app(ast.var_("f"), arg);
-      const env = makeTypeEnv({ f: funType(numType, numType) });
+      const env = makeTypeEnv({ f: funType(intType, intType) });
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
       // Walk to find the app and verify both operands are atoms
@@ -527,7 +527,7 @@ describe("lowerToIR", () => {
   describe("Type resolution", () => {
     it("applies substitution to types", () => {
       const subst = new Map<string, Type>();
-      subst.set("a", numType);
+      subst.set("a", intType);
 
       // x has type variable 'a' which should resolve to number
       const env: TypeEnv = new Map();
@@ -538,13 +538,13 @@ describe("lowerToIR", () => {
 
       expect(ir.kind).toBe("IRAtomExpr");
       if (ir.kind === "IRAtomExpr" && ir.atom.kind === "IRVar") {
-        expect(ir.atom.type).toEqual(numType);
+        expect(ir.atom.type).toEqual(intType);
       }
     });
 
     it("applies substitution to tuple types", () => {
       const subst = new Map<string, Type>();
-      subst.set("a", numType);
+      subst.set("a", intType);
 
       // x has tuple type (a, a) which should resolve to (number, number)
       const tupleWithVars: Type = {
@@ -564,15 +564,15 @@ describe("lowerToIR", () => {
       if (ir.kind === "IRAtomExpr" && ir.atom.kind === "IRVar") {
         expect(ir.atom.type.kind).toBe("TTuple");
         if (ir.atom.type.kind === "TTuple") {
-          expect(ir.atom.type.elements[0]).toEqual(numType);
-          expect(ir.atom.type.elements[1]).toEqual(numType);
+          expect(ir.atom.type.elements[0]).toEqual(intType);
+          expect(ir.atom.type.elements[1]).toEqual(intType);
         }
       }
     });
 
     it("applies substitution to TApp types", () => {
       const subst = new Map<string, Type>();
-      subst.set("a", numType);
+      subst.set("a", intType);
 
       // x has type Maybe a
       const maybeA: Type = {
@@ -588,7 +588,7 @@ describe("lowerToIR", () => {
 
       expect(ir.kind).toBe("IRAtomExpr");
       if (ir.kind === "IRAtomExpr" && ir.atom.kind === "IRVar" && ir.atom.type.kind === "TApp") {
-        expect(ir.atom.type.arg).toEqual(numType);
+        expect(ir.atom.type.arg).toEqual(intType);
       }
     });
   });
@@ -596,14 +596,14 @@ describe("lowerToIR", () => {
   describe("Error handling", () => {
     it("throws for field access on non-record type", () => {
       const expr = ast.fieldAccess(ast.var_("x"), "field");
-      const env = makeTypeEnv({ x: numType });
+      const env = makeTypeEnv({ x: intType });
       expect(() => lowerToIR(expr, env, makeCheckOutput())).toThrow(
         "Expected record type with field field, got TCon",
       );
     });
 
     it("throws for field access on record without that field", () => {
-      const recordType: Type = { kind: "TRecord", fields: new Map([["y", numType]]), row: null };
+      const recordType: Type = { kind: "TRecord", fields: new Map([["y", intType]]), row: null };
       const expr = ast.fieldAccess(ast.var_("r"), "x");
       const env = makeTypeEnv({ r: recordType });
       expect(() => lowerToIR(expr, env, makeCheckOutput())).toThrow(
@@ -615,8 +615,8 @@ describe("lowerToIR", () => {
   describe("Boolean literal patterns", () => {
     it("lowers match with true literal pattern", () => {
       const expr = ast.match(ast.bool(true), [
-        ast.case_(ast.plit(true), ast.num(1)),
-        ast.case_(ast.plit(false), ast.num(0)),
+        ast.case_(ast.plit(true), ast.int(1)),
+        ast.case_(ast.plit(false), ast.int(0)),
       ]);
       const ir = lowerToIR(expr, makeTypeEnv(), makeCheckOutput());
 
@@ -636,7 +636,7 @@ describe("lowerToIR", () => {
       // Simulate: use Math (..); Math.double 5
       // where double is imported into the type environment
       const expr = ast.qualifiedVar("Math", "double");
-      const env = makeTypeEnv({ double: funType(numType, numType) });
+      const env = makeTypeEnv({ double: funType(intType, intType) });
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
       expect(ir.kind).toBe("IRAtomExpr");
@@ -661,7 +661,7 @@ describe("lowerToIR", () => {
     it("lowers foreign function reference to IRForeignVar", () => {
       // Simulate a foreign function 'length' from 'String' module
       const expr = ast.var_("length");
-      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const env = makeTypeEnv({ length: funType(strType, intType) });
       const foreignFunctions = new Map([["length", { module: "String", name: "length" }]]);
 
       const ir = lowerToIR(expr, env, makeCheckOutput(), foreignFunctions);
@@ -679,7 +679,7 @@ describe("lowerToIR", () => {
     it("lowers foreign function application", () => {
       // length "hello" where length is a foreign function
       const expr = ast.app(ast.var_("length"), ast.str("hello"));
-      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const env = makeTypeEnv({ length: funType(strType, intType) });
       const foreignFunctions = new Map([["length", { module: "String", name: "length" }]]);
 
       const ir = lowerToIR(expr, env, makeCheckOutput(), foreignFunctions);
@@ -691,7 +691,7 @@ describe("lowerToIR", () => {
 
     it("lowers multiple foreign functions in same expression", () => {
       // concat (slice "hello" 0 3) " world"
-      const sliceType = funType(strType, funType(numType, funType(numType, strType)));
+      const sliceType = funType(strType, funType(intType, funType(intType, strType)));
       const concatType = funType(strType, funType(strType, strType));
 
       const env = makeTypeEnv({
@@ -704,9 +704,9 @@ describe("lowerToIR", () => {
       ]);
 
       // slice "hello" 0
-      const slicePartial = ast.app(ast.app(ast.var_("slice"), ast.str("hello")), ast.num(0));
+      const slicePartial = ast.app(ast.app(ast.var_("slice"), ast.str("hello")), ast.int(0));
       // slice "hello" 0 3
-      const sliceResult = ast.app(slicePartial, ast.num(3));
+      const sliceResult = ast.app(slicePartial, ast.int(3));
       // concat (slice "hello" 0 3) " world"
       const expr = ast.app(ast.app(ast.var_("concat"), sliceResult), ast.str(" world"));
 
@@ -723,7 +723,7 @@ describe("lowerToIR", () => {
       const lengthApp = ast.app(ast.var_("length"), ast.str("hi"));
       const expr = ast.let_("double", doubleFn, ast.app(ast.var_("double"), lengthApp));
 
-      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const env = makeTypeEnv({ length: funType(strType, intType) });
       const foreignFunctions = new Map([["length", { module: "String", name: "length" }]]);
 
       const ir = lowerToIR(expr, env, makeCheckOutput(), foreignFunctions);
@@ -734,7 +734,7 @@ describe("lowerToIR", () => {
     it("foreign function without ForeignMap falls back to regular variable", () => {
       // When no foreignFunctions map is provided, 'length' is treated as regular var
       const expr = ast.var_("length");
-      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const env = makeTypeEnv({ length: funType(strType, intType) });
 
       const ir = lowerToIR(expr, env, makeCheckOutput());
 
@@ -755,14 +755,16 @@ describe("lowerToIR", () => {
       const expr = ast.qualifiedVar("String", "length");
 
       // Global env has 'length' from List module (non-foreign)
-      const env = makeTypeEnv({ length: funType(strType, numType) });
+      const env = makeTypeEnv({ length: funType(strType, intType) });
 
       // Module environment with String module that has foreign 'length'
       const moduleEnv: ModuleTypeEnv = new Map([
         [
           "String",
           {
-            typeEnv: new Map([["length", { vars: [], constraints: [], type: funType(strType, numType) }]]),
+            typeEnv: new Map([
+              ["length", { vars: [], constraints: [], type: funType(strType, intType) }],
+            ]),
             registry: new Map(),
             constructorNames: [],
             foreignNames: new Set(["length"]),
@@ -791,7 +793,9 @@ describe("lowerToIR", () => {
         [
           "List",
           {
-            typeEnv: new Map([["length", { vars: [], constraints: [], type: funType(strType, numType) }]]),
+            typeEnv: new Map([
+              ["length", { vars: [], constraints: [], type: funType(strType, intType) }],
+            ]),
             registry: new Map(),
             constructorNames: [],
             foreignNames: new Set(), // Not foreign

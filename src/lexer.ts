@@ -19,7 +19,8 @@ export enum TokenKind {
   Eof,
 
   // Literals
-  Number,
+  Int,
+  Float,
   String,
   Char,
 
@@ -289,15 +290,16 @@ const scanNumber = (state: LexerState, start: number): Token => {
     advance(state);
   }
 
-  // Decimal part
+  // Check for decimal part - if present, it's a Float
   if (peek(state) === DOT && isDigit(peekAt(state, 1))) {
     advance(state); // .
     while (isDigit(peek(state))) {
       advance(state);
     }
+    return [TokenKind.Float, start, state.pos];
   }
 
-  return [TokenKind.Number, start, state.pos];
+  return [TokenKind.Int, start, state.pos];
 };
 
 const scanString = (state: LexerState, start: number): Token => {

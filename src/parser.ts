@@ -325,7 +325,7 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
     synchronize(state);
-    return { kind: "expr", expr: ast.num(0) };
+    return { kind: "expr", expr: ast.int(0) };
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
@@ -340,7 +340,7 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
 
   if (!expect(state, TokenKind.Eq, "expected '=' after parameters")) {
     synchronize(state);
-    return { kind: "expr", expr: ast.num(0) };
+    return { kind: "expr", expr: ast.int(0) };
   }
 
   const body = parseExpr(state);
@@ -736,9 +736,14 @@ const parsePrefix = (state: ParserState): ast.Expr => {
   const start = token[1];
 
   switch (kind) {
-    case TokenKind.Number: {
+    case TokenKind.Int: {
       advance(state);
-      return ast.num(parseFloat(text(state, token)), tokenSpan(token));
+      return ast.int(parseInt(text(state, token), 10), tokenSpan(token));
+    }
+
+    case TokenKind.Float: {
+      advance(state);
+      return ast.float(parseFloat(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.String: {
@@ -784,7 +789,7 @@ const parsePrefix = (state: ParserState): ast.Expr => {
       // Parse with high precedence to bind tightly (higher than multiplicative)
       const operand = parsePrecedence(state, Bp.Multiplicative + 1);
       const end = operand.span?.end ?? state.current[1];
-      return ast.binOp("-", ast.num(0, span(start, start)), operand, span(start, end));
+      return ast.binOp("-", ast.int(0, span(start, start)), operand, span(start, end));
     }
 
     case TokenKind.LBrace:
@@ -805,7 +810,7 @@ const parsePrefix = (state: ParserState): ast.Expr => {
     default: {
       error(state, `unexpected token: ${TokenKind[kind]}`);
       advance(state);
-      return ast.num(0);
+      return ast.int(0);
     }
   }
 };
@@ -897,12 +902,12 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
       }
 
       // Tuple indexing: tuple.0, tuple.1, etc.
-      if (at(state, TokenKind.Number)) {
+      if (at(state, TokenKind.Int)) {
         const indexToken = state.current;
         advance(state);
         const indexStr = text(state, indexToken);
         const index = parseInt(indexStr, 10);
-        if (!Number.isInteger(index) || index < 0) {
+        if (index < 0) {
           state.diagnostics.push({
             start: indexToken[1],
             end: indexToken[2],
@@ -967,7 +972,8 @@ const infixBindingPower = (state: ParserState): number => {
 
     case TokenKind.Lower:
     case TokenKind.Upper:
-    case TokenKind.Number:
+    case TokenKind.Int:
+    case TokenKind.Float:
     case TokenKind.String:
     case TokenKind.Char:
     case TokenKind.True:
@@ -996,7 +1002,7 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
   if (at(state, TokenKind.RParen)) {
     advance(state);
     error(state, "empty parentheses");
-    return ast.num(0);
+    return ast.int(0);
   }
 
   // Check if this is an annotated lambda: (name : type) -> body
@@ -1027,7 +1033,7 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
 
       // Not followed by ->, this is an error
       error(state, "expected '->' after annotated parameter");
-      return ast.num(0);
+      return ast.int(0);
     }
 
     // Not an annotated lambda, restore and continue
@@ -1182,7 +1188,7 @@ const parseMatch = (state: ParserState): ast.Expr => {
 const parseRecBinding = (state: ParserState): ast.RecBinding => {
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
-    return ast.recBinding("_error_", ast.num(0));
+    return ast.recBinding("_error_", ast.int(0));
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
@@ -1237,7 +1243,7 @@ const parseLetExpr = (state: ParserState): ast.Expr => {
   // Non-recursive let
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
-    return ast.num(0);
+    return ast.int(0);
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
@@ -1288,7 +1294,8 @@ const PATTERN_STARTS = new Set([
   TokenKind.Underscore,
   TokenKind.Lower,
   TokenKind.Upper,
-  TokenKind.Number,
+  TokenKind.Int,
+  TokenKind.Float,
   TokenKind.String,
   TokenKind.True,
   TokenKind.False,
@@ -1365,7 +1372,11 @@ const parsePatternCore = (state: ParserState, allowArgs = true): ast.Pattern => 
       return ast.pcon(name, args, span(start, end), nameSpan);
     }
 
-    case TokenKind.Number:
+    case TokenKind.Int:
+      advance(state);
+      return ast.plit(parseInt(text(state, token), 10), tokenSpan(token));
+
+    case TokenKind.Float:
       advance(state);
       return ast.plit(parseFloat(text(state, token)), tokenSpan(token));
 
@@ -1576,7 +1587,7 @@ export const programToExpr = (
     return null;
   }
 
-  let expr = program.expr ?? ast.num(0);
+  let expr = program.expr ?? ast.int(0);
 
   // Wrap with user's top-level bindings
   for (let i = program.bindings.length - 1; i >= 0; i--) {

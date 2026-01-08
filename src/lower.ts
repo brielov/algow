@@ -128,7 +128,8 @@ const getFieldType = (type: Type, field: string): Type => {
 // BUILT-IN TYPES
 // =============================================================================
 
-const tNum: Type = { kind: "TCon", name: "number" };
+const tInt: Type = { kind: "TCon", name: "Int" };
+const tFloat: Type = { kind: "TCon", name: "Float" };
 const tStr: Type = { kind: "TCon", name: "string" };
 const tChar: Type = { kind: "TCon", name: "char" };
 const tBool: Type = { kind: "TCon", name: "boolean" };
@@ -156,8 +157,10 @@ type NormalizeResult = {
 const normalize = (ctx: LowerContext, expr: ast.Expr): NormalizeResult => {
   // Check if expression is already atomic
   switch (expr.kind) {
-    case "Num":
-      return { bindings: [], atom: ir.irLit(expr.value, tNum) };
+    case "Int":
+      return { bindings: [], atom: ir.irLit(expr.value, tInt) };
+    case "Float":
+      return { bindings: [], atom: ir.irLit(expr.value, tFloat) };
     case "Str":
       return { bindings: [], atom: ir.irLit(expr.value, tStr) };
     case "Char":
@@ -278,8 +281,11 @@ const wrapWithBindings = (
  */
 const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
   switch (expr.kind) {
-    case "Num":
-      return ir.irAtomExpr(ir.irLit(expr.value, tNum));
+    case "Int":
+      return ir.irAtomExpr(ir.irLit(expr.value, tInt));
+
+    case "Float":
+      return ir.irAtomExpr(ir.irLit(expr.value, tFloat));
 
     case "Str":
       return ir.irAtomExpr(ir.irLit(expr.value, tStr));
@@ -359,7 +365,11 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
         const foreignInfo = ctx.foreignFunctions.get(expr.member);
         if (foreignInfo && foreignInfo.module === expr.moduleName) {
           return ir.irAtomExpr(
-            ir.irForeignVar(foreignInfo.module, foreignInfo.name, applySubst(ctx.subst, scheme.type)),
+            ir.irForeignVar(
+              foreignInfo.module,
+              foreignInfo.name,
+              applySubst(ctx.subst, scheme.type),
+            ),
           );
         }
         return ir.irAtomExpr(ir.irVar(expr.member, applySubst(ctx.subst, scheme.type)));
@@ -501,7 +511,8 @@ const lowerBinOp = (ctx: LowerContext, expr: ast.BinOp): ir.IRExpr => {
     case "-":
     case "*":
     case "/":
-      resultType = tNum;
+      // Arithmetic operators - result type matches operand type (Int or Float)
+      resultType = operandType;
       break;
     case "<":
     case "<=":
@@ -711,7 +722,7 @@ const lowerPattern = (pattern: ast.Pattern, type: Type): ir.IRPattern => {
     case "PLit": {
       let litType: Type;
       if (typeof pattern.value === "number") {
-        litType = tNum;
+        litType = Number.isInteger(pattern.value) ? tInt : tFloat;
       } else if (typeof pattern.value === "string") {
         litType = tStr;
       } else {

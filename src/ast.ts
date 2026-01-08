@@ -79,14 +79,23 @@ export type Expr =
  * Constants are literal values that have a known type at parse time.
  * They form the leaves of the expression tree.
  */
-export type Con = Num | Bool | Str | Char;
+export type Con = Int | Float | Bool | Str | Char;
 
 /**
- * Numeric literal.
- * Example: 42, 3.14
+ * Integer literal.
+ * Example: 42, -1, 0
  */
-export interface Num extends Node {
-  readonly kind: "Num";
+export interface Int extends Node {
+  readonly kind: "Int";
+  readonly value: number;
+}
+
+/**
+ * Floating-point literal.
+ * Example: 3.14, -0.5, 1.0
+ */
+export interface Float extends Node {
+  readonly kind: "Float";
   readonly value: number;
 }
 
@@ -782,13 +791,14 @@ export interface ImportItem {
  * They act as "smart constructors" that fill in the `kind` field automatically.
  *
  * Usage example:
- *   Instead of: { kind: "Num", value: 42 }
- *   Write:      num(42)
+ *   Instead of: { kind: "Int", value: 42 }
+ *   Write:      int(42)
  */
 
 // --- Constants ---
 
-export const num = (value: number, span?: Span): Num => ({ kind: "Num", value, span });
+export const int = (value: number, span?: Span): Int => ({ kind: "Int", value, span });
+export const float = (value: number, span?: Span): Float => ({ kind: "Float", value, span });
 export const bool = (value: boolean, span?: Span): Bool => ({ kind: "Bool", value, span });
 export const str = (value: string, span?: Span): Str => ({ kind: "Str", value, span });
 export const char = (value: string, span?: Span): Char => ({ kind: "Char", value, span });

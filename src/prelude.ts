@@ -110,10 +110,10 @@ const isEmptyExpr = ast.abs(
 const lengthExpr = ast.abs(
   "xs",
   ast.match(ast.var_("xs"), [
-    ast.case_(ast.pcon("Nil", []), ast.num(0)),
+    ast.case_(ast.pcon("Nil", []), ast.int(0)),
     ast.case_(
       ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
-      ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
+      ast.binOp("+", ast.int(1), ast.app(ast.var_("length"), ast.var_("rest"))),
     ),
   ]),
 );

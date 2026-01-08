@@ -105,6 +105,7 @@ __require(["vs/editor/editor.main"], () => {
   const jsEl = document.getElementById("js");
   const goEl = document.getElementById("go");
   const irEl = document.getElementById("ir");
+  const optimizeEl = document.getElementById("optimize");
   const tabs = document.querySelectorAll(".output-tab");
   const contents = document.querySelectorAll(".output-content");
   tabs.forEach((tab) => {
@@ -116,7 +117,7 @@ __require(["vs/editor/editor.main"], () => {
       document.getElementById(targetId).classList.add("active");
     });
   });
-  const bridge = createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl);
+  const bridge = createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl, optimizeEl);
   bridge.start();
 });
 function mapCompletionKind(lspKind) {
@@ -135,7 +136,7 @@ function mapCompletionKind(lspKind) {
       return monaco.languages.CompletionItemKind.Text;
   }
 }
-function createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl) {
+function createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl, optimizeEl) {
   const model = editor.getModel();
   const uri = model.uri.toString();
   let requestId = 0;
@@ -212,7 +213,8 @@ function createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl) {
         const compile = async () => {
           try {
             const result = await sendRequest("algow/compile", {
-              textDocument: { uri }
+              textDocument: { uri },
+              optimize: optimizeEl.checked
             });
             jsEl.className = "output-content " + (jsEl.classList.contains("active") ? "active " : "") + (result.success ? "code" : "error");
             jsEl.textContent = result.success ? result.code : result.error;
@@ -224,7 +226,8 @@ function createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl) {
         const compileGo = async () => {
           try {
             const result = await sendRequest("algow/compileGo", {
-              textDocument: { uri }
+              textDocument: { uri },
+              optimize: optimizeEl.checked
             });
             goEl.className = "output-content " + (goEl.classList.contains("active") ? "active " : "") + (result.success ? "code" : "error");
             goEl.textContent = result.success ? result.code : result.error;
@@ -236,7 +239,8 @@ function createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl) {
         const emitIR = async () => {
           try {
             const result = await sendRequest("algow/emitIR", {
-              textDocument: { uri }
+              textDocument: { uri },
+              optimize: optimizeEl.checked
             });
             irEl.className = "output-content " + (irEl.classList.contains("active") ? "active " : "") + (result.success ? "code" : "error");
             irEl.textContent = result.success ? result.ir : result.error;
@@ -277,6 +281,9 @@ function createLspBridge(worker, editor, statusEl, outputEl, jsEl, goEl, irEl) {
             textDocument: { uri, version },
             contentChanges: [{ text: model.getValue() }]
           });
+          scheduleEvaluate();
+        });
+        optimizeEl.addEventListener("change", () => {
           scheduleEvaluate();
         });
         monaco.languages.registerHoverProvider("algow", {

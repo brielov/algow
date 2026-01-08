@@ -274,8 +274,11 @@ const ttuple = (elements: readonly Type[]): Type => ({ kind: "TTuple", elements 
 // BUILT-IN TYPES
 // =============================================================================
 
-/** The number type (integers and floats) */
-const tNum = tcon("number");
+/** The integer type */
+const tInt = tcon("Int");
+
+/** The floating-point type */
+const tFloat = tcon("Float");
 
 /** The string type */
 const tStr = tcon("string");
@@ -314,13 +317,14 @@ type Constraint = {
  */
 const instances: Map<string, Set<string>> = new Map([
   // Eq: types that support equality testing (==, !=)
-  ["Eq", new Set(["number", "string", "boolean", "char"])],
+  ["Eq", new Set(["Int", "Float", "string", "boolean", "char"])],
 
   // Ord: types that support ordering comparisons (<, >, <=, >=)
-  ["Ord", new Set(["number", "string", "char"])],
+  ["Ord", new Set(["Int", "Float", "string", "char"])],
 
   // Add: types that support the + operator (addition or concatenation)
-  ["Add", new Set(["number", "string"])],
+  // Note: For mixed Int/Float, type widening to Float happens in inferBinOp
+  ["Add", new Set(["Int", "Float", "string"])],
 ]);
 
 // =============================================================================
@@ -1166,8 +1170,10 @@ const inferExpr = (
       return inferLet(ctx, env, registry, expr);
     case "LetRec":
       return inferLetRec(ctx, env, registry, expr);
-    case "Num":
-      return [new Map(), tNum, []];
+    case "Int":
+      return [new Map(), tInt, []];
+    case "Float":
+      return [new Map(), tFloat, []];
     case "Str":
       return [new Map(), tStr, []];
     case "Char":
@@ -1448,6 +1454,21 @@ const inferBinOp = (
   const subst = composeSubst(composeSubst(s1, s2), s3);
   const constraints = [...applySubstConstraints(subst, c1), ...applySubstConstraints(subst, c2)];
 
+  // Helper to check if type is numeric and unify appropriately
+  const ensureNumeric = (type: Type): Subst => {
+    // If it's already Int or Float, no unification needed
+    if (type.kind === "TCon" && (type.name === "Int" || type.name === "Float")) {
+      return new Map();
+    }
+    // If it's a type variable, we need to constrain it to be numeric
+    // For now, default to Int when the type is unknown
+    if (type.kind === "TVar") {
+      return unify(ctx, type, tInt, expr.span);
+    }
+    // Otherwise, try to unify with Int (will error if incompatible)
+    return unify(ctx, type, tInt, expr.span);
+  };
+
   switch (expr.op) {
     // Addition: polymorphic (Add class), returns operand type
     case "+": {
@@ -1455,12 +1476,13 @@ const inferBinOp = (
       return [subst, operandType, constraints];
     }
 
-    // Other arithmetic: must be number, returns number
+    // Other arithmetic: must be numeric (Int or Float), returns operand type
     case "-":
     case "/":
     case "*": {
-      const s4 = unify(ctx, operandType, tNum, expr.span);
-      return [composeSubst(subst, s4), tNum, constraints];
+      const s4 = ensureNumeric(operandType);
+      const finalType = applySubst(s4, operandType);
+      return [composeSubst(subst, s4), finalType, constraints];
     }
 
     // Comparison: Ord constraint, returns boolean
@@ -1813,8 +1835,15 @@ const inferPattern = (
 
     case "PLit": {
       // Literal: expected type must match the literal's type
+      // For numbers, distinguish Int (integer values) from Float
       const litType =
-        typeof pattern.value === "number" ? tNum : typeof pattern.value === "string" ? tStr : tBool;
+        typeof pattern.value === "number"
+          ? Number.isInteger(pattern.value)
+            ? tInt
+            : tFloat
+          : typeof pattern.value === "string"
+            ? tStr
+            : tBool;
       const s = unify(ctx, applySubst(subst, expectedType), litType);
       return [composeSubst(subst, s), new Map()];
     }
@@ -2261,7 +2290,7 @@ const typeExprToType = (texpr: ast.TypeExpr): Type => {
  * Known primitive type names that should be treated as type constructors
  * even though they're parsed as TyVar (lowercase identifiers).
  */
-const PRIMITIVE_TYPES = new Set(["number", "string", "boolean"]);
+const PRIMITIVE_TYPES = new Set(["Int", "Float", "string", "boolean"]);
 
 /**
  * Convert a type expression to a Type, replacing type variables with fresh ones.

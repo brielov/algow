@@ -4,7 +4,8 @@ import {
   evaluate,
   valueToString,
   vcon,
-  vnum,
+  vint,
+  vfloat,
   vstr,
   vchar,
   vbool,
@@ -26,10 +27,13 @@ const baseEnv: Env = new Map([
 
 describe("Interpreter", () => {
   describe("literals", () => {
-    it("evaluates numbers", () => {
-      expect(evaluate(emptyEnv, ast.num(42))).toEqual(vnum(42));
-      expect(evaluate(emptyEnv, ast.num(3.14))).toEqual(vnum(3.14));
-      expect(evaluate(emptyEnv, ast.num(-5))).toEqual(vnum(-5));
+    it("evaluates integers", () => {
+      expect(evaluate(emptyEnv, ast.int(42))).toEqual(vint(42));
+      expect(evaluate(emptyEnv, ast.int(-5))).toEqual(vint(-5));
+    });
+
+    it("evaluates floats", () => {
+      expect(evaluate(emptyEnv, ast.float(3.14))).toEqual(vfloat(3.14));
     });
 
     it("evaluates strings", () => {
@@ -51,34 +55,34 @@ describe("Interpreter", () => {
 
   describe("variables", () => {
     it("looks up variables from environment", () => {
-      const env: Env = new Map([["x", vnum(42)]]);
-      expect(evaluate(env, ast.var_("x"))).toEqual(vnum(42));
+      const env: Env = new Map([["x", vint(42)]]);
+      expect(evaluate(env, ast.var_("x"))).toEqual(vint(42));
     });
   });
 
   describe("arithmetic", () => {
     it("adds numbers", () => {
-      const result = evaluate(emptyEnv, ast.binOp("+", ast.num(1), ast.num(2)));
-      expect(result).toEqual(vnum(3));
+      const result = evaluate(emptyEnv, ast.binOp("+", ast.int(1), ast.int(2)));
+      expect(result).toEqual(vint(3));
     });
 
     it("subtracts numbers", () => {
-      const result = evaluate(emptyEnv, ast.binOp("-", ast.num(10), ast.num(3)));
-      expect(result).toEqual(vnum(7));
+      const result = evaluate(emptyEnv, ast.binOp("-", ast.int(10), ast.int(3)));
+      expect(result).toEqual(vint(7));
     });
 
     it("multiplies numbers", () => {
-      const result = evaluate(emptyEnv, ast.binOp("*", ast.num(4), ast.num(5)));
-      expect(result).toEqual(vnum(20));
+      const result = evaluate(emptyEnv, ast.binOp("*", ast.int(4), ast.int(5)));
+      expect(result).toEqual(vint(20));
     });
 
     it("divides numbers", () => {
-      const result = evaluate(emptyEnv, ast.binOp("/", ast.num(10), ast.num(2)));
-      expect(result).toEqual(vnum(5));
+      const result = evaluate(emptyEnv, ast.binOp("/", ast.int(10), ast.int(2)));
+      expect(result).toEqual(vint(5));
     });
 
     it("throws on division by zero", () => {
-      expect(() => evaluate(emptyEnv, ast.binOp("/", ast.num(1), ast.num(0)))).toThrow(
+      expect(() => evaluate(emptyEnv, ast.binOp("/", ast.int(1), ast.int(0)))).toThrow(
         RuntimeError,
       );
     });
@@ -91,32 +95,32 @@ describe("Interpreter", () => {
 
   describe("comparisons", () => {
     it("compares numbers with <", () => {
-      expect(evaluate(emptyEnv, ast.binOp("<", ast.num(1), ast.num(2)))).toEqual(vbool(true));
-      expect(evaluate(emptyEnv, ast.binOp("<", ast.num(2), ast.num(1)))).toEqual(vbool(false));
+      expect(evaluate(emptyEnv, ast.binOp("<", ast.int(1), ast.int(2)))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("<", ast.int(2), ast.int(1)))).toEqual(vbool(false));
     });
 
     it("compares numbers with >", () => {
-      expect(evaluate(emptyEnv, ast.binOp(">", ast.num(2), ast.num(1)))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp(">", ast.int(2), ast.int(1)))).toEqual(vbool(true));
     });
 
     it("compares numbers with <=", () => {
-      expect(evaluate(emptyEnv, ast.binOp("<=", ast.num(1), ast.num(1)))).toEqual(vbool(true));
-      expect(evaluate(emptyEnv, ast.binOp("<=", ast.num(1), ast.num(2)))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("<=", ast.int(1), ast.int(1)))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("<=", ast.int(1), ast.int(2)))).toEqual(vbool(true));
     });
 
     it("compares numbers with >=", () => {
-      expect(evaluate(emptyEnv, ast.binOp(">=", ast.num(2), ast.num(2)))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp(">=", ast.int(2), ast.int(2)))).toEqual(vbool(true));
     });
 
     it("compares with ==", () => {
-      expect(evaluate(emptyEnv, ast.binOp("==", ast.num(1), ast.num(1)))).toEqual(vbool(true));
-      expect(evaluate(emptyEnv, ast.binOp("==", ast.num(1), ast.num(2)))).toEqual(vbool(false));
+      expect(evaluate(emptyEnv, ast.binOp("==", ast.int(1), ast.int(1)))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("==", ast.int(1), ast.int(2)))).toEqual(vbool(false));
       expect(evaluate(emptyEnv, ast.binOp("==", ast.str("a"), ast.str("a")))).toEqual(vbool(true));
     });
 
     it("compares with !=", () => {
-      expect(evaluate(emptyEnv, ast.binOp("!=", ast.num(1), ast.num(2)))).toEqual(vbool(true));
-      expect(evaluate(emptyEnv, ast.binOp("!=", ast.num(1), ast.num(1)))).toEqual(vbool(false));
+      expect(evaluate(emptyEnv, ast.binOp("!=", ast.int(1), ast.int(2)))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("!=", ast.int(1), ast.int(1)))).toEqual(vbool(false));
     });
 
     it("concatenates strings with +", () => {
@@ -136,18 +140,24 @@ describe("Interpreter", () => {
 
     it("compares chars with <", () => {
       expect(evaluate(emptyEnv, ast.binOp("<", ast.char("a"), ast.char("b")))).toEqual(vbool(true));
-      expect(evaluate(emptyEnv, ast.binOp("<", ast.char("b"), ast.char("a")))).toEqual(vbool(false));
+      expect(evaluate(emptyEnv, ast.binOp("<", ast.char("b"), ast.char("a")))).toEqual(
+        vbool(false),
+      );
     });
 
     it("compares chars with ==", () => {
-      expect(evaluate(emptyEnv, ast.binOp("==", ast.char("a"), ast.char("a")))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("==", ast.char("a"), ast.char("a")))).toEqual(
+        vbool(true),
+      );
       expect(evaluate(emptyEnv, ast.binOp("==", ast.char("a"), ast.char("b")))).toEqual(
         vbool(false),
       );
     });
 
     it("compares chars with !=", () => {
-      expect(evaluate(emptyEnv, ast.binOp("!=", ast.char("a"), ast.char("b")))).toEqual(vbool(true));
+      expect(evaluate(emptyEnv, ast.binOp("!=", ast.char("a"), ast.char("b")))).toEqual(
+        vbool(true),
+      );
       expect(evaluate(emptyEnv, ast.binOp("!=", ast.char("a"), ast.char("a")))).toEqual(
         vbool(false),
       );
@@ -162,43 +172,43 @@ describe("Interpreter", () => {
 
     it("applies identity function", () => {
       const id = ast.abs("x", ast.var_("x"));
-      const result = evaluate(emptyEnv, ast.app(id, ast.num(42)));
-      expect(result).toEqual(vnum(42));
+      const result = evaluate(emptyEnv, ast.app(id, ast.int(42)));
+      expect(result).toEqual(vint(42));
     });
 
     it("applies function with computation", () => {
-      const addOne = ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1)));
-      const result = evaluate(emptyEnv, ast.app(addOne, ast.num(10)));
-      expect(result).toEqual(vnum(11));
+      const addOne = ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1)));
+      const result = evaluate(emptyEnv, ast.app(addOne, ast.int(10)));
+      expect(result).toEqual(vint(11));
     });
 
     it("supports curried functions", () => {
       const add = ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y"))));
-      const result = evaluate(emptyEnv, ast.app(ast.app(add, ast.num(3)), ast.num(4)));
-      expect(result).toEqual(vnum(7));
+      const result = evaluate(emptyEnv, ast.app(ast.app(add, ast.int(3)), ast.int(4)));
+      expect(result).toEqual(vint(7));
     });
 
     it("captures environment in closures", () => {
       const expr = ast.let_(
         "x",
-        ast.num(10),
+        ast.int(10),
         ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y"))),
       );
-      const result = evaluate(emptyEnv, ast.app(expr, ast.num(5)));
-      expect(result).toEqual(vnum(15));
+      const result = evaluate(emptyEnv, ast.app(expr, ast.int(5)));
+      expect(result).toEqual(vint(15));
     });
   });
 
   describe("let bindings", () => {
     it("binds value and evaluates body", () => {
-      const expr = ast.let_("x", ast.num(5), ast.binOp("*", ast.var_("x"), ast.var_("x")));
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(25));
+      const expr = ast.let_("x", ast.int(5), ast.binOp("*", ast.var_("x"), ast.var_("x")));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(25));
     });
 
     it("shadows outer bindings", () => {
-      const env: Env = new Map([["x", vnum(100)]]);
-      const expr = ast.let_("x", ast.num(5), ast.var_("x"));
-      expect(evaluate(env, expr)).toEqual(vnum(5));
+      const env: Env = new Map([["x", vint(100)]]);
+      const expr = ast.let_("x", ast.int(5), ast.var_("x"));
+      expect(evaluate(env, expr)).toEqual(vint(5));
     });
   });
 
@@ -212,20 +222,20 @@ describe("Interpreter", () => {
             ast.abs(
               "n",
               ast.if_(
-                ast.binOp("==", ast.var_("n"), ast.num(0)),
-                ast.num(1),
+                ast.binOp("==", ast.var_("n"), ast.int(0)),
+                ast.int(1),
                 ast.binOp(
                   "*",
                   ast.var_("n"),
-                  ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                  ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.int(1))),
                 ),
               ),
             ),
           ),
         ],
-        ast.app(ast.var_("fact"), ast.num(5)),
+        ast.app(ast.var_("fact"), ast.int(5)),
       );
-      expect(evaluate(emptyEnv, factorial)).toEqual(vnum(120));
+      expect(evaluate(emptyEnv, factorial)).toEqual(vint(120));
     });
 
     it("supports mutual recursion", () => {
@@ -238,9 +248,9 @@ describe("Interpreter", () => {
             ast.abs(
               "n",
               ast.if_(
-                ast.binOp("==", ast.var_("n"), ast.num(0)),
+                ast.binOp("==", ast.var_("n"), ast.int(0)),
                 ast.bool(true),
-                ast.app(ast.var_("isOdd"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                ast.app(ast.var_("isOdd"), ast.binOp("-", ast.var_("n"), ast.int(1))),
               ),
             ),
           ),
@@ -249,16 +259,16 @@ describe("Interpreter", () => {
             ast.abs(
               "n",
               ast.if_(
-                ast.binOp("==", ast.var_("n"), ast.num(0)),
+                ast.binOp("==", ast.var_("n"), ast.int(0)),
                 ast.bool(false),
-                ast.app(ast.var_("isEven"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                ast.app(ast.var_("isEven"), ast.binOp("-", ast.var_("n"), ast.int(1))),
               ),
             ),
           ),
         ],
         ast.tuple([
-          ast.app(ast.var_("isEven"), ast.num(10)),
-          ast.app(ast.var_("isOdd"), ast.num(10)),
+          ast.app(ast.var_("isEven"), ast.int(10)),
+          ast.app(ast.var_("isOdd"), ast.int(10)),
         ]),
       );
       expect(evaluate(emptyEnv, mutualRec)).toEqual(vtuple([vbool(true), vbool(false)]));
@@ -267,59 +277,59 @@ describe("Interpreter", () => {
 
   describe("conditionals", () => {
     it("evaluates then branch when true", () => {
-      const expr = ast.if_(ast.bool(true), ast.num(1), ast.num(2));
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(1));
+      const expr = ast.if_(ast.bool(true), ast.int(1), ast.int(2));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(1));
     });
 
     it("evaluates else branch when false", () => {
-      const expr = ast.if_(ast.bool(false), ast.num(1), ast.num(2));
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(2));
+      const expr = ast.if_(ast.bool(false), ast.int(1), ast.int(2));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(2));
     });
 
     it("works with computed conditions", () => {
-      const expr = ast.if_(ast.binOp(">", ast.num(5), ast.num(3)), ast.str("yes"), ast.str("no"));
+      const expr = ast.if_(ast.binOp(">", ast.int(5), ast.int(3)), ast.str("yes"), ast.str("no"));
       expect(evaluate(emptyEnv, expr)).toEqual(vstr("yes"));
     });
   });
 
   describe("tuples", () => {
     it("evaluates tuple elements", () => {
-      const expr = ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]);
+      const expr = ast.tuple([ast.int(1), ast.str("hello"), ast.bool(true)]);
       const result = evaluate(emptyEnv, expr);
       expect(result.kind).toBe("VTuple");
       expect(valueToString(result)).toBe('(1, "hello", true)');
     });
 
     it("unwraps single-element tuples", () => {
-      const result = evaluate(emptyEnv, ast.tuple([ast.num(42)]));
-      expect(result).toEqual(vnum(42));
+      const result = evaluate(emptyEnv, ast.tuple([ast.int(42)]));
+      expect(result).toEqual(vint(42));
     });
 
     it("accesses tuple elements by index", () => {
-      const tuple = ast.tuple([ast.num(42), ast.str("hello"), ast.bool(true)]);
-      expect(evaluate(emptyEnv, ast.tupleIndex(tuple, 0))).toEqual(vnum(42));
+      const tuple = ast.tuple([ast.int(42), ast.str("hello"), ast.bool(true)]);
+      expect(evaluate(emptyEnv, ast.tupleIndex(tuple, 0))).toEqual(vint(42));
       expect(evaluate(emptyEnv, ast.tupleIndex(tuple, 1))).toEqual(vstr("hello"));
       expect(evaluate(emptyEnv, ast.tupleIndex(tuple, 2))).toEqual(vbool(true));
     });
 
     it("accesses nested tuple elements", () => {
-      const inner = ast.tuple([ast.num(1), ast.num(2)]);
-      const outer = ast.tuple([inner, ast.num(3)]);
-      expect(evaluate(emptyEnv, ast.tupleIndex(ast.tupleIndex(outer, 0), 1))).toEqual(vnum(2));
+      const inner = ast.tuple([ast.int(1), ast.int(2)]);
+      const outer = ast.tuple([inner, ast.int(3)]);
+      expect(evaluate(emptyEnv, ast.tupleIndex(ast.tupleIndex(outer, 0), 1))).toEqual(vint(2));
     });
   });
 
   describe("records", () => {
     it("evaluates record fields", () => {
-      const expr = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
+      const expr = ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]);
       const result = evaluate(emptyEnv, expr);
       expect(result.kind).toBe("VRecord");
       expect(valueToString(result)).toBe("{ x: 1, y: 2 }");
     });
 
     it("accesses record fields", () => {
-      const record = ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("hello"))]);
-      expect(evaluate(emptyEnv, ast.fieldAccess(record, "x"))).toEqual(vnum(42));
+      const record = ast.record([ast.field("x", ast.int(42)), ast.field("y", ast.str("hello"))]);
+      expect(evaluate(emptyEnv, ast.fieldAccess(record, "x"))).toEqual(vint(42));
       expect(evaluate(emptyEnv, ast.fieldAccess(record, "y"))).toEqual(vstr("hello"));
     });
   });
@@ -331,31 +341,31 @@ describe("Interpreter", () => {
     });
 
     it("applies constructors to arguments", () => {
-      const just42 = ast.app(ast.var_("Just"), ast.num(42));
+      const just42 = ast.app(ast.var_("Just"), ast.int(42));
       const result = evaluate(baseEnv, just42);
-      expect(result).toEqual(vcon("Just", [vnum(42)]));
+      expect(result).toEqual(vcon("Just", [vint(42)]));
     });
 
     it("supports nested constructor application", () => {
-      const cons = ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("Nil"));
+      const cons = ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("Nil"));
       const result = evaluate(baseEnv, cons);
-      expect(result).toEqual(vcon("Cons", [vnum(1), vcon("Nil")]));
+      expect(result).toEqual(vcon("Cons", [vint(1), vcon("Nil")]));
     });
   });
 
   describe("pattern matching", () => {
     it("matches wildcard", () => {
-      const expr = ast.match(ast.num(42), [ast.case_(ast.pwildcard(), ast.str("matched"))]);
+      const expr = ast.match(ast.int(42), [ast.case_(ast.pwildcard(), ast.str("matched"))]);
       expect(evaluate(emptyEnv, expr)).toEqual(vstr("matched"));
     });
 
     it("matches variable and binds", () => {
-      const expr = ast.match(ast.num(42), [ast.case_(ast.pvar("x"), ast.var_("x"))]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(42));
+      const expr = ast.match(ast.int(42), [ast.case_(ast.pvar("x"), ast.var_("x"))]);
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(42));
     });
 
     it("matches literal", () => {
-      const expr = ast.match(ast.num(1), [
+      const expr = ast.match(ast.int(1), [
         ast.case_(ast.plit(1), ast.str("one")),
         ast.case_(ast.plit(2), ast.str("two")),
         ast.case_(ast.pwildcard(), ast.str("other")),
@@ -364,42 +374,42 @@ describe("Interpreter", () => {
     });
 
     it("matches constructor", () => {
-      const just42 = ast.app(ast.var_("Just"), ast.num(42));
+      const just42 = ast.app(ast.var_("Just"), ast.int(42));
       const expr = ast.match(just42, [
-        ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.binOp("*", ast.var_("x"), ast.num(2))),
-        ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+        ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.binOp("*", ast.var_("x"), ast.int(2))),
+        ast.case_(ast.pcon("Nothing", []), ast.int(0)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(84));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(84));
     });
 
     it("matches Nothing", () => {
       const expr = ast.match(ast.var_("Nothing"), [
         ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
-        ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+        ast.case_(ast.pcon("Nothing", []), ast.int(0)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(0));
     });
 
     it("matches tuple pattern", () => {
-      const tuple = ast.tuple([ast.num(1), ast.str("hello")]);
+      const tuple = ast.tuple([ast.int(1), ast.str("hello")]);
       const expr = ast.match(tuple, [
         ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), ast.var_("a")),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(1));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(1));
     });
 
     it("matches record pattern", () => {
-      const record = ast.record([ast.field("x", ast.num(10)), ast.field("y", ast.num(20))]);
+      const record = ast.record([ast.field("x", ast.int(10)), ast.field("y", ast.int(20))]);
       const expr = ast.match(record, [
         ast.case_(ast.precord([ast.pfield("x", ast.pvar("a"))]), ast.var_("a")),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(10));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(10));
     });
   });
 
   describe("valueToString", () => {
     it("formats numbers", () => {
-      expect(valueToString(vnum(42))).toBe("42");
+      expect(valueToString(vint(42))).toBe("42");
     });
 
     it("formats strings with quotes", () => {
@@ -423,7 +433,7 @@ describe("Interpreter", () => {
 
     it("formats constructors", () => {
       expect(valueToString(vcon("Nothing"))).toBe("Nothing");
-      expect(valueToString(vcon("Just", [vnum(42)]))).toBe("(Just 42)");
+      expect(valueToString(vcon("Just", [vint(42)]))).toBe("(Just 42)");
     });
   });
 
@@ -438,9 +448,9 @@ describe("Interpreter", () => {
     });
 
     it("compares constructors with ==", () => {
-      const j1 = ast.app(ast.var_("Just"), ast.num(42));
-      const j2 = ast.app(ast.var_("Just"), ast.num(42));
-      const j3 = ast.app(ast.var_("Just"), ast.num(99));
+      const j1 = ast.app(ast.var_("Just"), ast.int(42));
+      const j2 = ast.app(ast.var_("Just"), ast.int(42));
+      const j3 = ast.app(ast.var_("Just"), ast.int(99));
       // Just 42 == Just 42
       expect(evaluate(baseEnv, ast.binOp("==", j1, j2))).toEqual(vbool(true));
       // Just 42 == Just 99
@@ -450,10 +460,10 @@ describe("Interpreter", () => {
     });
 
     it("compares tuples with ==", () => {
-      const t1 = ast.tuple([ast.num(1), ast.num(2)]);
-      const t2 = ast.tuple([ast.num(1), ast.num(2)]);
-      const t3 = ast.tuple([ast.num(1), ast.num(3)]);
-      const t4 = ast.tuple([ast.num(1), ast.num(2), ast.num(3)]);
+      const t1 = ast.tuple([ast.int(1), ast.int(2)]);
+      const t2 = ast.tuple([ast.int(1), ast.int(2)]);
+      const t3 = ast.tuple([ast.int(1), ast.int(3)]);
+      const t4 = ast.tuple([ast.int(1), ast.int(2), ast.int(3)]);
       expect(evaluate(emptyEnv, ast.binOp("==", t1, t2))).toEqual(vbool(true));
       expect(evaluate(emptyEnv, ast.binOp("==", t1, t3))).toEqual(vbool(false));
       // Different lengths
@@ -461,10 +471,10 @@ describe("Interpreter", () => {
     });
 
     it("compares records with ==", () => {
-      const r1 = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
-      const r2 = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]);
-      const r3 = ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(3))]);
-      const r4 = ast.record([ast.field("x", ast.num(1))]);
+      const r1 = ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]);
+      const r2 = ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]);
+      const r3 = ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(3))]);
+      const r4 = ast.record([ast.field("x", ast.int(1))]);
       expect(evaluate(emptyEnv, ast.binOp("==", r1, r2))).toEqual(vbool(true));
       expect(evaluate(emptyEnv, ast.binOp("==", r1, r3))).toEqual(vbool(false));
       // Different number of fields
@@ -481,11 +491,11 @@ describe("Interpreter", () => {
   describe("pattern matching edge cases", () => {
     it("matches string literal pattern", () => {
       const expr = ast.match(ast.str("hello"), [
-        ast.case_(ast.plit("hello"), ast.num(1)),
-        ast.case_(ast.plit("world"), ast.num(2)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.plit("hello"), ast.int(1)),
+        ast.case_(ast.plit("world"), ast.int(2)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(1));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(1));
     });
 
     it("matches boolean literal pattern", () => {
@@ -497,37 +507,37 @@ describe("Interpreter", () => {
     });
 
     it("rejects constructor with wrong number of args", () => {
-      const just42 = ast.app(ast.var_("Just"), ast.num(42));
+      const just42 = ast.app(ast.var_("Just"), ast.int(42));
       const expr = ast.match(just42, [
         // Try to match Just with 2 args (should fail)
-        ast.case_(ast.pcon("Just", [ast.pvar("x"), ast.pvar("y")]), ast.num(0)),
-        ast.case_(ast.pwildcard(), ast.num(99)),
+        ast.case_(ast.pcon("Just", [ast.pvar("x"), ast.pvar("y")]), ast.int(0)),
+        ast.case_(ast.pwildcard(), ast.int(99)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(99));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(99));
     });
 
     it("rejects tuple with wrong number of elements", () => {
-      const tuple = ast.tuple([ast.num(1), ast.num(2)]);
+      const tuple = ast.tuple([ast.int(1), ast.int(2)]);
       const expr = ast.match(tuple, [
         // Try to match 2-tuple with 3-element pattern (should fail)
-        ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b"), ast.pvar("c")]), ast.num(0)),
-        ast.case_(ast.pwildcard(), ast.num(99)),
+        ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b"), ast.pvar("c")]), ast.int(0)),
+        ast.case_(ast.pwildcard(), ast.int(99)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(99));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(99));
     });
 
     it("matches record with missing field pattern", () => {
-      const record = ast.record([ast.field("x", ast.num(1))]);
+      const record = ast.record([ast.field("x", ast.int(1))]);
       const expr = ast.match(record, [
         // Try to match record with pattern that expects a missing field
-        ast.case_(ast.precord([ast.pfield("y", ast.pvar("a"))]), ast.num(0)),
-        ast.case_(ast.pwildcard(), ast.num(99)),
+        ast.case_(ast.precord([ast.pfield("y", ast.pvar("a"))]), ast.int(0)),
+        ast.case_(ast.pwildcard(), ast.int(99)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(99));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(99));
     });
 
     it("rejects literal pattern when value doesn't match", () => {
-      const expr = ast.match(ast.num(5), [
+      const expr = ast.match(ast.int(5), [
         ast.case_(ast.plit(1), ast.str("one")),
         ast.case_(ast.plit(2), ast.str("two")),
         ast.case_(ast.pwildcard(), ast.str("other")),
@@ -537,76 +547,76 @@ describe("Interpreter", () => {
 
     it("rejects string literal pattern when value doesn't match", () => {
       const expr = ast.match(ast.str("foo"), [
-        ast.case_(ast.plit("bar"), ast.num(1)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.plit("bar"), ast.int(1)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(0));
     });
 
     it("rejects boolean literal pattern when value doesn't match", () => {
       const expr = ast.match(ast.bool(false), [
-        ast.case_(ast.plit(true), ast.num(1)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.plit(true), ast.int(1)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(0));
     });
 
     it("rejects literal pattern when type doesn't match", () => {
       // Matching a number against a string pattern
-      const expr = ast.match(ast.num(42), [
-        ast.case_(ast.plit("42"), ast.num(1)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+      const expr = ast.match(ast.int(42), [
+        ast.case_(ast.plit("42"), ast.int(1)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(0));
     });
 
     it("matches nested record pattern", () => {
-      const record = ast.record([ast.field("x", ast.num(10)), ast.field("y", ast.num(20))]);
+      const record = ast.record([ast.field("x", ast.int(10)), ast.field("y", ast.int(20))]);
       const expr = ast.match(record, [
         ast.case_(
           ast.precord([ast.pfield("x", ast.pvar("a")), ast.pfield("y", ast.pvar("b"))]),
           ast.binOp("+", ast.var_("a"), ast.var_("b")),
         ),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(30));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(30));
     });
 
     it("rejects record pattern against non-record value", () => {
       // Matching a number against a record pattern
-      const expr = ast.match(ast.num(42), [
-        ast.case_(ast.precord([ast.pfield("x", ast.pvar("a"))]), ast.num(1)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+      const expr = ast.match(ast.int(42), [
+        ast.case_(ast.precord([ast.pfield("x", ast.pvar("a"))]), ast.int(1)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(0));
     });
 
     it("rejects tuple pattern against non-tuple value", () => {
       // Matching a number against a tuple pattern
-      const expr = ast.match(ast.num(42), [
-        ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), ast.num(1)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+      const expr = ast.match(ast.int(42), [
+        ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), ast.int(1)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(0));
     });
 
     it("rejects constructor pattern against non-constructor value", () => {
       // Matching a number against a constructor pattern
-      const expr = ast.match(ast.num(42), [
-        ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.num(1)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+      const expr = ast.match(ast.int(42), [
+        ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.int(1)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(0));
     });
 
     it("fails nested constructor pattern match", () => {
       // Match Just(Just 1) against Just(Just 2)
-      const nestedJust = ast.app(ast.var_("Just"), ast.app(ast.var_("Just"), ast.num(1)));
+      const nestedJust = ast.app(ast.var_("Just"), ast.app(ast.var_("Just"), ast.int(1)));
       const expr = ast.match(nestedJust, [
         // Try to match inner value as 2 (should fail)
-        ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.plit(2)])]), ast.num(1)),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.plit(2)])]), ast.int(1)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(0));
     });
 
     it("matches first alternative in or-pattern", () => {
@@ -614,11 +624,11 @@ describe("Interpreter", () => {
       const expr = ast.match(ast.var_("Nothing"), [
         ast.case_(
           ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]),
-          ast.num(1),
+          ast.int(1),
         ),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(1));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(1));
     });
 
     it("matches second alternative in or-pattern", () => {
@@ -627,42 +637,42 @@ describe("Interpreter", () => {
       const expr = ast.match(justNothing, [
         ast.case_(
           ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]),
-          ast.num(1),
+          ast.int(1),
         ),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(1));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(1));
     });
 
     it("rejects or-pattern when no alternative matches", () => {
       // Match Just(Just 1) against (Nothing | Just Nothing) - should fail
-      const justJust = ast.app(ast.var_("Just"), ast.app(ast.var_("Just"), ast.num(1)));
+      const justJust = ast.app(ast.var_("Just"), ast.app(ast.var_("Just"), ast.int(1)));
       const expr = ast.match(justJust, [
         ast.case_(
           ast.por([ast.pcon("Nothing", []), ast.pcon("Just", [ast.pcon("Nothing", [])])]),
-          ast.num(1),
+          ast.int(1),
         ),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(0));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(0));
     });
 
     it("binds variables from or-pattern", () => {
       // Match Just 5 against (Just x | Right x) - x should be 5
-      const just5 = ast.app(ast.var_("Just"), ast.num(5));
+      const just5 = ast.app(ast.var_("Just"), ast.int(5));
       const expr = ast.match(just5, [
         ast.case_(
           ast.por([ast.pcon("Just", [ast.pvar("x")]), ast.pcon("Right", [ast.pvar("x")])]),
           ast.var_("x"),
         ),
-        ast.case_(ast.pwildcard(), ast.num(0)),
+        ast.case_(ast.pwildcard(), ast.int(0)),
       ]);
-      expect(evaluate(baseEnv, expr)).toEqual(vnum(5));
+      expect(evaluate(baseEnv, expr)).toEqual(vint(5));
     });
 
     it("matches multiple literal alternatives", () => {
       // Match 1 against (0 | 1 | 2) => true
-      const expr = ast.match(ast.num(1), [
+      const expr = ast.match(ast.int(1), [
         ast.case_(ast.por([ast.plit(0), ast.plit(1), ast.plit(2)]), ast.bool(true)),
         ast.case_(ast.pwildcard(), ast.bool(false)),
       ]);
@@ -674,22 +684,22 @@ describe("Interpreter", () => {
     it("evaluates qualified variable from environment", () => {
       // Simulate: use Math (..); Math.double 5
       // where double is in the environment
-      const env: Env = new Map([["double", vnum(42)]]);
+      const env: Env = new Map([["double", vint(42)]]);
       const expr = ast.qualifiedVar("Math", "double");
-      expect(evaluate(env, expr)).toEqual(vnum(42));
+      expect(evaluate(env, expr)).toEqual(vint(42));
     });
 
     it("dereferences VRef from letrec binding", () => {
       // Simulate module binding through letrec:
       // letRec double = x -> x * 2 in Math.double
       // The binding creates a VRef that must be dereferenced
-      const doubleBody = ast.binOp("*", ast.var_("x"), ast.num(2));
+      const doubleBody = ast.binOp("*", ast.var_("x"), ast.int(2));
       const doubleFn = ast.abs("x", doubleBody);
       const expr = ast.letRec(
         [ast.recBinding("double", doubleFn)],
-        ast.app(ast.qualifiedVar("Math", "double"), ast.num(5)),
+        ast.app(ast.qualifiedVar("Math", "double"), ast.int(5)),
       );
-      expect(evaluate(emptyEnv, expr)).toEqual(vnum(10));
+      expect(evaluate(emptyEnv, expr)).toEqual(vint(10));
     });
 
     it("throws error for unimported qualified variable", () => {

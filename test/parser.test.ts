@@ -20,19 +20,19 @@ describe("Parser", () => {
     it("parses integer literals", () => {
       const result = parse("42");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.num(42));
+      expect(stripSpans(result.program.expr)).toEqual(ast.int(42));
     });
 
     it("parses floating point literals", () => {
       const result = parse("3.14");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.num(3.14));
+      expect(stripSpans(result.program.expr)).toEqual(ast.float(3.14));
     });
 
     it("parses zero", () => {
       const result = parse("0");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.num(0));
+      expect(stripSpans(result.program.expr)).toEqual(ast.int(0));
     });
 
     it("parses simple strings", () => {
@@ -164,25 +164,25 @@ describe("Parser", () => {
     it("parses addition", () => {
       const result = parse("1 + 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("+", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("+", ast.int(1), ast.int(2)));
     });
 
     it("parses subtraction", () => {
       const result = parse("5 - 3");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.num(5), ast.num(3)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.int(5), ast.int(3)));
     });
 
     it("parses multiplication", () => {
       const result = parse("2 * 3");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("*", ast.num(2), ast.num(3)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("*", ast.int(2), ast.int(3)));
     });
 
     it("parses division", () => {
       const result = parse("10 / 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("/", ast.num(10), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("/", ast.int(10), ast.int(2)));
     });
 
     it("parses string concatenation with +", () => {
@@ -196,51 +196,51 @@ describe("Parser", () => {
     it("parses less than", () => {
       const result = parse("1 < 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("<", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("<", ast.int(1), ast.int(2)));
     });
 
     it("parses less than or equal", () => {
       const result = parse("1 <= 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("<=", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("<=", ast.int(1), ast.int(2)));
     });
 
     it("parses greater than", () => {
       const result = parse("2 > 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp(">", ast.num(2), ast.num(1)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp(">", ast.int(2), ast.int(1)));
     });
 
     it("parses greater than or equal", () => {
       const result = parse("2 >= 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp(">=", ast.num(2), ast.num(1)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp(">=", ast.int(2), ast.int(1)));
     });
 
     it("parses equality", () => {
       const result = parse("1 == 1");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("==", ast.num(1), ast.num(1)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("==", ast.int(1), ast.int(1)));
     });
 
     it("parses inequality", () => {
       const result = parse("1 != 2");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("!=", ast.num(1), ast.num(2)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("!=", ast.int(1), ast.int(2)));
     });
 
     it("parses unary negation", () => {
       // -5 desugars to 0 - 5
       const result = parse("-5");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.num(0), ast.num(5)));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.int(0), ast.int(5)));
     });
 
     it("parses unary negation of variable", () => {
       // -x desugars to 0 - x
       const result = parse("-x");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.num(0), ast.var_("x")));
+      expect(stripSpans(result.program.expr)).toEqual(ast.binOp("-", ast.int(0), ast.var_("x")));
     });
 
     it("unary negation binds tighter than multiplication", () => {
@@ -248,7 +248,7 @@ describe("Parser", () => {
       const result = parse("-2 * 3");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.binOp("*", ast.binOp("-", ast.num(0), ast.num(2)), ast.num(3)),
+        ast.binOp("*", ast.binOp("-", ast.int(0), ast.int(2)), ast.int(3)),
       );
     });
 
@@ -257,7 +257,7 @@ describe("Parser", () => {
       const result = parse("- -5");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.binOp("-", ast.num(0), ast.binOp("-", ast.num(0), ast.num(5))),
+        ast.binOp("-", ast.int(0), ast.binOp("-", ast.int(0), ast.int(5))),
       );
     });
 
@@ -266,7 +266,7 @@ describe("Parser", () => {
       const result = parse("10 + -5");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.binOp("+", ast.num(10), ast.binOp("-", ast.num(0), ast.num(5))),
+        ast.binOp("+", ast.int(10), ast.binOp("-", ast.int(0), ast.int(5))),
       );
     });
 
@@ -276,7 +276,7 @@ describe("Parser", () => {
         const result = parse("1 + 2 * 3");
         expect(result.diagnostics).toHaveLength(0);
         expect(stripSpans(result.program.expr)).toEqual(
-          ast.binOp("+", ast.num(1), ast.binOp("*", ast.num(2), ast.num(3))),
+          ast.binOp("+", ast.int(1), ast.binOp("*", ast.int(2), ast.int(3))),
         );
       });
 
@@ -285,7 +285,7 @@ describe("Parser", () => {
         const result = parse("6 - 4 / 2");
         expect(result.diagnostics).toHaveLength(0);
         expect(stripSpans(result.program.expr)).toEqual(
-          ast.binOp("-", ast.num(6), ast.binOp("/", ast.num(4), ast.num(2))),
+          ast.binOp("-", ast.int(6), ast.binOp("/", ast.int(4), ast.int(2))),
         );
       });
 
@@ -294,7 +294,7 @@ describe("Parser", () => {
         const result = parse("1 + 2 < 4");
         expect(result.diagnostics).toHaveLength(0);
         expect(stripSpans(result.program.expr)).toEqual(
-          ast.binOp("<", ast.binOp("+", ast.num(1), ast.num(2)), ast.num(4)),
+          ast.binOp("<", ast.binOp("+", ast.int(1), ast.int(2)), ast.int(4)),
         );
       });
 
@@ -303,7 +303,7 @@ describe("Parser", () => {
         const result = parse("1 < 2 == true");
         expect(result.diagnostics).toHaveLength(0);
         expect(stripSpans(result.program.expr)).toEqual(
-          ast.binOp("==", ast.binOp("<", ast.num(1), ast.num(2)), ast.bool(true)),
+          ast.binOp("==", ast.binOp("<", ast.int(1), ast.int(2)), ast.bool(true)),
         );
       });
 
@@ -312,7 +312,7 @@ describe("Parser", () => {
         const result = parse("(1 + 2) * 3");
         expect(result.diagnostics).toHaveLength(0);
         expect(stripSpans(result.program.expr)).toEqual(
-          ast.binOp("*", ast.binOp("+", ast.num(1), ast.num(2)), ast.num(3)),
+          ast.binOp("*", ast.binOp("+", ast.int(1), ast.int(2)), ast.int(3)),
         );
       });
     });
@@ -323,7 +323,7 @@ describe("Parser", () => {
         const result = parse("1 + 2 + 3");
         expect(result.diagnostics).toHaveLength(0);
         expect(stripSpans(result.program.expr)).toEqual(
-          ast.binOp("+", ast.binOp("+", ast.num(1), ast.num(2)), ast.num(3)),
+          ast.binOp("+", ast.binOp("+", ast.int(1), ast.int(2)), ast.int(3)),
         );
       });
 
@@ -332,7 +332,7 @@ describe("Parser", () => {
         const result = parse("2 * 3 * 4");
         expect(result.diagnostics).toHaveLength(0);
         expect(stripSpans(result.program.expr)).toEqual(
-          ast.binOp("*", ast.binOp("*", ast.num(2), ast.num(3)), ast.num(4)),
+          ast.binOp("*", ast.binOp("*", ast.int(2), ast.int(3)), ast.int(4)),
         );
       });
     });
@@ -360,7 +360,7 @@ describe("Parser", () => {
       const result = parse("1 + 2 |> f");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.app(ast.var_("f"), ast.binOp("+", ast.num(1), ast.num(2))),
+        ast.app(ast.var_("f"), ast.binOp("+", ast.int(1), ast.int(2))),
       );
     });
   });
@@ -371,7 +371,7 @@ describe("Parser", () => {
       const result = parse("1 :: xs");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("xs")),
+        ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("xs")),
       );
     });
 
@@ -381,8 +381,8 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.app(
-          ast.app(ast.var_("Cons"), ast.num(1)),
-          ast.app(ast.app(ast.var_("Cons"), ast.num(2)), ast.var_("Nil")),
+          ast.app(ast.var_("Cons"), ast.int(1)),
+          ast.app(ast.app(ast.var_("Cons"), ast.int(2)), ast.var_("Nil")),
         ),
       );
     });
@@ -392,7 +392,7 @@ describe("Parser", () => {
       const result = parse("1 + 2 :: xs");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.app(ast.app(ast.var_("Cons"), ast.binOp("+", ast.num(1), ast.num(2))), ast.var_("xs")),
+        ast.app(ast.app(ast.var_("Cons"), ast.binOp("+", ast.int(1), ast.int(2))), ast.var_("xs")),
       );
     });
   });
@@ -461,8 +461,8 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.if_(
-          ast.binOp(">", ast.var_("x"), ast.num(0)),
-          ast.binOp("<", ast.var_("y"), ast.num(10)),
+          ast.binOp(">", ast.var_("x"), ast.int(0)),
+          ast.binOp("<", ast.var_("y"), ast.int(10)),
           ast.bool(false),
         ),
       );
@@ -483,7 +483,7 @@ describe("Parser", () => {
       const result = parse("x -> x + 1");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1))),
+        ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))),
       );
     });
 
@@ -550,7 +550,7 @@ describe("Parser", () => {
       const result = parse("f (x + 1)");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.app(ast.var_("f"), ast.binOp("+", ast.var_("x"), ast.num(1))),
+        ast.app(ast.var_("f"), ast.binOp("+", ast.var_("x"), ast.int(1))),
       );
     });
 
@@ -558,7 +558,7 @@ describe("Parser", () => {
       const result = parse("(x -> x) 42");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.app(ast.abs("x", ast.var_("x")), ast.num(42)),
+        ast.app(ast.abs("x", ast.var_("x")), ast.int(42)),
       );
     });
   });
@@ -583,7 +583,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.expr?.kind).toBe("Tuple");
       const tuple = result.program.expr as ast.Tuple;
-      expect(tuple.elements[0]?.kind).toBe("Num");
+      expect(tuple.elements[0]?.kind).toBe("Int");
       expect(tuple.elements[1]?.kind).toBe("Str");
       expect(tuple.elements[2]?.kind).toBe("Bool");
     });
@@ -599,7 +599,7 @@ describe("Parser", () => {
     it("parses single element in parens as that element", () => {
       const result = parse("(42)");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.num(42));
+      expect(stripSpans(result.program.expr)).toEqual(ast.int(42));
     });
 
     it("reports error for empty parentheses", () => {
@@ -613,14 +613,14 @@ describe("Parser", () => {
     it("parses simple record", () => {
       const result = parse("{ x = 1 }");
       expect(result.diagnostics).toHaveLength(0);
-      expect(stripSpans(result.program.expr)).toEqual(ast.record([ast.field("x", ast.num(1))]));
+      expect(stripSpans(result.program.expr)).toEqual(ast.record([ast.field("x", ast.int(1))]));
     });
 
     it("parses record with multiple fields", () => {
       const result = parse("{ x = 1, y = 2 }");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]),
+        ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]),
       );
     });
 
@@ -634,7 +634,7 @@ describe("Parser", () => {
       const result = parse("{ inner = { value = 42 } }");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.record([ast.field("inner", ast.record([ast.field("value", ast.num(42))]))]),
+        ast.record([ast.field("inner", ast.record([ast.field("value", ast.int(42))]))]),
       );
     });
 
@@ -642,7 +642,7 @@ describe("Parser", () => {
       const result = parse("{ sum = 1 + 2 }");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.record([ast.field("sum", ast.binOp("+", ast.num(1), ast.num(2)))]),
+        ast.record([ast.field("sum", ast.binOp("+", ast.int(1), ast.int(2)))]),
       );
     });
 
@@ -660,7 +660,7 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(
         ast.record([
           ast.field("x", ast.var_("x")),
-          ast.field("y", ast.num(2)),
+          ast.field("y", ast.int(2)),
           ast.field("z", ast.var_("z")),
         ]),
       );
@@ -692,7 +692,7 @@ describe("Parser", () => {
       const result = parse("{ x = 1 }.x");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.fieldAccess(ast.record([ast.field("x", ast.num(1))]), "x"),
+        ast.fieldAccess(ast.record([ast.field("x", ast.int(1))]), "x"),
       );
     });
 
@@ -742,7 +742,7 @@ describe("Parser", () => {
       const result = parse("(1, 2).0");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.tupleIndex(ast.tuple([ast.num(1), ast.num(2)]), 0),
+        ast.tupleIndex(ast.tuple([ast.int(1), ast.int(2)]), 0),
       );
     });
 
@@ -767,7 +767,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       // [1] desugars to Cons 1 Nil
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("Nil")),
+        ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("Nil")),
       );
     });
 
@@ -777,10 +777,10 @@ describe("Parser", () => {
       // [1, 2, 3] desugars to Cons 1 (Cons 2 (Cons 3 Nil))
       expect(stripSpans(result.program.expr)).toEqual(
         ast.app(
-          ast.app(ast.var_("Cons"), ast.num(1)),
+          ast.app(ast.var_("Cons"), ast.int(1)),
           ast.app(
-            ast.app(ast.var_("Cons"), ast.num(2)),
-            ast.app(ast.app(ast.var_("Cons"), ast.num(3)), ast.var_("Nil")),
+            ast.app(ast.var_("Cons"), ast.int(2)),
+            ast.app(ast.app(ast.var_("Cons"), ast.int(3)), ast.var_("Nil")),
           ),
         ),
       );
@@ -791,7 +791,7 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.app(
-          ast.app(ast.var_("Cons"), ast.binOp("+", ast.num(1), ast.num(2))),
+          ast.app(ast.var_("Cons"), ast.binOp("+", ast.int(1), ast.int(2))),
           ast.app(ast.app(ast.var_("Cons"), ast.var_("x")), ast.var_("Nil")),
         ),
       );
@@ -801,8 +801,8 @@ describe("Parser", () => {
       const result = parse("[[1], [2]]");
       expect(result.diagnostics).toHaveLength(0);
       // [[1], [2]] desugars to Cons (Cons 1 Nil) (Cons (Cons 2 Nil) Nil)
-      const list1 = ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("Nil"));
-      const list2 = ast.app(ast.app(ast.var_("Cons"), ast.num(2)), ast.var_("Nil"));
+      const list1 = ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("Nil"));
+      const list2 = ast.app(ast.app(ast.var_("Cons"), ast.int(2)), ast.var_("Nil"));
       expect(stripSpans(result.program.expr)).toEqual(
         ast.app(
           ast.app(ast.var_("Cons"), list1),
@@ -817,7 +817,7 @@ describe("Parser", () => {
       const result = parse("if true then 1 else 2");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.if_(ast.bool(true), ast.num(1), ast.num(2)),
+        ast.if_(ast.bool(true), ast.int(1), ast.int(2)),
       );
     });
 
@@ -825,7 +825,7 @@ describe("Parser", () => {
       const result = parse("if x > 0 then 1 else 0");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.if_(ast.binOp(">", ast.var_("x"), ast.num(0)), ast.num(1), ast.num(0)),
+        ast.if_(ast.binOp(">", ast.var_("x"), ast.int(0)), ast.int(1), ast.int(0)),
       );
     });
 
@@ -833,7 +833,7 @@ describe("Parser", () => {
       const result = parse("if a then if b then 1 else 2 else 3");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.if_(ast.var_("a"), ast.if_(ast.var_("b"), ast.num(1), ast.num(2)), ast.num(3)),
+        ast.if_(ast.var_("a"), ast.if_(ast.var_("b"), ast.int(1), ast.int(2)), ast.int(3)),
       );
     });
 
@@ -843,8 +843,8 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(
         ast.if_(
           ast.var_("cond"),
-          ast.binOp("+", ast.var_("x"), ast.num(1)),
-          ast.binOp("*", ast.var_("y"), ast.num(2)),
+          ast.binOp("+", ast.var_("x"), ast.int(1)),
+          ast.binOp("*", ast.var_("y"), ast.int(2)),
         ),
       );
     });
@@ -855,7 +855,7 @@ describe("Parser", () => {
       const result = parse("let x = 1 in x + 1");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.let_("x", ast.num(1), ast.binOp("+", ast.var_("x"), ast.num(1))),
+        ast.let_("x", ast.int(1), ast.binOp("+", ast.var_("x"), ast.int(1))),
       );
     });
 
@@ -867,7 +867,7 @@ describe("Parser", () => {
         ast.let_(
           "f",
           ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
-          ast.app(ast.app(ast.var_("f"), ast.num(1)), ast.num(2)),
+          ast.app(ast.app(ast.var_("f"), ast.int(1)), ast.int(2)),
         ),
       );
     });
@@ -878,8 +878,8 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(
         ast.let_(
           "x",
-          ast.num(1),
-          ast.let_("y", ast.num(2), ast.binOp("+", ast.var_("x"), ast.var_("y"))),
+          ast.int(1),
+          ast.let_("y", ast.int(2), ast.binOp("+", ast.var_("x"), ast.var_("y"))),
         ),
       );
     });
@@ -924,7 +924,7 @@ describe("Parser", () => {
       const result = parse("let (x, y) = (1, 2) in x + y");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+        ast.match(ast.tuple([ast.int(1), ast.int(2)]), [
           ast.case_(
             ast.ptuple([ast.pvar("x"), ast.pvar("y")]),
             ast.binOp("+", ast.var_("x"), ast.var_("y")),
@@ -951,7 +951,7 @@ describe("Parser", () => {
       const result = parse("let _ = 123 in 456");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.match(ast.num(123), [ast.case_(ast.pwildcard(), ast.num(456))]),
+        ast.match(ast.int(123), [ast.case_(ast.pwildcard(), ast.int(456))]),
       );
     });
 
@@ -975,7 +975,7 @@ describe("Parser", () => {
       expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("x"), [
           ast.case_(ast.pcon("Just", [ast.pvar("y")]), ast.var_("y")),
-          ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+          ast.case_(ast.pcon("Nothing", []), ast.int(0)),
         ]),
       );
     });
@@ -988,7 +988,7 @@ describe("Parser", () => {
       `);
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.match(ast.var_("x"), [ast.case_(ast.pwildcard(), ast.num(42))]),
+        ast.match(ast.var_("x"), [ast.case_(ast.pwildcard(), ast.int(42))]),
       );
     });
 
@@ -1018,8 +1018,8 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("b"), [
-          ast.case_(ast.plit(true), ast.num(1)),
-          ast.case_(ast.plit(false), ast.num(0)),
+          ast.case_(ast.plit(true), ast.int(1)),
+          ast.case_(ast.plit(false), ast.int(0)),
         ]),
       );
     });
@@ -1121,8 +1121,8 @@ describe("Parser", () => {
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
         ast.match(ast.var_("s"), [
-          ast.case_(ast.plit("hello"), ast.num(1)),
-          ast.case_(ast.pwildcard(), ast.num(0)),
+          ast.case_(ast.plit("hello"), ast.int(1)),
+          ast.case_(ast.pwildcard(), ast.int(0)),
         ]),
       );
     });
@@ -1339,7 +1339,7 @@ describe("Parser", () => {
       `);
       expect(result.diagnostics).toHaveLength(0);
       expect(result.program.declarations).toHaveLength(2);
-      expect(stripSpans(result.program.expr)).toEqual(ast.num(42));
+      expect(stripSpans(result.program.expr)).toEqual(ast.int(42));
     });
 
     it("parses parenthesized type in constructor field", () => {
@@ -1493,7 +1493,7 @@ describe("Parser", () => {
     it("converts program without bindings", () => {
       const result = parse("42");
       const expr = programToExpr(result.program);
-      expect(stripSpans(expr)).toEqual(ast.num(42));
+      expect(stripSpans(expr)).toEqual(ast.int(42));
     });
 
     it("converts program with bindings", () => {
@@ -1506,8 +1506,8 @@ describe("Parser", () => {
       expect(stripSpans(expr)).toEqual(
         ast.let_(
           "x",
-          ast.num(1),
-          ast.let_("y", ast.num(2), ast.binOp("+", ast.var_("x"), ast.var_("y"))),
+          ast.int(1),
+          ast.let_("y", ast.int(2), ast.binOp("+", ast.var_("x"), ast.var_("y"))),
         ),
       );
     });
@@ -1536,7 +1536,7 @@ describe("Parser", () => {
         ast.let_(
           "add",
           ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
-          ast.app(ast.app(ast.var_("add"), ast.num(1)), ast.num(2)),
+          ast.app(ast.app(ast.var_("add"), ast.int(1)), ast.int(2)),
         ),
       );
     });

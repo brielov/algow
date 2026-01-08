@@ -5,7 +5,7 @@ import { generateJS } from "../src/backend/js";
 import { RUNTIME } from "../src/backend/runtime";
 
 // Type helpers
-const numType: Type = { kind: "TCon", name: "number" };
+const intType: Type = { kind: "TCon", name: "Int" };
 const strType: Type = { kind: "TCon", name: "string" };
 const boolType: Type = { kind: "TCon", name: "boolean" };
 const funType = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret });
@@ -16,7 +16,7 @@ const appType = (con: Type, arg: Type): Type => ({ kind: "TApp", con, arg });
 describe("JavaScript Backend", () => {
   describe("generateJS", () => {
     it("includes runtime in output", () => {
-      const expr = ir.irAtomExpr(ir.irLit(42, numType));
+      const expr = ir.irAtomExpr(ir.irLit(42, intType));
       const result = generateJS(expr, []);
       expect(result.code).toContain("$apply");
       expect(result.code).toContain("$con");
@@ -24,7 +24,7 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates number literal", () => {
-      const expr = ir.irAtomExpr(ir.irLit(42, numType));
+      const expr = ir.irAtomExpr(ir.irLit(42, intType));
       const result = generateJS(expr, []);
       expect(result.code).toContain("const $result = 42;");
     });
@@ -42,8 +42,8 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates variable reference", () => {
-      const binding = ir.irAtomBinding(ir.irLit(42, numType));
-      const body = ir.irAtomExpr(ir.irVar("x", numType));
+      const binding = ir.irAtomBinding(ir.irLit(42, intType));
+      const body = ir.irAtomExpr(ir.irVar("x", intType));
       const expr = ir.irLet("x", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("const x = 42;");
@@ -51,17 +51,17 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates let binding", () => {
-      const binding = ir.irAtomBinding(ir.irLit(1, numType));
-      const body = ir.irAtomExpr(ir.irVar("x", numType));
+      const binding = ir.irAtomBinding(ir.irLit(1, intType));
+      const body = ir.irAtomExpr(ir.irVar("x", intType));
       const expr = ir.irLet("x", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("const x = 1;");
     });
 
     it("generates recursive let binding", () => {
-      const lambdaBody = ir.irAtomExpr(ir.irVar("n", numType));
-      const fnType = funType(numType, numType);
-      const binding = ir.irLambdaBinding("n", numType, lambdaBody, fnType);
+      const lambdaBody = ir.irAtomExpr(ir.irVar("n", intType));
+      const fnType = funType(intType, intType);
+      const binding = ir.irLambdaBinding("n", intType, lambdaBody, fnType);
       const body = ir.irAtomExpr(ir.irVar("f", fnType));
       const expr = ir.irLetRec([ir.irRecBinding("f", binding)], body);
       const result = generateJS(expr, []);
@@ -72,8 +72,8 @@ describe("JavaScript Backend", () => {
 
     it("generates non-lambda recursive let binding with const", () => {
       // A recursive binding that's not a lambda (e.g., a simple value)
-      const binding = ir.irAtomBinding(ir.irLit(42, numType));
-      const body = ir.irAtomExpr(ir.irVar("x", numType));
+      const binding = ir.irAtomBinding(ir.irLit(42, intType));
+      const body = ir.irAtomExpr(ir.irVar("x", intType));
       const expr = ir.irLetRec([ir.irRecBinding("x", binding)], body);
       const result = generateJS(expr, []);
       // Non-lambda recursive bindings use const
@@ -83,10 +83,10 @@ describe("JavaScript Backend", () => {
 
   describe("Binary Operations", () => {
     it("generates addition", () => {
-      const left = ir.irLit(1, numType);
-      const right = ir.irLit(2, numType);
-      const binding = ir.irBinOpBinding("+", left, right, numType, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const left = ir.irLit(1, intType);
+      const right = ir.irLit(2, intType);
+      const binding = ir.irBinOpBinding("+", left, right, intType, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("(1 + 2)");
@@ -95,12 +95,12 @@ describe("JavaScript Backend", () => {
     it("generates subtraction", () => {
       const binding = ir.irBinOpBinding(
         "-",
-        ir.irLit(5, numType),
-        ir.irLit(3, numType),
-        numType,
-        numType,
+        ir.irLit(5, intType),
+        ir.irLit(3, intType),
+        intType,
+        intType,
       );
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("(5 - 3)");
@@ -109,12 +109,12 @@ describe("JavaScript Backend", () => {
     it("generates multiplication", () => {
       const binding = ir.irBinOpBinding(
         "*",
-        ir.irLit(4, numType),
-        ir.irLit(3, numType),
-        numType,
-        numType,
+        ir.irLit(4, intType),
+        ir.irLit(3, intType),
+        intType,
+        intType,
       );
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("(4 * 3)");
@@ -123,12 +123,12 @@ describe("JavaScript Backend", () => {
     it("generates division", () => {
       const binding = ir.irBinOpBinding(
         "/",
-        ir.irLit(10, numType),
-        ir.irLit(2, numType),
-        numType,
-        numType,
+        ir.irLit(10, intType),
+        ir.irLit(2, intType),
+        intType,
+        intType,
       );
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("(10 / 2)");
@@ -138,9 +138,9 @@ describe("JavaScript Backend", () => {
       for (const op of ["<", ">", "<=", ">="] as const) {
         const binding = ir.irBinOpBinding(
           op,
-          ir.irLit(1, numType),
-          ir.irLit(2, numType),
-          numType,
+          ir.irLit(1, intType),
+          ir.irLit(2, intType),
+          intType,
           boolType,
         );
         const body = ir.irAtomExpr(ir.irVar("_t", boolType));
@@ -153,9 +153,9 @@ describe("JavaScript Backend", () => {
     it("generates primitive equality with ===", () => {
       const binding = ir.irBinOpBinding(
         "==",
-        ir.irLit(1, numType),
-        ir.irLit(2, numType),
-        numType,
+        ir.irLit(1, intType),
+        ir.irLit(2, intType),
+        intType,
         boolType,
       );
       const body = ir.irAtomExpr(ir.irVar("_t", boolType));
@@ -167,9 +167,9 @@ describe("JavaScript Backend", () => {
     it("generates primitive inequality with !==", () => {
       const binding = ir.irBinOpBinding(
         "!=",
-        ir.irLit(1, numType),
-        ir.irLit(2, numType),
-        numType,
+        ir.irLit(1, intType),
+        ir.irLit(2, intType),
+        intType,
         boolType,
       );
       const body = ir.irAtomExpr(ir.irVar("_t", boolType));
@@ -179,7 +179,7 @@ describe("JavaScript Backend", () => {
     });
 
     it("uses $eq for complex type equality", () => {
-      const tupleT = tupleType([numType, numType]);
+      const tupleT = tupleType([intType, intType]);
       const binding = ir.irBinOpBinding(
         "==",
         ir.irVar("a", tupleT),
@@ -194,7 +194,7 @@ describe("JavaScript Backend", () => {
     });
 
     it("uses !$eq for complex type inequality", () => {
-      const tupleT = tupleType([numType, numType]);
+      const tupleT = tupleType([intType, intType]);
       const binding = ir.irBinOpBinding(
         "!=",
         ir.irVar("a", tupleT),
@@ -224,7 +224,7 @@ describe("JavaScript Backend", () => {
     });
 
     it("uses $eq for function types", () => {
-      const fnT = funType(numType, numType);
+      const fnT = funType(intType, intType);
       const binding = ir.irBinOpBinding(
         "==",
         ir.irVar("f", fnT),
@@ -239,7 +239,7 @@ describe("JavaScript Backend", () => {
     });
 
     it("uses $eq for TApp types (custom data types)", () => {
-      const maybeNum = appType({ kind: "TCon", name: "Maybe" }, numType);
+      const maybeNum = appType({ kind: "TCon", name: "Maybe" }, intType);
       const binding = ir.irBinOpBinding(
         "==",
         ir.irVar("a", maybeNum),
@@ -254,7 +254,7 @@ describe("JavaScript Backend", () => {
     });
 
     it("uses $eq for record types", () => {
-      const recT: Type = { kind: "TRecord", fields: new Map([["x", numType]]), row: null };
+      const recT: Type = { kind: "TRecord", fields: new Map([["x", intType]]), row: null };
       const binding = ir.irBinOpBinding(
         "==",
         ir.irVar("a", recT),
@@ -271,9 +271,9 @@ describe("JavaScript Backend", () => {
 
   describe("Function Application", () => {
     it("generates function application", () => {
-      const fnType_ = funType(numType, numType);
-      const binding = ir.irAppBinding(ir.irVar("f", fnType_), ir.irLit(1, numType), numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const fnType_ = funType(intType, intType);
+      const binding = ir.irAppBinding(ir.irVar("f", fnType_), ir.irLit(1, intType), intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       // Direct call since f is a known function (not a constructor)
@@ -283,10 +283,10 @@ describe("JavaScript Backend", () => {
 
   describe("Conditional Expressions", () => {
     it("generates simple if expression", () => {
-      const thenBranch = ir.irAtomExpr(ir.irLit(1, numType));
-      const elseBranch = ir.irAtomExpr(ir.irLit(2, numType));
-      const binding = ir.irIfBinding(ir.irLit(true, boolType), thenBranch, elseBranch, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const thenBranch = ir.irAtomExpr(ir.irLit(1, intType));
+      const elseBranch = ir.irAtomExpr(ir.irLit(2, intType));
+      const binding = ir.irIfBinding(ir.irLit(true, boolType), thenBranch, elseBranch, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("(true ? 1 : 2)");
@@ -294,11 +294,11 @@ describe("JavaScript Backend", () => {
 
     it("generates if with complex branches using IIFE", () => {
       // Complex then branch: let x = 1 in x
-      const innerBinding = ir.irAtomBinding(ir.irLit(1, numType));
-      const thenBranch = ir.irLet("x", innerBinding, ir.irAtomExpr(ir.irVar("x", numType)));
-      const elseBranch = ir.irAtomExpr(ir.irLit(2, numType));
-      const binding = ir.irIfBinding(ir.irLit(true, boolType), thenBranch, elseBranch, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const innerBinding = ir.irAtomBinding(ir.irLit(1, intType));
+      const thenBranch = ir.irLet("x", innerBinding, ir.irAtomExpr(ir.irVar("x", intType)));
+      const elseBranch = ir.irAtomExpr(ir.irLit(2, intType));
+      const binding = ir.irIfBinding(ir.irLit(true, boolType), thenBranch, elseBranch, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("(() =>");
@@ -307,9 +307,9 @@ describe("JavaScript Backend", () => {
 
   describe("Tuples", () => {
     it("generates tuple as array", () => {
-      const elements = [ir.irLit(1, numType), ir.irLit(2, numType)];
-      const binding = ir.irTupleBinding(elements, tupleType([numType, numType]));
-      const body = ir.irAtomExpr(ir.irVar("_t", tupleType([numType, numType])));
+      const elements = [ir.irLit(1, intType), ir.irLit(2, intType)];
+      const binding = ir.irTupleBinding(elements, tupleType([intType, intType]));
+      const body = ir.irAtomExpr(ir.irVar("_t", tupleType([intType, intType])));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("[1, 2]");
@@ -321,14 +321,14 @@ describe("JavaScript Backend", () => {
       const recType: Type = {
         kind: "TRecord",
         fields: new Map([
-          ["x", numType],
-          ["y", numType],
+          ["x", intType],
+          ["y", intType],
         ]),
         row: null,
       };
       const fields = [
-        ir.irRecordField("x", ir.irLit(1, numType)),
-        ir.irRecordField("y", ir.irLit(2, numType)),
+        ir.irRecordField("x", ir.irLit(1, intType)),
+        ir.irRecordField("y", ir.irLit(2, intType)),
       ];
       const binding = ir.irRecordBinding(fields, recType);
       const body = ir.irAtomExpr(ir.irVar("_t", recType));
@@ -338,9 +338,9 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates field access", () => {
-      const recType: Type = { kind: "TRecord", fields: new Map([["x", numType]]), row: null };
-      const binding = ir.irFieldAccessBinding(ir.irVar("r", recType), "x", numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const recType: Type = { kind: "TRecord", fields: new Map([["x", intType]]), row: null };
+      const binding = ir.irFieldAccessBinding(ir.irVar("r", recType), "x", intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("r.x");
@@ -349,9 +349,9 @@ describe("JavaScript Backend", () => {
 
   describe("Lambda Expressions", () => {
     it("generates simple lambda", () => {
-      const fnType_ = funType(numType, numType);
-      const lambdaBody = ir.irAtomExpr(ir.irVar("x", numType));
-      const binding = ir.irLambdaBinding("x", numType, lambdaBody, fnType_);
+      const fnType_ = funType(intType, intType);
+      const lambdaBody = ir.irAtomExpr(ir.irVar("x", intType));
+      const binding = ir.irLambdaBinding("x", intType, lambdaBody, fnType_);
       const body = ir.irAtomExpr(ir.irVar("_fn", fnType_));
       const expr = ir.irLet("_fn", binding, body);
       const result = generateJS(expr, []);
@@ -359,10 +359,10 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates lambda with complex body", () => {
-      const fnType_ = funType(numType, numType);
-      const innerBinding = ir.irAtomBinding(ir.irLit(1, numType));
-      const lambdaBody = ir.irLet("y", innerBinding, ir.irAtomExpr(ir.irVar("y", numType)));
-      const binding = ir.irLambdaBinding("x", numType, lambdaBody, fnType_);
+      const fnType_ = funType(intType, intType);
+      const innerBinding = ir.irAtomBinding(ir.irLit(1, intType));
+      const lambdaBody = ir.irLet("y", innerBinding, ir.irAtomExpr(ir.irVar("y", intType)));
+      const binding = ir.irLambdaBinding("x", intType, lambdaBody, fnType_);
       const body = ir.irAtomExpr(ir.irVar("_fn", fnType_));
       const expr = ir.irLet("_fn", binding, body);
       const result = generateJS(expr, []);
@@ -373,7 +373,7 @@ describe("JavaScript Backend", () => {
 
   describe("Constructors", () => {
     it("generates constructor as $con call", () => {
-      const maybeType = appType({ kind: "TCon", name: "Maybe" }, numType);
+      const maybeType = appType({ kind: "TCon", name: "Maybe" }, intType);
       const binding = ir.irAtomBinding(ir.irVar("Nothing", maybeType));
       const body = ir.irAtomExpr(ir.irVar("x", maybeType));
       const expr = ir.irLet("x", binding, body);
@@ -382,8 +382,8 @@ describe("JavaScript Backend", () => {
     });
 
     it("does not treat regular variables as constructors", () => {
-      const binding = ir.irAtomBinding(ir.irVar("x", numType));
-      const body = ir.irAtomExpr(ir.irVar("y", numType));
+      const binding = ir.irAtomBinding(ir.irVar("x", intType));
+      const body = ir.irAtomExpr(ir.irVar("y", intType));
       const expr = ir.irLet("y", binding, body);
       const result = generateJS(expr, ["Nothing", "Just"]);
       expect(result.code).toContain("const y = x;");
@@ -393,11 +393,11 @@ describe("JavaScript Backend", () => {
 
   describe("Pattern Matching", () => {
     it("generates match with variable pattern", () => {
-      const pattern = ir.irPVar("n", numType);
-      const caseBody = ir.irAtomExpr(ir.irVar("n", numType));
+      const pattern = ir.irPVar("n", intType);
+      const caseBody = ir.irAtomExpr(ir.irVar("n", intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irLit(42, numType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irLit(42, intType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("if (true)");
@@ -405,11 +405,11 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates match with wildcard pattern", () => {
-      const pattern = ir.irPWildcard(numType);
-      const caseBody = ir.irAtomExpr(ir.irLit(0, numType));
+      const pattern = ir.irPWildcard(intType);
+      const caseBody = ir.irAtomExpr(ir.irLit(0, intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irLit(42, numType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irLit(42, intType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("if (true)");
@@ -417,11 +417,11 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates match with literal pattern", () => {
-      const pattern = ir.irPLit(0, numType);
-      const caseBody = ir.irAtomExpr(ir.irLit(1, numType));
+      const pattern = ir.irPLit(0, intType);
+      const caseBody = ir.irAtomExpr(ir.irLit(1, intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("x", numType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("x", intType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("_s === 0");
@@ -429,10 +429,10 @@ describe("JavaScript Backend", () => {
 
     it("generates match with string literal pattern", () => {
       const pattern = ir.irPLit("hello", strType);
-      const caseBody = ir.irAtomExpr(ir.irLit(1, numType));
+      const caseBody = ir.irAtomExpr(ir.irLit(1, intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("x", strType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("x", strType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain('_s === "hello"');
@@ -440,23 +440,23 @@ describe("JavaScript Backend", () => {
 
     it("generates match with boolean literal pattern", () => {
       const pattern = ir.irPLit(true, boolType);
-      const caseBody = ir.irAtomExpr(ir.irLit(1, numType));
+      const caseBody = ir.irAtomExpr(ir.irLit(1, intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("x", boolType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("x", boolType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("_s === true");
     });
 
     it("generates match with constructor pattern", () => {
-      const maybeType = appType({ kind: "TCon", name: "Maybe" }, numType);
-      const argPattern = ir.irPVar("n", numType);
+      const maybeType = appType({ kind: "TCon", name: "Maybe" }, intType);
+      const argPattern = ir.irPVar("n", intType);
       const pattern = ir.irPCon("Just", [argPattern], maybeType);
-      const caseBody = ir.irAtomExpr(ir.irVar("n", numType));
+      const caseBody = ir.irAtomExpr(ir.irVar("n", intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("x", maybeType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("x", maybeType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, ["Just", "Nothing"]);
       // Uses switch-based dispatch for unique constructor tags
@@ -466,12 +466,12 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates match with tuple pattern", () => {
-      const tupleT = tupleType([numType, numType]);
-      const pattern = ir.irPTuple([ir.irPVar("a", numType), ir.irPVar("b", numType)], tupleT);
-      const caseBody = ir.irAtomExpr(ir.irVar("a", numType));
+      const tupleT = tupleType([intType, intType]);
+      const pattern = ir.irPTuple([ir.irPVar("a", intType), ir.irPVar("b", intType)], tupleT);
+      const caseBody = ir.irAtomExpr(ir.irVar("a", intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("t", tupleT), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("t", tupleT), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("const a = _s[0]");
@@ -479,24 +479,24 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates match with tuple pattern containing literals", () => {
-      const tupleT = tupleType([numType, numType]);
-      const pattern = ir.irPTuple([ir.irPLit(1, numType), ir.irPLit(2, numType)], tupleT);
-      const caseBody = ir.irAtomExpr(ir.irLit(42, numType));
+      const tupleT = tupleType([intType, intType]);
+      const pattern = ir.irPTuple([ir.irPLit(1, intType), ir.irPLit(2, intType)], tupleT);
+      const caseBody = ir.irAtomExpr(ir.irLit(42, intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("t", tupleT), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("t", tupleT), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("_s[0] === 1 && _s[1] === 2");
     });
 
     it("generates match with record pattern", () => {
-      const recType: Type = { kind: "TRecord", fields: new Map([["x", numType]]), row: null };
-      const pattern = ir.irPRecord([ir.irPRecordField("x", ir.irPVar("val", numType))], recType);
-      const caseBody = ir.irAtomExpr(ir.irVar("val", numType));
+      const recType: Type = { kind: "TRecord", fields: new Map([["x", intType]]), row: null };
+      const pattern = ir.irPRecord([ir.irPRecordField("x", ir.irPVar("val", intType))], recType);
+      const caseBody = ir.irAtomExpr(ir.irVar("val", intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("r", recType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("r", recType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("const val = _s.x");
@@ -504,12 +504,12 @@ describe("JavaScript Backend", () => {
 
     it("generates multiple match cases with else if", () => {
       const cases = [
-        ir.irCase(ir.irPLit(0, numType), ir.irAtomExpr(ir.irLit(1, numType))),
-        ir.irCase(ir.irPLit(1, numType), ir.irAtomExpr(ir.irLit(2, numType))),
-        ir.irCase(ir.irPWildcard(numType), ir.irAtomExpr(ir.irLit(0, numType))),
+        ir.irCase(ir.irPLit(0, intType), ir.irAtomExpr(ir.irLit(1, intType))),
+        ir.irCase(ir.irPLit(1, intType), ir.irAtomExpr(ir.irLit(2, intType))),
+        ir.irCase(ir.irPWildcard(intType), ir.irAtomExpr(ir.irLit(0, intType))),
       ];
-      const binding = ir.irMatchBinding(ir.irVar("x", numType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("x", intType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("if (_s === 0)");
@@ -518,13 +518,13 @@ describe("JavaScript Backend", () => {
     });
 
     it("generates nested patterns in constructors", () => {
-      const maybeType = appType({ kind: "TCon", name: "Maybe" }, numType);
-      const innerPattern = ir.irPLit(42, numType);
+      const maybeType = appType({ kind: "TCon", name: "Maybe" }, intType);
+      const innerPattern = ir.irPLit(42, intType);
       const pattern = ir.irPCon("Just", [innerPattern], maybeType);
-      const caseBody = ir.irAtomExpr(ir.irLit(1, numType));
+      const caseBody = ir.irAtomExpr(ir.irLit(1, intType));
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irVar("x", maybeType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irVar("x", maybeType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, ["Just", "Nothing"]);
       // Uses switch-based dispatch; nested literal check inside case
@@ -535,12 +535,12 @@ describe("JavaScript Backend", () => {
 
     it("generates match with complex case body", () => {
       // Match case body that has let bindings
-      const innerBinding = ir.irAtomBinding(ir.irLit(1, numType));
-      const caseBody = ir.irLet("y", innerBinding, ir.irAtomExpr(ir.irVar("y", numType)));
-      const pattern = ir.irPVar("x", numType);
+      const innerBinding = ir.irAtomBinding(ir.irLit(1, intType));
+      const caseBody = ir.irLet("y", innerBinding, ir.irAtomExpr(ir.irVar("y", intType)));
+      const pattern = ir.irPVar("x", intType);
       const cases = [ir.irCase(pattern, caseBody)];
-      const binding = ir.irMatchBinding(ir.irLit(42, numType), cases, numType);
-      const body = ir.irAtomExpr(ir.irVar("_t", numType));
+      const binding = ir.irMatchBinding(ir.irLit(42, intType), cases, intType);
+      const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("const y = 1");
@@ -550,8 +550,8 @@ describe("JavaScript Backend", () => {
 
   describe("Closures", () => {
     it("generates closure binding", () => {
-      const fnType_ = funType(numType, numType);
-      const captures = [ir.irVar("y", numType)];
+      const fnType_ = funType(intType, intType);
+      const captures = [ir.irVar("y", intType)];
       const binding = ir.irClosureBinding("$fn_1", captures, fnType_);
       const body = ir.irAtomExpr(ir.irVar("_t", fnType_));
       const expr = ir.irLet("_t", binding, body);
@@ -562,8 +562,8 @@ describe("JavaScript Backend", () => {
 
   describe("Variable name sanitization", () => {
     it("sanitizes invalid characters in variable names", () => {
-      const binding = ir.irAtomBinding(ir.irLit(1, numType));
-      const body = ir.irAtomExpr(ir.irVar("x-y", numType));
+      const binding = ir.irAtomBinding(ir.irLit(1, intType));
+      const body = ir.irAtomExpr(ir.irVar("x-y", intType));
       const expr = ir.irLet("x-y", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("const x_y = 1;");
@@ -572,13 +572,13 @@ describe("JavaScript Backend", () => {
 
   describe("Output format", () => {
     it("returns empty warnings array", () => {
-      const expr = ir.irAtomExpr(ir.irLit(42, numType));
+      const expr = ir.irAtomExpr(ir.irLit(42, intType));
       const result = generateJS(expr, []);
       expect(result.warnings).toEqual([]);
     });
 
     it("includes console.log at end", () => {
-      const expr = ir.irAtomExpr(ir.irLit(42, numType));
+      const expr = ir.irAtomExpr(ir.irLit(42, intType));
       const result = generateJS(expr, []);
       expect(result.code).toContain("console.log($result);");
     });
@@ -611,7 +611,7 @@ describe("Runtime", () => {
 
 describe("Foreign Functions", () => {
   it("generates foreign function reference with $foreign lookup", () => {
-    const fnType_ = funType(strType, numType);
+    const fnType_ = funType(strType, intType);
     const foreignVar = ir.irForeignVar("String", "length", fnType_);
     const expr = ir.irAtomExpr(foreignVar);
     const result = generateJS(expr, []);
@@ -619,10 +619,10 @@ describe("Foreign Functions", () => {
   });
 
   it("generates foreign function application", () => {
-    const fnType_ = funType(strType, numType);
+    const fnType_ = funType(strType, intType);
     const foreignVar = ir.irForeignVar("String", "length", fnType_);
-    const binding = ir.irAppBinding(foreignVar, ir.irLit("hello", strType), numType);
-    const body = ir.irAtomExpr(ir.irVar("_t", numType));
+    const binding = ir.irAppBinding(foreignVar, ir.irLit("hello", strType), intType);
+    const body = ir.irAtomExpr(ir.irVar("_t", intType));
     const expr = ir.irLet("_t", binding, body);
     const result = generateJS(expr, []);
     expect(result.code).toContain('$foreign["String"]["length"]("hello")');
@@ -630,8 +630,8 @@ describe("Foreign Functions", () => {
 
   it("generates curried foreign function applications", () => {
     // slice "hello" 0 - returns a function
-    const sliceType = funType(strType, funType(numType, funType(numType, strType)));
-    const partialSliceType = funType(numType, funType(numType, strType));
+    const sliceType = funType(strType, funType(intType, funType(intType, strType)));
+    const partialSliceType = funType(intType, funType(intType, strType));
 
     const foreignVar = ir.irForeignVar("String", "slice", sliceType);
 
@@ -645,7 +645,7 @@ describe("Foreign Functions", () => {
   });
 
   it("includes $foreign in runtime", () => {
-    const expr = ir.irAtomExpr(ir.irLit(42, numType));
+    const expr = ir.irAtomExpr(ir.irLit(42, intType));
     const result = generateJS(expr, []);
     expect(result.code).toContain("const $foreign = {");
     // Should contain String and Char modules
@@ -658,7 +658,7 @@ describe("TCO (Tail Call Optimization)", () => {
   it("generates valid JS for recursive function with pattern matching", () => {
     // This is a simpler test that just verifies the code is syntactically valid
     // The actual continue-in-IIFE bug would cause a runtime error
-    const listType = appType({ kind: "TCon", name: "List" }, numType);
+    const listType = appType({ kind: "TCon", name: "List" }, intType);
 
     // Simple pattern match without TCO (non-tail recursive)
     const matchBinding = ir.irMatchBinding(
@@ -666,26 +666,26 @@ describe("TCO (Tail Call Optimization)", () => {
       [
         {
           pattern: ir.irPCon("Nil", [], listType),
-          body: ir.irAtomExpr(ir.irLit(0, numType)),
+          body: ir.irAtomExpr(ir.irLit(0, intType)),
         },
         {
           pattern: ir.irPCon(
             "Cons",
-            [ir.irPVar("x", numType), ir.irPVar("rest", listType)],
+            [ir.irPVar("x", intType), ir.irPVar("rest", listType)],
             listType,
           ),
-          body: ir.irAtomExpr(ir.irVar("x", numType)),
+          body: ir.irAtomExpr(ir.irVar("x", intType)),
         },
       ],
-      numType,
+      intType,
     );
 
-    const body = ir.irLet("_match", matchBinding, ir.irAtomExpr(ir.irVar("_match", numType)));
-    const lambda = ir.irLambdaBinding("xs", listType, body, funType(listType, numType));
+    const body = ir.irLet("_match", matchBinding, ir.irAtomExpr(ir.irVar("_match", intType)));
+    const lambda = ir.irLambdaBinding("xs", listType, body, funType(listType, intType));
 
     const expr = ir.irLetRec(
       [ir.irRecBinding("head", lambda)],
-      ir.irAtomExpr(ir.irVar("head", funType(listType, numType))),
+      ir.irAtomExpr(ir.irVar("head", funType(listType, intType))),
     );
 
     const result = generateJS(expr, ["Nil", "Cons"]);

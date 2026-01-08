@@ -60,43 +60,43 @@ describe("Lexer", () => {
     it("lexes integers", () => {
       const state = createLexer("42");
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("42");
     });
 
     it("lexes multiple integers", () => {
       const state = createLexer("42 123 0");
       let tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("42");
 
       tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("123");
 
       tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("0");
     });
 
     it("lexes floating point numbers", () => {
       const state = createLexer("3.14");
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Float);
       expect(slice(state, tok[1], tok[2])).toBe("3.14");
     });
 
     it("lexes numbers with multiple decimal places", () => {
       const state = createLexer("123.456789");
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Float);
       expect(slice(state, tok[1], tok[2])).toBe("123.456789");
     });
 
     it("lexes integer followed by dot as separate tokens", () => {
       const state = createLexer("42.x");
       let tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("42");
 
       tok = nextToken(state);
@@ -492,13 +492,13 @@ describe("Lexer", () => {
     it("skips spaces", () => {
       const state = createLexer("   42");
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
     });
 
     it("skips tabs", () => {
       const state = createLexer("\t\t42");
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
     });
 
     it("handles newlines and sets atLineStart", () => {
@@ -506,7 +506,7 @@ describe("Lexer", () => {
       nextToken(state);
       expect(state.atLineStart).toBe(false);
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("43");
     });
 
@@ -514,71 +514,71 @@ describe("Lexer", () => {
       const state = createLexer("42\r43");
       nextToken(state);
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("43");
     });
 
     it("handles mixed whitespace", () => {
       const state = createLexer("  \t\n\r  42");
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
     });
   });
 
   describe("comments", () => {
     it("skips line comments", () => {
       const state = createLexer("42 -- this is a comment\n43");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("43");
     });
 
     it("handles line comment at end of file", () => {
       const state = createLexer("42 -- comment");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.Eof);
     });
 
     it("handles empty line comment", () => {
       const state = createLexer("42 --\n43");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
     });
 
     it("skips block comments", () => {
       const state = createLexer("42 {- comment -} 43");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("43");
     });
 
     it("handles nested block comments", () => {
       const state = createLexer("42 {- outer {- inner -} outer -} 43");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("43");
     });
 
     it("handles multiline block comments", () => {
       const state = createLexer("42 {-\nmultiline\ncomment\n-} 43");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
     });
 
     it("handles deeply nested block comments", () => {
       const state = createLexer("42 {- a {- b {- c -} b -} a -} 43");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       const tok = nextToken(state);
-      expect(tok[0]).toBe(TokenKind.Number);
+      expect(tok[0]).toBe(TokenKind.Int);
       expect(slice(state, tok[1], tok[2])).toBe("43");
     });
 
     it("handles unclosed block comment at EOF", () => {
       const state = createLexer("42 {- unclosed");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.Eof);
     });
   });
@@ -617,7 +617,7 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.Plus);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Star);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
     });
 
     it("lexes a let expression", () => {
@@ -625,11 +625,11 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.Let);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Eq);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.In);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Plus);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
     });
 
     it("lexes a lambda expression", () => {
@@ -638,7 +638,7 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.Arrow);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Plus);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
     });
 
     it("lexes a match expression", () => {
@@ -653,7 +653,7 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.When);
       expect(nextToken(state)[0]).toBe(TokenKind.Upper);
       expect(nextToken(state)[0]).toBe(TokenKind.Arrow);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.End);
     });
 
@@ -674,22 +674,22 @@ describe("Lexer", () => {
       expect(nextToken(state)[0]).toBe(TokenKind.LBrace);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Eq);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.Comma);
       expect(nextToken(state)[0]).toBe(TokenKind.Lower);
       expect(nextToken(state)[0]).toBe(TokenKind.Eq);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.RBrace);
     });
 
     it("lexes tuple syntax", () => {
       const state = createLexer("(1, 2, 3)");
       expect(nextToken(state)[0]).toBe(TokenKind.LParen);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.Comma);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.Comma);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.RParen);
     });
 
@@ -713,11 +713,11 @@ describe("Lexer", () => {
   describe("edge cases", () => {
     it("handles operators without spaces", () => {
       const state = createLexer("1+2*3");
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.Plus);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
       expect(nextToken(state)[0]).toBe(TokenKind.Star);
-      expect(nextToken(state)[0]).toBe(TokenKind.Number);
+      expect(nextToken(state)[0]).toBe(TokenKind.Int);
     });
 
     it("handles consecutive operators", () => {

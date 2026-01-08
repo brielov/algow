@@ -171,7 +171,8 @@ export const bindWithConstructors = (
 
 const bindExpr = (ctx: BindContext, expr: ast.Expr): void => {
   switch (expr.kind) {
-    case "Num":
+    case "Int":
+    case "Float":
     case "Bool":
     case "Str":
       // Literals have no bindings

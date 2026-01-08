@@ -68,9 +68,9 @@ const createEitherEnv = () => {
 describe("Type Inference", () => {
   describe("literals", () => {
     it("infers number type", () => {
-      const { type, diagnostics } = infer(baseEnv, new Map(), ast.num(42));
+      const { type, diagnostics } = infer(baseEnv, new Map(), ast.int(42));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers boolean type for true", () => {
@@ -141,10 +141,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1))),
+        ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number -> number");
+      expect(typeToString(type)).toBe("Int -> Int");
     });
 
     it("infers curried function type", () => {
@@ -159,9 +159,9 @@ describe("Type Inference", () => {
     });
 
     it("infers lambda returning constant", () => {
-      const { type, diagnostics } = infer(baseEnv, new Map(), ast.abs("x", ast.num(42)));
+      const { type, diagnostics } = infer(baseEnv, new Map(), ast.abs("x", ast.int(42)));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toMatch(/t\d+ -> number/);
+      expect(typeToString(type)).toMatch(/t\d+ -> Int/);
     });
 
     it("infers deeply nested lambdas", () => {
@@ -181,10 +181,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.app(ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1))), ast.num(5)),
+        ast.app(ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))), ast.int(5)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers curried application", () => {
@@ -194,13 +194,13 @@ describe("Type Inference", () => {
         ast.app(
           ast.app(
             ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
-            ast.num(1),
+            ast.int(1),
           ),
-          ast.num(2),
+          ast.int(2),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers partial application", () => {
@@ -209,24 +209,24 @@ describe("Type Inference", () => {
         new Map(),
         ast.app(
           ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
-          ast.num(1),
+          ast.int(1),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number -> number");
+      expect(typeToString(type)).toBe("Int -> Int");
     });
 
     it("reports type error for wrong argument type", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.app(ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1))), ast.str("hello")),
+        ast.app(ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))), ast.str("hello")),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
     });
 
     it("reports error when applying non-function", () => {
-      const { diagnostics } = infer(baseEnv, new Map(), ast.app(ast.num(42), ast.num(1)));
+      const { diagnostics } = infer(baseEnv, new Map(), ast.app(ast.int(42), ast.int(1)));
       expect(diagnostics.length).toBeGreaterThan(0);
     });
   });
@@ -237,10 +237,10 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("+", ast.num(1), ast.num(2)),
+          ast.binOp("+", ast.int(1), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers string concatenation", () => {
@@ -257,30 +257,30 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("-", ast.num(5), ast.num(3)),
+          ast.binOp("-", ast.int(5), ast.int(3)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers multiplication", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("*", ast.num(2), ast.num(3)),
+          ast.binOp("*", ast.int(2), ast.int(3)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers division", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("/", ast.num(10), ast.num(2)),
+          ast.binOp("/", ast.int(10), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers + string concatenation", () => {
@@ -308,7 +308,7 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("<", ast.num(1), ast.num(2)),
+          ast.binOp("<", ast.int(1), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
         expect(typeToString(type)).toBe("boolean");
@@ -318,7 +318,7 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("<=", ast.num(1), ast.num(2)),
+          ast.binOp("<=", ast.int(1), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
         expect(typeToString(type)).toBe("boolean");
@@ -328,7 +328,7 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp(">", ast.num(2), ast.num(1)),
+          ast.binOp(">", ast.int(2), ast.int(1)),
         );
         expect(diagnostics).toHaveLength(0);
         expect(typeToString(type)).toBe("boolean");
@@ -338,7 +338,7 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp(">=", ast.num(2), ast.num(1)),
+          ast.binOp(">=", ast.int(2), ast.int(1)),
         );
         expect(diagnostics).toHaveLength(0);
         expect(typeToString(type)).toBe("boolean");
@@ -369,7 +369,7 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("==", ast.num(1), ast.num(2)),
+          ast.binOp("==", ast.int(1), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
         expect(typeToString(type)).toBe("boolean");
@@ -399,7 +399,7 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("==", ast.num(1), ast.str("1")),
+          ast.binOp("==", ast.int(1), ast.str("1")),
         );
         expect(diagnostics.length).toBeGreaterThan(0);
       });
@@ -410,17 +410,17 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("+", ast.binOp("*", ast.num(2), ast.num(3)), ast.num(4)),
+          ast.binOp("+", ast.binOp("*", ast.int(2), ast.int(3)), ast.int(4)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers combined comparison and arithmetic", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.binOp("<", ast.binOp("+", ast.num(1), ast.num(2)), ast.num(5)),
+          ast.binOp("<", ast.binOp("+", ast.int(1), ast.int(2)), ast.int(5)),
         );
         expect(diagnostics).toHaveLength(0);
         expect(typeToString(type)).toBe("boolean");
@@ -433,10 +433,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.if_(ast.bool(true), ast.num(1), ast.num(2)),
+        ast.if_(ast.bool(true), ast.int(1), ast.int(2)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers if with string branches", () => {
@@ -453,7 +453,7 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.if_(ast.binOp(">", ast.num(5), ast.num(3)), ast.str("big"), ast.str("small")),
+        ast.if_(ast.binOp(">", ast.int(5), ast.int(3)), ast.str("big"), ast.str("small")),
       );
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toBe("string");
@@ -463,17 +463,17 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.if_(ast.bool(true), ast.if_(ast.bool(false), ast.num(1), ast.num(2)), ast.num(3)),
+        ast.if_(ast.bool(true), ast.if_(ast.bool(false), ast.int(1), ast.int(2)), ast.int(3)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("reports error for non-boolean condition", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.if_(ast.num(1), ast.num(2), ast.num(3)),
+        ast.if_(ast.int(1), ast.int(2), ast.int(3)),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
     });
@@ -482,7 +482,7 @@ describe("Type Inference", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.if_(ast.bool(true), ast.num(1), ast.str("two")),
+        ast.if_(ast.bool(true), ast.int(1), ast.str("two")),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
     });
@@ -493,20 +493,20 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.let_("x", ast.num(42), ast.var_("x")),
+        ast.let_("x", ast.int(42), ast.var_("x")),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers let with usage in body", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.let_("x", ast.num(10), ast.binOp("+", ast.var_("x"), ast.num(5))),
+        ast.let_("x", ast.int(10), ast.binOp("+", ast.var_("x"), ast.int(5))),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers nested let", () => {
@@ -515,19 +515,19 @@ describe("Type Inference", () => {
         new Map(),
         ast.let_(
           "x",
-          ast.num(1),
-          ast.let_("y", ast.num(2), ast.binOp("+", ast.var_("x"), ast.var_("y"))),
+          ast.int(1),
+          ast.let_("y", ast.int(2), ast.binOp("+", ast.var_("x"), ast.var_("y"))),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("supports shadowing", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.let_("x", ast.num(1), ast.let_("x", ast.str("hello"), ast.var_("x"))),
+        ast.let_("x", ast.int(1), ast.let_("x", ast.str("hello"), ast.var_("x"))),
       );
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toBe("string");
@@ -544,13 +544,13 @@ describe("Type Inference", () => {
             "id",
             ast.abs("x", ast.var_("x")),
             ast.tuple([
-              ast.app(ast.var_("id"), ast.num(1)),
+              ast.app(ast.var_("id"), ast.int(1)),
               ast.app(ast.var_("id"), ast.str("hello")),
             ]),
           ),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("(number, string)");
+        expect(typeToString(type)).toBe("(Int, string)");
       });
 
       it("generalizes function types", () => {
@@ -579,22 +579,22 @@ describe("Type Inference", () => {
               ast.abs(
                 "n",
                 ast.if_(
-                  ast.binOp("==", ast.var_("n"), ast.num(0)),
-                  ast.num(1),
+                  ast.binOp("==", ast.var_("n"), ast.int(0)),
+                  ast.int(1),
                   ast.binOp(
                     "*",
                     ast.var_("n"),
-                    ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+                    ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.int(1))),
                   ),
                 ),
               ),
             ),
           ],
-          ast.app(ast.var_("fact"), ast.num(5)),
+          ast.app(ast.var_("fact"), ast.int(5)),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers recursive list function", () => {
@@ -612,10 +612,10 @@ describe("Type Inference", () => {
               ast.abs(
                 "xs",
                 ast.match(ast.var_("xs"), [
-                  ast.case_(ast.pcon("Nil", []), ast.num(0)),
+                  ast.case_(ast.pcon("Nil", []), ast.int(0)),
                   ast.case_(
                     ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
-                    ast.binOp("+", ast.num(1), ast.app(ast.var_("length"), ast.var_("rest"))),
+                    ast.binOp("+", ast.int(1), ast.app(ast.var_("length"), ast.var_("rest"))),
                   ),
                 ]),
               ),
@@ -625,7 +625,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toMatch(/List t\d+ -> number/);
+      expect(typeToString(type)).toMatch(/List t\d+ -> Int/);
     });
 
     it("allows recursive reference in body", () => {
@@ -647,36 +647,36 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.tuple([ast.num(1), ast.str("hello")]),
+        ast.tuple([ast.int(1), ast.str("hello")]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(number, string)");
+      expect(typeToString(type)).toBe("(Int, string)");
     });
 
     it("infers 3-tuple", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]),
+        ast.tuple([ast.int(1), ast.str("hello"), ast.bool(true)]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(number, string, boolean)");
+      expect(typeToString(type)).toBe("(Int, string, boolean)");
     });
 
     it("infers nested tuple", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.tuple([ast.tuple([ast.num(1), ast.num(2)]), ast.str("nested")]),
+        ast.tuple([ast.tuple([ast.int(1), ast.int(2)]), ast.str("nested")]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("((number, number), string)");
+      expect(typeToString(type)).toBe("((Int, Int), string)");
     });
 
     it("unwraps single-element tuple", () => {
-      const { type, diagnostics } = infer(baseEnv, new Map(), ast.tuple([ast.num(42)]));
+      const { type, diagnostics } = infer(baseEnv, new Map(), ast.tuple([ast.int(42)]));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("reports error for empty tuple", () => {
@@ -690,21 +690,21 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.record([ast.field("x", ast.num(1))]),
+        ast.record([ast.field("x", ast.int(1))]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("{ x: number }");
+      expect(typeToString(type)).toBe("{ x: Int }");
     });
 
     it("infers record with multiple fields", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.str("hello"))]),
+        ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.str("hello"))]),
       );
       expect(diagnostics).toHaveLength(0);
       const typeStr = typeToString(type);
-      expect(typeStr).toContain("x: number");
+      expect(typeStr).toContain("x: Int");
       expect(typeStr).toContain("y: string");
     });
 
@@ -718,11 +718,11 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.record([ast.field("inner", ast.record([ast.field("value", ast.num(42))]))]),
+        ast.record([ast.field("inner", ast.record([ast.field("value", ast.int(42))]))]),
       );
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toContain("inner:");
-      expect(typeToString(type)).toContain("value: number");
+      expect(typeToString(type)).toContain("value: Int");
     });
   });
 
@@ -731,10 +731,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.fieldAccess(ast.record([ast.field("x", ast.num(42))]), "x"),
+        ast.fieldAccess(ast.record([ast.field("x", ast.int(42))]), "x"),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers nested field access", () => {
@@ -742,26 +742,26 @@ describe("Type Inference", () => {
         baseEnv,
         new Map(),
         ast.fieldAccess(
-          ast.record([ast.field("inner", ast.record([ast.field("value", ast.num(99))]))]),
+          ast.record([ast.field("inner", ast.record([ast.field("value", ast.int(99))]))]),
           "inner",
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toContain("value: number");
+      expect(typeToString(type)).toContain("value: Int");
     });
 
     it("reports error for missing field on closed record", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.fieldAccess(ast.record([ast.field("x", ast.num(1))]), "y"),
+        ast.fieldAccess(ast.record([ast.field("x", ast.int(1))]), "y"),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(diagnostics[0]!.message).toContain("no field");
     });
 
     it("reports error for field access on non-record", () => {
-      const { diagnostics } = infer(baseEnv, new Map(), ast.fieldAccess(ast.num(42), "x"));
+      const { diagnostics } = infer(baseEnv, new Map(), ast.fieldAccess(ast.int(42), "x"));
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(diagnostics[0]!.message).toContain("non-record");
     });
@@ -786,11 +786,11 @@ describe("Type Inference", () => {
           new Map(),
           ast.app(
             ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
-            ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("hello"))]),
+            ast.record([ast.field("x", ast.int(42)), ast.field("y", ast.str("hello"))]),
           ),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers function accessing multiple fields", () => {
@@ -819,17 +819,17 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.tupleIndex(ast.tuple([ast.num(1), ast.str("hello")]), 0),
+        ast.tupleIndex(ast.tuple([ast.int(1), ast.str("hello")]), 0),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers second element of pair", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.tupleIndex(ast.tuple([ast.num(1), ast.str("hello")]), 1),
+        ast.tupleIndex(ast.tuple([ast.int(1), ast.str("hello")]), 1),
       );
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toBe("string");
@@ -839,7 +839,7 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.tupleIndex(ast.tuple([ast.num(1), ast.str("hello"), ast.bool(true)]), 2),
+        ast.tupleIndex(ast.tuple([ast.int(1), ast.str("hello"), ast.bool(true)]), 2),
       );
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toBe("boolean");
@@ -849,14 +849,14 @@ describe("Type Inference", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.tupleIndex(ast.tuple([ast.num(1), ast.num(2)]), 5),
+        ast.tupleIndex(ast.tuple([ast.int(1), ast.int(2)]), 5),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(diagnostics[0]!.message).toContain("out of bounds");
     });
 
     it("reports error for tuple index on non-tuple", () => {
-      const { diagnostics } = infer(baseEnv, new Map(), ast.tupleIndex(ast.num(42), 0));
+      const { diagnostics } = infer(baseEnv, new Map(), ast.tupleIndex(ast.int(42), 0));
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(diagnostics[0]!.message).toContain("non-tuple");
     });
@@ -866,7 +866,7 @@ describe("Type Inference", () => {
         baseEnv,
         new Map(),
         ast.tupleIndex(
-          ast.tupleIndex(ast.tuple([ast.tuple([ast.num(1), ast.str("inner")]), ast.bool(true)]), 0),
+          ast.tupleIndex(ast.tuple([ast.tuple([ast.int(1), ast.str("inner")]), ast.bool(true)]), 0),
           1,
         ),
       );
@@ -881,17 +881,17 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.match(ast.num(42), [ast.case_(ast.pvar("x"), ast.var_("x"))]),
+          ast.match(ast.int(42), [ast.case_(ast.pvar("x"), ast.var_("x"))]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers match with wildcard pattern", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.match(ast.num(42), [ast.case_(ast.pwildcard(), ast.str("matched"))]),
+          ast.match(ast.int(42), [ast.case_(ast.pwildcard(), ast.str("matched"))]),
         );
         expect(diagnostics).toHaveLength(0);
         expect(typeToString(type)).toBe("string");
@@ -901,7 +901,7 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.match(ast.num(42), [
+          ast.match(ast.int(42), [
             ast.case_(ast.plit(0), ast.str("zero")),
             ast.case_(ast.pwildcard(), ast.str("other")),
           ]),
@@ -919,13 +919,13 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
-            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.int(0)),
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers match on List", () => {
@@ -936,19 +936,19 @@ describe("Type Inference", () => {
           env,
           listReg,
           ast.match(ast.var_("Nil"), [
-            ast.case_(ast.pcon("Nil", []), ast.num(0)),
+            ast.case_(ast.pcon("Nil", []), ast.int(0)),
             ast.case_(ast.pcon("Cons", [ast.pvar("x"), ast.pwildcard()]), ast.var_("x")),
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("reports error for unknown constructor", () => {
         const { diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.match(ast.num(42), [ast.case_(ast.pcon("Unknown", [ast.pvar("x")]), ast.var_("x"))]),
+          ast.match(ast.int(42), [ast.case_(ast.pcon("Unknown", [ast.pvar("x")]), ast.var_("x"))]),
         );
         expect(diagnostics.length).toBeGreaterThan(0);
         expect(diagnostics[0]!.message).toContain("Unknown constructor");
@@ -961,7 +961,7 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.pcon("Just", [ast.pvar("x"), ast.pvar("y")]), ast.var_("x")),
           ]),
         );
@@ -974,19 +974,19 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.match(ast.tuple([ast.num(1), ast.str("hello")]), [
+          ast.match(ast.tuple([ast.int(1), ast.str("hello")]), [
             ast.case_(ast.ptuple([ast.pvar("n"), ast.pvar("s")]), ast.var_("n")),
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("reports error for tuple arity mismatch", () => {
         const { diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+          ast.match(ast.tuple([ast.int(1), ast.int(2)]), [
             ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b"), ast.pvar("c")]), ast.var_("a")),
           ]),
         );
@@ -999,12 +999,12 @@ describe("Type Inference", () => {
         const { type, diagnostics } = infer(
           baseEnv,
           new Map(),
-          ast.match(ast.record([ast.field("x", ast.num(42)), ast.field("y", ast.str("hello"))]), [
+          ast.match(ast.record([ast.field("x", ast.int(42)), ast.field("y", ast.str("hello"))]), [
             ast.case_(ast.precord([ast.pfield("x", ast.pvar("a"))]), ast.var_("a")),
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("infers nested record pattern", () => {
@@ -1012,7 +1012,7 @@ describe("Type Inference", () => {
           baseEnv,
           new Map(),
           ast.match(
-            ast.record([ast.field("inner", ast.record([ast.field("value", ast.num(99))]))]),
+            ast.record([ast.field("inner", ast.record([ast.field("value", ast.int(99))]))]),
             [
               ast.case_(
                 ast.precord([
@@ -1024,7 +1024,7 @@ describe("Type Inference", () => {
           ),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
     });
 
@@ -1036,7 +1036,7 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
             // Missing: Nothing case
           ]),
@@ -1053,9 +1053,9 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
-            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1071,9 +1071,9 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.pcon("Just", [ast.pvar("x")]), ast.var_("x")),
-            ast.case_(ast.pwildcard(), ast.num(0)),
+            ast.case_(ast.pwildcard(), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1089,8 +1089,8 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
-            ast.case_(ast.pvar("m"), ast.num(42)),
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
+            ast.case_(ast.pvar("m"), ast.int(42)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1128,7 +1128,7 @@ describe("Type Inference", () => {
           maybeReg,
           ast.match(ast.var_("Nothing"), [
             ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pvar("y")])]), ast.var_("y")),
-            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1152,8 +1152,8 @@ describe("Type Inference", () => {
           maybeReg,
           ast.match(ast.var_("Nothing"), [
             ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pvar("y")])]), ast.var_("y")),
-            ast.case_(ast.pcon("Just", [ast.pcon("Nothing", [])]), ast.num(0)),
-            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+            ast.case_(ast.pcon("Just", [ast.pcon("Nothing", [])]), ast.int(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1176,8 +1176,8 @@ describe("Type Inference", () => {
           maybeReg,
           ast.match(ast.var_("Nothing"), [
             ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pvar("y")])]), ast.var_("y")),
-            ast.case_(ast.pcon("Just", [ast.pwildcard()]), ast.num(0)),
-            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+            ast.case_(ast.pcon("Just", [ast.pwildcard()]), ast.int(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1204,8 +1204,8 @@ describe("Type Inference", () => {
               ast.pcon("Just", [ast.pcon("Just", [ast.pcon("Just", [ast.pvar("z")])])]),
               ast.var_("z"),
             ),
-            ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pcon("Nothing", [])])]), ast.num(0)),
-            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+            ast.case_(ast.pcon("Just", [ast.pcon("Just", [ast.pcon("Nothing", [])])]), ast.int(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1226,9 +1226,9 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.qualifiedPCon("Maybe", "Just", [ast.pvar("x")]), ast.var_("x")),
-            ast.case_(ast.qualifiedPCon("Maybe", "Nothing", []), ast.num(0)),
+            ast.case_(ast.qualifiedPCon("Maybe", "Nothing", []), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1247,7 +1247,7 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.qualifiedPCon("Maybe", "Just", [ast.pvar("x")]), ast.var_("x")),
           ]),
         );
@@ -1269,9 +1269,9 @@ describe("Type Inference", () => {
         const { diagnostics } = infer(
           env,
           maybeReg,
-          ast.match(ast.app(ast.var_("Just"), ast.num(42)), [
+          ast.match(ast.app(ast.var_("Just"), ast.int(42)), [
             ast.case_(ast.qualifiedPCon("Maybe", "Just", [ast.pvar("x")]), ast.var_("x")),
-            ast.case_(ast.pcon("Nothing", []), ast.num(0)),
+            ast.case_(ast.pcon("Nothing", []), ast.int(0)),
           ]),
         );
         const exhaustivenessErrors = diagnostics.filter((d) =>
@@ -1283,7 +1283,7 @@ describe("Type Inference", () => {
 
     describe("empty match", () => {
       it("reports error for match with no cases", () => {
-        const { diagnostics } = infer(baseEnv, new Map(), ast.match(ast.num(42), []));
+        const { diagnostics } = infer(baseEnv, new Map(), ast.match(ast.int(42), []));
         expect(diagnostics.length).toBeGreaterThan(0);
         expect(diagnostics[0]!.message).toContain("at least one case");
       });
@@ -1292,20 +1292,20 @@ describe("Type Inference", () => {
     describe("pattern guards", () => {
       it("infers match with pattern guard", () => {
         // match 5 with | n if n > 0 => n | _ => 0 end
-        const expr = ast.match(ast.num(5), [
-          ast.case_(ast.pvar("n"), ast.var_("n"), ast.binOp(">", ast.var_("n"), ast.num(0))),
-          ast.case_(ast.pwildcard(), ast.num(0)),
+        const expr = ast.match(ast.int(5), [
+          ast.case_(ast.pvar("n"), ast.var_("n"), ast.binOp(">", ast.var_("n"), ast.int(0))),
+          ast.case_(ast.pwildcard(), ast.int(0)),
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
 
       it("reports error for non-boolean guard", () => {
         // match 5 with | n if n => n | _ => 0 end (guard is number, not boolean)
-        const expr = ast.match(ast.num(5), [
+        const expr = ast.match(ast.int(5), [
           ast.case_(ast.pvar("n"), ast.var_("n"), ast.var_("n")),
-          ast.case_(ast.pwildcard(), ast.num(0)),
+          ast.case_(ast.pwildcard(), ast.int(0)),
         ]);
         const { diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics.length).toBeGreaterThan(0);
@@ -1314,24 +1314,24 @@ describe("Type Inference", () => {
 
       it("guard can access pattern bindings", () => {
         // match (1, 2) with | (a, b) if a < b => a | _ => 0 end
-        const expr = ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+        const expr = ast.match(ast.tuple([ast.int(1), ast.int(2)]), [
           ast.case_(
             ast.ptuple([ast.pvar("a"), ast.pvar("b")]),
             ast.var_("a"),
             ast.binOp("<", ast.var_("a"), ast.var_("b")),
           ),
-          ast.case_(ast.pwildcard(), ast.num(0)),
+          ast.case_(ast.pwildcard(), ast.int(0)),
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
     });
 
     describe("as-patterns", () => {
       it("infers match with as-pattern", () => {
         // match (1, 2) with | (a, b) as whole => whole end
-        const expr = ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+        const expr = ast.match(ast.tuple([ast.int(1), ast.int(2)]), [
           ast.case_(
             ast.pas(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), "whole"),
             ast.var_("whole"),
@@ -1339,12 +1339,12 @@ describe("Type Inference", () => {
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("(number, number)");
+        expect(typeToString(type)).toBe("(Int, Int)");
       });
 
       it("as-binding and inner bindings are both in scope", () => {
         // match (1, 2) with | (a, b) as whole => a end
-        const expr = ast.match(ast.tuple([ast.num(1), ast.num(2)]), [
+        const expr = ast.match(ast.tuple([ast.int(1), ast.int(2)]), [
           ast.case_(
             ast.pas(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), "whole"),
             ast.binOp("+", ast.var_("a"), ast.var_("b")),
@@ -1352,7 +1352,7 @@ describe("Type Inference", () => {
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("number");
+        expect(typeToString(type)).toBe("Int");
       });
     });
   });
@@ -1397,9 +1397,9 @@ describe("Type Inference", () => {
       const [maybeEnv, maybeReg] = createMaybeEnv();
       const env = mergeEnvs(baseEnv, maybeEnv);
 
-      const { type, diagnostics } = infer(env, maybeReg, ast.app(ast.var_("Just"), ast.num(42)));
+      const { type, diagnostics } = infer(env, maybeReg, ast.app(ast.var_("Just"), ast.int(42)));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Maybe number");
+      expect(typeToString(type)).toBe("Maybe Int");
     });
 
     it("infers binary constructor application", () => {
@@ -1409,10 +1409,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         env,
         listReg,
-        ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("Nil")),
+        ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("Nil")),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("List number");
+      expect(typeToString(type)).toBe("List Int");
     });
   });
 
@@ -1461,7 +1461,7 @@ describe("Type Inference", () => {
 
     it("later environments override earlier ones", () => {
       const env1 = new Map([
-        ["x", { vars: [], constraints: [], type: { kind: "TCon" as const, name: "number" } }],
+        ["x", { vars: [], constraints: [], type: { kind: "TCon" as const, name: "Int" } }],
       ]);
       const env2 = new Map([
         ["x", { vars: [], constraints: [], type: { kind: "TCon" as const, name: "string" } }],
@@ -1489,10 +1489,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.if_(ast.bool(true), ast.num(1), ast.num(2)),
+        ast.if_(ast.bool(true), ast.int(1), ast.int(2)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
   });
 
@@ -1508,22 +1508,22 @@ describe("Type Inference", () => {
               ast.abs(
                 "n",
                 ast.if_(
-                  ast.binOp("<=", ast.var_("n"), ast.num(1)),
+                  ast.binOp("<=", ast.var_("n"), ast.int(1)),
                   ast.var_("n"),
                   ast.binOp(
                     "+",
-                    ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.num(1))),
-                    ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.num(2))),
+                    ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.int(1))),
+                    ast.app(ast.var_("fib"), ast.binOp("-", ast.var_("n"), ast.int(2))),
                   ),
                 ),
               ),
             ),
           ],
-          ast.app(ast.var_("fib"), ast.num(10)),
+          ast.app(ast.var_("fib"), ast.int(10)),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers map-like function on custom ADT", () => {
@@ -1620,10 +1620,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         env,
         listReg,
-        ast.app(ast.app(ast.var_("Cons"), ast.num(1)), ast.var_("Nil")),
+        ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("Nil")),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("List number");
+      expect(typeToString(type)).toBe("List Int");
     });
   });
 
@@ -1635,8 +1635,8 @@ describe("Type Inference", () => {
         new Map(),
         ast.if_(
           ast.bool(true),
-          ast.tuple([ast.num(1), ast.num(2)]),
-          ast.tuple([ast.num(1), ast.num(2), ast.num(3)]),
+          ast.tuple([ast.int(1), ast.int(2)]),
+          ast.tuple([ast.int(1), ast.int(2), ast.int(3)]),
         ),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
@@ -1650,12 +1650,12 @@ describe("Type Inference", () => {
         new Map(),
         ast.let_(
           "f",
-          ast.abs("x", ast.if_(ast.bool(true), ast.var_("x"), ast.tuple([ast.num(1), ast.num(2)]))),
-          ast.app(ast.var_("f"), ast.tuple([ast.num(3), ast.num(4)])),
+          ast.abs("x", ast.if_(ast.bool(true), ast.var_("x"), ast.tuple([ast.int(1), ast.int(2)]))),
+          ast.app(ast.var_("f"), ast.tuple([ast.int(3), ast.int(4)])),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(number, number)");
+      expect(typeToString(type)).toBe("(Int, Int)");
     });
   });
 
@@ -1683,14 +1683,14 @@ describe("Type Inference", () => {
               ),
               ast.app(
                 ast.var_("both"),
-                ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]),
+                ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]),
               ),
             ),
           ),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(number, number)");
+      expect(typeToString(type)).toBe("(Int, Int)");
     });
 
     it("reports error for missing field on closed record during unification", () => {
@@ -1706,8 +1706,8 @@ describe("Type Inference", () => {
             ast.abs("r", ast.fieldAccess(ast.var_("r"), "z")),
             // Try to use both functions on the same closed record
             ast.tuple([
-              ast.app(ast.var_("f"), ast.record([ast.field("x", ast.num(1))])),
-              ast.app(ast.var_("g"), ast.record([ast.field("y", ast.num(2))])),
+              ast.app(ast.var_("f"), ast.record([ast.field("x", ast.int(1))])),
+              ast.app(ast.var_("g"), ast.record([ast.field("y", ast.int(2))])),
             ]),
           ),
         ),
@@ -1722,11 +1722,11 @@ describe("Type Inference", () => {
         new Map(),
         ast.app(
           ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
-          ast.record([ast.field("x", ast.num(42))]),
+          ast.record([ast.field("x", ast.int(42))]),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("handles both records with unique extra fields", () => {
@@ -1740,9 +1740,9 @@ describe("Type Inference", () => {
           ast.app(
             ast.app(
               ast.var_("combine"),
-              ast.record([ast.field("x", ast.num(1)), ast.field("shared", ast.num(0))]),
+              ast.record([ast.field("x", ast.int(1)), ast.field("shared", ast.int(0))]),
             ),
-            ast.record([ast.field("y", ast.num(2)), ast.field("shared", ast.num(0))]),
+            ast.record([ast.field("y", ast.int(2)), ast.field("shared", ast.int(0))]),
           ),
         ),
       );
@@ -1765,11 +1765,11 @@ describe("Type Inference", () => {
               ast.case_(ast.precord([ast.pfield("a", ast.pvar("v"))]), ast.var_("v")),
             ]),
           ),
-          ast.app(ast.var_("extract"), ast.record([ast.field("a", ast.num(42))])),
+          ast.app(ast.var_("extract"), ast.record([ast.field("a", ast.int(42))])),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("infers tuple pattern when expected type is variable", () => {
@@ -1788,18 +1788,18 @@ describe("Type Inference", () => {
               ),
             ]),
           ),
-          ast.app(ast.var_("sum"), ast.tuple([ast.num(1), ast.num(2)])),
+          ast.app(ast.var_("sum"), ast.tuple([ast.int(1), ast.int(2)])),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("reports error for record pattern against non-record type", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.match(ast.num(42), [
+        ast.match(ast.int(42), [
           ast.case_(ast.precord([ast.pfield("x", ast.pvar("v"))]), ast.var_("v")),
         ]),
       );
@@ -1811,7 +1811,7 @@ describe("Type Inference", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.match(ast.num(42), [
+        ast.match(ast.int(42), [
           ast.case_(ast.ptuple([ast.pvar("a"), ast.pvar("b")]), ast.var_("a")),
         ]),
       );
@@ -1838,22 +1838,22 @@ describe("Type Inference", () => {
           ast.app(
             ast.var_("getAB"),
             ast.record([
-              ast.field("a", ast.num(1)),
-              ast.field("b", ast.num(2)),
-              ast.field("c", ast.num(3)),
+              ast.field("a", ast.int(1)),
+              ast.field("b", ast.int(2)),
+              ast.field("c", ast.int(3)),
             ]),
           ),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("reports error for record pattern with non-existent field on closed record", () => {
       const { diagnostics } = infer(
         baseEnv,
         new Map(),
-        ast.match(ast.record([ast.field("x", ast.num(1))]), [
+        ast.match(ast.record([ast.field("x", ast.int(1))]), [
           ast.case_(ast.precord([ast.pfield("y", ast.pvar("v"))]), ast.var_("v")),
         ]),
       );
@@ -1904,10 +1904,10 @@ describe("Type Inference", () => {
       const { type, diagnostics } = infer(
         env,
         fnReg,
-        ast.app(ast.var_("MkFn"), ast.abs("x", ast.binOp("+", ast.var_("x"), ast.num(1)))),
+        ast.app(ast.var_("MkFn"), ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1)))),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Fn number number");
+      expect(typeToString(type)).toBe("Fn Int Int");
     });
   });
 
@@ -1937,13 +1937,13 @@ describe("Type Inference", () => {
           ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
           ast.let_(
             "result",
-            ast.app(ast.var_("getX"), ast.record([ast.field("x", ast.num(1))])),
+            ast.app(ast.var_("getX"), ast.record([ast.field("x", ast.int(1))])),
             ast.var_("result"),
           ),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("reports error when closed record missing required fields", () => {
@@ -1961,7 +1961,7 @@ describe("Type Inference", () => {
               ast.fieldAccess(ast.var_("r"), "y"),
             ),
           ),
-          ast.app(ast.var_("getXY"), ast.record([ast.field("x", ast.num(1))])),
+          ast.app(ast.var_("getXY"), ast.record([ast.field("x", ast.int(1))])),
         ),
       );
       expect(diagnostics.length).toBeGreaterThan(0);
@@ -1989,9 +1989,9 @@ describe("Type Inference", () => {
           ast.app(
             ast.app(
               ast.var_("sameX"),
-              ast.record([ast.field("x", ast.num(1)), ast.field("z", ast.num(3))]),
+              ast.record([ast.field("x", ast.int(1)), ast.field("z", ast.int(3))]),
             ),
-            ast.record([ast.field("x", ast.num(2)), ast.field("z", ast.num(4))]),
+            ast.record([ast.field("x", ast.int(2)), ast.field("z", ast.int(4))]),
           ),
         ),
       );
@@ -2007,11 +2007,11 @@ describe("Type Inference", () => {
         ast.let_(
           "getX",
           ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
-          ast.app(ast.var_("getX"), ast.record([ast.field("x", ast.num(42))])),
+          ast.app(ast.var_("getX"), ast.record([ast.field("x", ast.int(42))])),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("unifies open record with closed record having extra fields", () => {
@@ -2025,12 +2025,12 @@ describe("Type Inference", () => {
           ast.abs("r", ast.fieldAccess(ast.var_("r"), "x")),
           ast.app(
             ast.var_("getX"),
-            ast.record([ast.field("x", ast.num(1)), ast.field("y", ast.num(2))]),
+            ast.record([ast.field("x", ast.int(1)), ast.field("y", ast.int(2))]),
           ),
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number");
+      expect(typeToString(type)).toBe("Int");
     });
 
     it("reports error for closed record missing fields from open record", () => {
@@ -2052,7 +2052,7 @@ describe("Type Inference", () => {
                 "r",
                 ast.fieldAccess(ast.var_("r"), "z"), // access z
               ),
-              ast.app(ast.var_("f"), ast.record([ast.field("x", ast.num(1))])),
+              ast.app(ast.var_("f"), ast.record([ast.field("x", ast.int(1))])),
             ),
           ),
         ),
@@ -2110,7 +2110,7 @@ describe("Type Inference", () => {
         "Expr",
         [],
         [
-          ast.conDecl("Lit", [ast.tyvar("number")]),
+          ast.conDecl("Lit", [ast.tycon("Int")]),
           ast.conDecl("Bin", [ast.tycon("Expr"), ast.tycon("Expr")]),
         ],
       );
@@ -2160,16 +2160,16 @@ describe("Type Inference", () => {
         "f",
         ast.abs(
           "x",
-          ast.binOp("+", ast.var_("x"), ast.num(1)),
+          ast.binOp("+", ast.var_("x"), ast.int(1)),
           undefined,
           undefined,
-          ast.tyvar("number"),
+          ast.tycon("Int"),
         ),
         ast.var_("f"),
       );
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number -> number");
+      expect(typeToString(type)).toBe("Int -> Int");
     });
 
     it("accepts correct return type annotation", () => {
@@ -2177,13 +2177,13 @@ describe("Type Inference", () => {
       const expr: ast.Let = {
         kind: "Let",
         name: "f",
-        returnType: ast.tyvar("number"),
+        returnType: ast.tycon("Int"),
         value: ast.abs("x", ast.var_("x")),
         body: ast.var_("f"),
       };
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number -> number");
+      expect(typeToString(type)).toBe("Int -> Int");
     });
 
     it("rejects mismatched return type annotation", () => {
@@ -2192,7 +2192,7 @@ describe("Type Inference", () => {
         kind: "Let",
         name: "f",
         returnType: ast.tyvar("string"),
-        value: ast.abs("x", ast.var_("x"), undefined, undefined, ast.tyvar("number")),
+        value: ast.abs("x", ast.var_("x"), undefined, undefined, ast.tycon("Int")),
         body: ast.var_("f"),
       };
       const { diagnostics } = infer(baseEnv, new Map(), expr);
@@ -2216,8 +2216,8 @@ describe("Type Inference", () => {
     });
 
     it("accepts function type annotation", () => {
-      // let apply (f : number -> number) (x : number) = f x in apply
-      const fType = ast.tyfun(ast.tyvar("number"), ast.tyvar("number"));
+      // let apply (f : Int -> Int) (x : number) = f x in apply
+      const fType = ast.tyfun(ast.tycon("Int"), ast.tycon("Int"));
       const expr = ast.let_(
         "apply",
         ast.abs(
@@ -2227,7 +2227,7 @@ describe("Type Inference", () => {
             ast.app(ast.var_("f"), ast.var_("x")),
             undefined,
             undefined,
-            ast.tyvar("number"),
+            ast.tycon("Int"),
           ),
           undefined,
           undefined,
@@ -2237,36 +2237,36 @@ describe("Type Inference", () => {
       );
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(number -> number) -> number -> number");
+      expect(typeToString(type)).toBe("(Int -> Int) -> Int -> Int");
     });
 
     it("accepts annotated recursive binding", () => {
       // let rec fact (n : number) : number = if n <= 1 then 1 else n * fact (n - 1) in fact
       const factBody = ast.if_(
-        ast.binOp("<=", ast.var_("n"), ast.num(1)),
-        ast.num(1),
+        ast.binOp("<=", ast.var_("n"), ast.int(1)),
+        ast.int(1),
         ast.binOp(
           "*",
           ast.var_("n"),
-          ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.num(1))),
+          ast.app(ast.var_("fact"), ast.binOp("-", ast.var_("n"), ast.int(1))),
         ),
       );
       const recBinding: ast.RecBinding = {
         name: "fact",
-        returnType: ast.tyvar("number"),
-        value: ast.abs("n", factBody, undefined, undefined, ast.tyvar("number")),
+        returnType: ast.tycon("Int"),
+        value: ast.abs("n", factBody, undefined, undefined, ast.tycon("Int")),
       };
       const expr = ast.letRec([recBinding], ast.var_("fact"));
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("number -> number");
+      expect(typeToString(type)).toBe("Int -> Int");
     });
 
     it("uses annotation to constrain inferred type", () => {
       // let f (x : number) = x in f "hello" -- should fail
       const expr = ast.let_(
         "f",
-        ast.abs("x", ast.var_("x"), undefined, undefined, ast.tyvar("number")),
+        ast.abs("x", ast.var_("x"), undefined, undefined, ast.tycon("Int")),
         ast.app(ast.var_("f"), ast.str("hello")),
       );
       const { diagnostics } = infer(baseEnv, new Map(), expr);
@@ -2280,12 +2280,12 @@ describe("Type Inference", () => {
         "String",
         [],
         [],
-        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("number")))],
+        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("Int")))],
       );
       const info = processModule(mod);
       expect(info.typeEnv.has("length")).toBe(true);
       const lengthScheme = info.typeEnv.get("length")!;
-      expect(typeToString(lengthScheme.type)).toBe("string -> number");
+      expect(typeToString(lengthScheme.type)).toBe("string -> Int");
     });
 
     it("processes foreign binding with type parameters", () => {
@@ -2325,10 +2325,10 @@ describe("Type Inference", () => {
         [
           ast.recBinding(
             "isEmpty",
-            ast.abs("s", ast.binOp("==", ast.app(ast.var_("length"), ast.var_("s")), ast.num(0))),
+            ast.abs("s", ast.binOp("==", ast.app(ast.var_("length"), ast.var_("s")), ast.int(0))),
           ),
         ],
-        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("number")))],
+        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("Int")))],
       );
       const info = processModule(mod);
       expect(info.typeEnv.has("isEmpty")).toBe(true);
@@ -2342,7 +2342,7 @@ describe("Type Inference", () => {
         [],
         [],
         [
-          ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("number"))),
+          ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("Int"))),
           ast.foreignBinding(
             "concat",
             ast.tyfun(ast.tycon("string"), ast.tyfun(ast.tycon("string"), ast.tycon("string"))),
