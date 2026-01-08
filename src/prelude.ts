@@ -195,11 +195,164 @@ const reverseExpr = ast.abs(
   ),
 );
 
-const concatExpr = ast.abs(
+// List.append : List a -> List a -> List a (combines two lists)
+const appendExpr = ast.abs(
   "xs",
   ast.abs(
     "ys",
     ast.app(ast.app(ast.app(ast.var_("foldr"), ast.var_("Cons")), ast.var_("ys")), ast.var_("xs")),
+  ),
+);
+
+// List.concat : List (List a) -> List a (flattens list of lists)
+// let rec concat xss = match xss when Nil -> Nil when Cons xs rest -> append xs (concat rest) end
+// where append xs ys = foldr Cons ys xs
+const concatExpr = ast.abs(
+  "xss",
+  ast.match(ast.var_("xss"), [
+    ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
+    ast.case_(
+      ast.pcon("Cons", [ast.pvar("xs"), ast.pvar("rest")]),
+      // foldr Cons (concat rest) xs
+      ast.app(
+        ast.app(
+          ast.app(ast.var_("foldr"), ast.var_("Cons")),
+          ast.app(ast.var_("concat"), ast.var_("rest")),
+        ),
+        ast.var_("xs"),
+      ),
+    ),
+  ]),
+);
+
+// List.take : Int -> List a -> List a
+// let rec take n xs = if n <= 0 then Nil else match xs when Nil -> Nil when Cons x rest -> Cons x (take (n - 1) rest) end
+const takeExpr = ast.abs(
+  "n",
+  ast.abs(
+    "xs",
+    ast.if_(
+      ast.binOp("<=", ast.var_("n"), ast.int(0)),
+      ast.var_("Nil"),
+      ast.match(ast.var_("xs"), [
+        ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
+        ast.case_(
+          ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+          ast.app(
+            ast.app(ast.var_("Cons"), ast.var_("x")),
+            ast.app(
+              ast.app(ast.var_("take"), ast.binOp("-", ast.var_("n"), ast.int(1))),
+              ast.var_("rest"),
+            ),
+          ),
+        ),
+      ]),
+    ),
+  ),
+);
+
+// List.drop : Int -> List a -> List a
+// let rec drop n xs = if n <= 0 then xs else match xs when Nil -> Nil when Cons _ rest -> drop (n - 1) rest end
+const dropExpr = ast.abs(
+  "n",
+  ast.abs(
+    "xs",
+    ast.if_(
+      ast.binOp("<=", ast.var_("n"), ast.int(0)),
+      ast.var_("xs"),
+      ast.match(ast.var_("xs"), [
+        ast.case_(ast.pcon("Nil", []), ast.var_("Nil")),
+        ast.case_(
+          ast.pcon("Cons", [ast.pwildcard(), ast.pvar("rest")]),
+          ast.app(
+            ast.app(ast.var_("drop"), ast.binOp("-", ast.var_("n"), ast.int(1))),
+            ast.var_("rest"),
+          ),
+        ),
+      ]),
+    ),
+  ),
+);
+
+// List.zip : List a -> List b -> List (a, b)
+// let rec zip xs ys = match (xs, ys) when (Cons x xrest, Cons y yrest) -> Cons (x, y) (zip xrest yrest) when _ -> Nil end
+const zipExpr = ast.abs(
+  "xs",
+  ast.abs(
+    "ys",
+    ast.match(ast.tuple([ast.var_("xs"), ast.var_("ys")]), [
+      ast.case_(
+        ast.ptuple([
+          ast.pcon("Cons", [ast.pvar("x"), ast.pvar("xrest")]),
+          ast.pcon("Cons", [ast.pvar("y"), ast.pvar("yrest")]),
+        ]),
+        ast.app(
+          ast.app(ast.var_("Cons"), ast.tuple([ast.var_("x"), ast.var_("y")])),
+          ast.app(ast.app(ast.var_("zip"), ast.var_("xrest")), ast.var_("yrest")),
+        ),
+      ),
+      ast.case_(ast.pwildcard(), ast.var_("Nil")),
+    ]),
+  ),
+);
+
+// List.any : (a -> Bool) -> List a -> Bool
+// let rec any p xs = match xs when Nil -> false when Cons x rest -> if p x then true else any p rest end
+const anyExpr = ast.abs(
+  "p",
+  ast.abs(
+    "xs",
+    ast.match(ast.var_("xs"), [
+      ast.case_(ast.pcon("Nil", []), ast.bool(false)),
+      ast.case_(
+        ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+        ast.if_(
+          ast.app(ast.var_("p"), ast.var_("x")),
+          ast.bool(true),
+          ast.app(ast.app(ast.var_("any"), ast.var_("p")), ast.var_("rest")),
+        ),
+      ),
+    ]),
+  ),
+);
+
+// List.all : (a -> Bool) -> List a -> Bool
+// let rec all p xs = match xs when Nil -> true when Cons x rest -> if p x then all p rest else false end
+const allExpr = ast.abs(
+  "p",
+  ast.abs(
+    "xs",
+    ast.match(ast.var_("xs"), [
+      ast.case_(ast.pcon("Nil", []), ast.bool(true)),
+      ast.case_(
+        ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+        ast.if_(
+          ast.app(ast.var_("p"), ast.var_("x")),
+          ast.app(ast.app(ast.var_("all"), ast.var_("p")), ast.var_("rest")),
+          ast.bool(false),
+        ),
+      ),
+    ]),
+  ),
+);
+
+// List.find : (a -> Bool) -> List a -> Maybe a
+// let rec find p xs = match xs when Nil -> Nothing when Cons x rest -> if p x then Just x else find p rest end
+const findExpr = ast.abs(
+  "p",
+  ast.abs(
+    "xs",
+    ast.match(ast.var_("xs"), [
+      ast.case_(ast.pcon("Nil", []), ast.var_("Nothing")),
+      ast.case_(
+        ast.pcon("Cons", [ast.pvar("x"), ast.pvar("rest")]),
+        ast.if_(
+          ast.app(ast.var_("p"), ast.var_("x")),
+          ast.app(ast.var_("Just"), ast.var_("x")),
+          ast.app(ast.app(ast.var_("find"), ast.var_("p")), ast.var_("rest")),
+        ),
+      ),
+    ]),
   ),
 );
 
@@ -432,7 +585,14 @@ export const listModule = ast.moduleDecl(
     ast.recBinding("foldr", foldrExpr),
     ast.recBinding("foldl", foldlExpr),
     ast.recBinding("reverse", reverseExpr),
+    ast.recBinding("append", appendExpr),
     ast.recBinding("concat", concatExpr),
+    ast.recBinding("take", takeExpr),
+    ast.recBinding("drop", dropExpr),
+    ast.recBinding("zip", zipExpr),
+    ast.recBinding("any", anyExpr),
+    ast.recBinding("all", allExpr),
+    ast.recBinding("find", findExpr),
   ],
 );
 
