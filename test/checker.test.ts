@@ -2394,5 +2394,29 @@ describe("Type Inference", () => {
       expect(info.typeEnv.has("concat")).toBe(true);
       expect(typeToString(info.typeEnv.get("concat")!.type)).toBe("string -> string -> string");
     });
+
+    it("allows same-named bindings in different modules with different types", () => {
+      // Regression test: Functions with the same name in different modules
+      // should not have their types unified. This was a bug where programToExpr
+      // combined all module bindings into a single letRec, causing type conflicts.
+      //
+      // module A: let process x = x + 1  (Int -> Int)
+      // module B: let process s = s      (a -> a, polymorphic)
+      const modA = ast.moduleDecl(
+        "A",
+        [],
+        [ast.recBinding("process", ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))))],
+      );
+      const modB = ast.moduleDecl("B", [], [ast.recBinding("process", ast.abs("s", ast.var_("s")))]);
+
+      const infoA = processModule(modA);
+      const infoB = processModule(modB);
+
+      // A.process should be Int -> Int
+      expect(typeToString(infoA.typeEnv.get("process")!.type)).toBe("Int -> Int");
+      // B.process should be polymorphic (a -> a)
+      const bProcessType = infoB.typeEnv.get("process")!;
+      expect(bProcessType.vars.length).toBe(1); // One type variable
+    });
   });
 });

@@ -707,5 +707,28 @@ describe("Interpreter", () => {
       const expr = ast.qualifiedVar("Math", "unknown");
       expect(() => evaluate(emptyEnv, expr)).toThrow(RuntimeError);
     });
+
+    it("does not confuse same-named functions from different modules", () => {
+      // Regression test: Module bindings with the same name (e.g., A.map, B.map)
+      // should not interfere with each other. Previously, all module bindings
+      // were combined into a single letRec, causing type unification conflicts.
+      //
+      // Simulate two modules with a 'process' function:
+      // module A: let process x = x + 1
+      // module B: let process x = x * 2
+      const aProcess = ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1)));
+      const bProcess = ast.abs("x", ast.binOp("*", ast.var_("x"), ast.int(2)));
+
+      // Each module's bindings use qualified names to avoid conflicts
+      const expr = ast.letRec(
+        [ast.recBinding("A.process", aProcess), ast.recBinding("B.process", bProcess)],
+        ast.tuple([
+          ast.app(ast.qualifiedVar("A", "process"), ast.int(5)), // A.process 5 = 6
+          ast.app(ast.qualifiedVar("B", "process"), ast.int(5)), // B.process 5 = 10
+        ]),
+      );
+
+      expect(evaluate(emptyEnv, expr)).toEqual(vtuple([vint(6), vint(10)]));
+    });
   });
 });
