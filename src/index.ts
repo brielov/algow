@@ -105,14 +105,46 @@ const preludeUses: ast.UseDecl[] = preludeModules.map((mod) =>
 
 /** Process a program with prelude */
 const processProgram = (parseResult: ReturnType<typeof parse>) => {
-  // Combine prelude + user
+  // Combine prelude + user modules
   const allModules = [...preludeModules, ...parseResult.program.modules];
   const allUses = [...preludeUses, ...parseResult.program.uses];
 
-  // Process modules and use statements
+  // Process all modules first
   const moduleEnv = processModules(allModules);
-  const { localEnv, localRegistry, constructorNames, aliases, foreignFunctions } =
-    processUseStatements(allUses, moduleEnv);
+
+  // Process prelude use statements first (no collision checking)
+  const {
+    localEnv: preludeEnv,
+    localRegistry: preludeRegistry,
+    constructorNames: preludeConstructors,
+    aliases: preludeAliases,
+    foreignFunctions: preludeForeign,
+  } = processUseStatements(preludeUses, moduleEnv);
+
+  // Process user use statements with collision checking against prelude
+  const {
+    localEnv: userEnv,
+    localRegistry: userRegistry,
+    constructorNames: userConstructors,
+    aliases: userAliases,
+    foreignFunctions: userForeign,
+    diagnostics: useDiagnostics,
+  } = processUseStatements(parseResult.program.uses, moduleEnv, preludeEnv);
+
+  // Merge prelude and user environments
+  const localEnv = new Map(preludeEnv);
+  for (const [k, v] of userEnv) localEnv.set(k, v);
+
+  const localRegistry = new Map(preludeRegistry);
+  for (const [k, v] of userRegistry) localRegistry.set(k, v);
+
+  const constructorNames = [...preludeConstructors, ...userConstructors];
+
+  const aliases = new Map(preludeAliases);
+  for (const [k, v] of userAliases) aliases.set(k, v);
+
+  const foreignFunctions = new Map(preludeForeign);
+  for (const [k, v] of userForeign) foreignFunctions.set(k, v);
 
   // Process top-level type declarations
   const {
@@ -139,6 +171,7 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
     moduleEnv,
     aliases,
     foreignFunctions,
+    useDiagnostics,
   };
 };
 
@@ -147,8 +180,17 @@ const run = (source: string, filename: string): void => {
   const parseResult = parse(source);
   diagnostics.push(...parseResult.diagnostics);
 
-  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
-    processProgram(parseResult);
+  const {
+    typeEnv,
+    registry,
+    constructorNames,
+    allModules,
+    allUses,
+    moduleEnv,
+    aliases,
+    useDiagnostics,
+  } = processProgram(parseResult);
+  diagnostics.push(...useDiagnostics);
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
@@ -181,8 +223,21 @@ const typeCheck = (source: string, filename: string): void => {
     process.exit(1);
   }
 
-  const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv, aliases } =
-    processProgram(parseResult);
+  const {
+    typeEnv,
+    registry,
+    constructorNames,
+    allModules,
+    allUses,
+    moduleEnv,
+    aliases,
+    useDiagnostics,
+  } = processProgram(parseResult);
+
+  if (useDiagnostics.length > 0) {
+    printDiagnostics(useDiagnostics, source, filename);
+    process.exit(1);
+  }
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
@@ -220,7 +275,13 @@ const emitIR = (source: string, filename: string): void => {
     moduleEnv,
     aliases,
     foreignFunctions,
+    useDiagnostics,
   } = processProgram(parseResult);
+
+  if (useDiagnostics.length > 0) {
+    printDiagnostics(useDiagnostics, source, filename);
+    process.exit(1);
+  }
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
@@ -260,7 +321,13 @@ const compile = (source: string, filename: string): void => {
     moduleEnv,
     aliases,
     foreignFunctions,
+    useDiagnostics,
   } = processProgram(parseResult);
+
+  if (useDiagnostics.length > 0) {
+    printDiagnostics(useDiagnostics, source, filename);
+    process.exit(1);
+  }
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {
@@ -308,7 +375,13 @@ const compileToGo = (source: string, filename: string): void => {
     moduleEnv,
     aliases,
     foreignFunctions,
+    useDiagnostics,
   } = processProgram(parseResult);
+
+  if (useDiagnostics.length > 0) {
+    printDiagnostics(useDiagnostics, source, filename);
+    process.exit(1);
+  }
 
   const expr = programToExpr(parseResult.program, allModules, allUses);
   if (!expr) {

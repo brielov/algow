@@ -1159,6 +1159,43 @@ describe("Parser", () => {
       expect(matchExpr.cases[2]!.guard).toBeUndefined();
     });
 
+    it("parses pattern guard with function application (regression)", () => {
+      // This used to fail because `isDigit c` followed by `->` looked like a lambda
+      const result = parse(`
+        match x
+          when Just c if Char.isDigit c -> "digit"
+          when Just c -> "other"
+          when Nothing -> "nothing"
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const matchExpr = result.program.expr as ast.Match;
+      expect(matchExpr.cases).toHaveLength(3);
+      expect(matchExpr.cases[0]!.guard).toBeDefined();
+      // The guard should be an application (Char.isDigit c), not a lambda
+      expect(matchExpr.cases[0]!.guard?.kind).toBe("App");
+      expect(matchExpr.cases[1]!.guard).toBeUndefined();
+      expect(matchExpr.cases[2]!.guard).toBeUndefined();
+    });
+
+    it("parses pattern guard with unqualified function application (regression)", () => {
+      // This used to fail because `isWhitespace c` followed by `->` was parsed as lambda `isWhitespace c -> ...`
+      const result = parse(`
+        let isWhitespace c = c == ' ' in
+        match s
+          when Just c if isWhitespace c -> "space"
+          when _ -> "other"
+        end
+      `);
+      expect(result.diagnostics).toHaveLength(0);
+      const letExpr = result.program.expr as ast.Let;
+      const matchExpr = letExpr.body as ast.Match;
+      expect(matchExpr.cases).toHaveLength(2);
+      expect(matchExpr.cases[0]!.guard).toBeDefined();
+      // The guard should be an application (isWhitespace c), not a lambda
+      expect(matchExpr.cases[0]!.guard?.kind).toBe("App");
+    });
+
     it("parses match with as-pattern", () => {
       const result = parse(`
         match pair
@@ -1724,6 +1761,16 @@ describe("Parser", () => {
       const match = result.program.expr as ast.Match;
       const pcon = match.cases[0]!.pattern as ast.PCon;
       expect(stripSpans(pcon.args[0])).toEqual(ast.plit("hello"));
+    });
+
+    it("parses char literal in constructor pattern (regression)", () => {
+      // Char literals were missing from PATTERN_STARTS
+      const result = parse("match x when Just 'a' -> 1 when _ -> 0 end");
+      expect(result.diagnostics).toHaveLength(0);
+      const match = result.program.expr as ast.Match;
+      const pcon = match.cases[0]!.pattern as ast.PCon;
+      expect(pcon.name).toBe("Just");
+      expect(stripSpans(pcon.args[0])).toEqual(ast.pchar("a"));
     });
 
     it("parses true in constructor pattern", () => {

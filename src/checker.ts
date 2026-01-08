@@ -2682,6 +2682,49 @@ const specialize = (matrix: PatternMatrix, conName: string, arity: number): Patt
 };
 
 /**
+ * Specialize a pattern matrix for a boolean literal (true/false).
+ * Used for exhaustiveness checking of boolean patterns.
+ */
+const specializeBoolLiteral = (matrix: PatternMatrix, value: boolean): PatternMatrix => {
+  const result: PatternRow[] = [];
+
+  for (const row of matrix) {
+    if (row.length === 0) continue;
+
+    const first = row[0]!;
+    const rest = row.slice(1);
+
+    switch (first.kind) {
+      case "Lit":
+        // Only include row if literal value matches
+        if (first.value === value) {
+          result.push(rest);
+        }
+        break;
+
+      case "Wild":
+        // Wildcard matches any boolean value
+        result.push(rest);
+        break;
+
+      case "Or":
+        // Or-pattern: expand each alternative
+        for (const alt of first.alternatives) {
+          const expanded = specializeBoolLiteral([[alt, ...rest]], value);
+          result.push(...expanded);
+        }
+        break;
+
+      default:
+        // Other patterns don't match boolean literals
+        break;
+    }
+  }
+
+  return result;
+};
+
+/**
  * Specialize a pattern matrix for tuples of a given arity.
  */
 const specializeTuple = (matrix: PatternMatrix, arity: number): PatternMatrix => {
@@ -2927,6 +2970,26 @@ const findWitness = (
   const firstType = types[0]!;
   const restTypes = types.slice(1);
   const typeName = getTypeConName(firstType);
+
+  // Handle booleans specially - they have exactly two values: true and false
+  // Must check BEFORE the general ADT handling since "boolean" is a truthy typeName
+  if (typeName === "boolean") {
+    // Try true
+    const specializedTrue = specializeBoolLiteral(matrix, true);
+    const witnessTrue = findWitness(env, registry, specializedTrue, restTypes, depth + 1);
+    if (witnessTrue) {
+      return [{ kind: "Lit", value: true }, ...witnessTrue];
+    }
+
+    // Try false
+    const specializedFalse = specializeBoolLiteral(matrix, false);
+    const witnessFalse = findWitness(env, registry, specializedFalse, restTypes, depth + 1);
+    if (witnessFalse) {
+      return [{ kind: "Lit", value: false }, ...witnessFalse];
+    }
+
+    return null;
+  }
 
   // Handle tuples
   if (firstType.kind === "TTuple") {
@@ -3207,22 +3270,63 @@ export type ForeignMap = ReadonlyMap<string, ForeignInfo>;
 
 /**
  * Process use statements to build local type environment and aliases.
+ * Optionally checks for name collisions against an existing environment.
  */
 export const processUseStatements = (
   uses: readonly ast.UseDecl[],
   moduleEnv: ModuleTypeEnv,
+  existingEnv?: TypeEnv,
 ): {
   localEnv: TypeEnv;
   localRegistry: ConstructorRegistry;
   constructorNames: string[];
   aliases: Map<string, string>;
   foreignFunctions: ForeignMap;
+  diagnostics: Diagnostic[];
 } => {
   const localEnv: TypeEnv = new Map();
   const localRegistry: ConstructorRegistry = new Map();
   const constructorNames: string[] = [];
   const aliases = new Map<string, string>();
   const foreignFunctions = new Map<string, ForeignInfo>();
+  const diagnostics: Diagnostic[] = [];
+
+  // Track where each name was imported from (for error messages)
+  const nameSource = new Map<string, string>(); // name -> module name
+
+  // Helper to check for collision and add name
+  const addName = (
+    name: string,
+    scheme: Scheme,
+    moduleName: string,
+    span?: ast.Span,
+    isForeign = false,
+  ) => {
+    // Check against existing environment (prelude)
+    if (existingEnv?.has(name)) {
+      const start = span?.start ?? 0;
+      const end = span?.end ?? start;
+      diagnostics.push(diagError(start, end, `'${name}' is already defined in the prelude`));
+      return;
+    }
+
+    // Check against already-imported names
+    if (localEnv.has(name)) {
+      const source = nameSource.get(name);
+      const start = span?.start ?? 0;
+      const end = span?.end ?? start;
+      diagnostics.push(
+        diagError(start, end, `'${name}' is already imported${source ? ` from '${source}'` : ""}`),
+      );
+      return;
+    }
+
+    localEnv.set(name, scheme);
+    nameSource.set(name, moduleName);
+    if (isForeign) {
+      foreignFunctions.set(name, { module: moduleName, name });
+    }
+  };
 
   for (const use of uses) {
     // Track alias
@@ -3241,11 +3345,8 @@ export const processUseStatements = (
     if (use.imports?.kind === "All") {
       // Import everything unqualified
       for (const [name, scheme] of mod.typeEnv) {
-        localEnv.set(name, scheme);
-        // Track if this is a foreign function
-        if (mod.foreignNames.has(name)) {
-          foreignFunctions.set(name, { module: use.moduleName, name });
-        }
+        const isForeign = mod.foreignNames.has(name);
+        addName(name, scheme, use.moduleName, use.span, isForeign);
       }
       for (const [typeName, cons] of mod.registry) {
         localRegistry.set(typeName, cons);
@@ -3256,11 +3357,8 @@ export const processUseStatements = (
       for (const item of use.imports.items) {
         const scheme = mod.typeEnv.get(item.name);
         if (scheme) {
-          localEnv.set(item.name, scheme);
-          // Track if this is a foreign function
-          if (mod.foreignNames.has(item.name)) {
-            foreignFunctions.set(item.name, { module: use.moduleName, name: item.name });
-          }
+          const isForeign = mod.foreignNames.has(item.name);
+          addName(item.name, scheme, use.moduleName, item.span, isForeign);
         }
 
         // Handle constructor imports for types
@@ -3273,7 +3371,7 @@ export const processUseStatements = (
               for (const conName of cons) {
                 const conScheme = mod.typeEnv.get(conName);
                 if (conScheme) {
-                  localEnv.set(conName, conScheme);
+                  addName(conName, conScheme, use.moduleName, item.span);
                   constructorNames.push(conName);
                 }
               }
@@ -3282,7 +3380,7 @@ export const processUseStatements = (
               for (const conName of item.constructors) {
                 const conScheme = mod.typeEnv.get(conName);
                 if (conScheme) {
-                  localEnv.set(conName, conScheme);
+                  addName(conName, conScheme, use.moduleName, item.span);
                   constructorNames.push(conName);
                 }
               }
@@ -3294,7 +3392,7 @@ export const processUseStatements = (
     // If imports is null, only qualified access is available (no unqualified imports)
   }
 
-  return { localEnv, localRegistry, constructorNames, aliases, foreignFunctions };
+  return { localEnv, localRegistry, constructorNames, aliases, foreignFunctions, diagnostics };
 };
 
 // =============================================================================

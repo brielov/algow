@@ -10,8 +10,10 @@ import {
   processDataDecl,
   processDeclarations,
   processModule,
+  processUseStatements,
   type TypeEnv,
   type ConstructorRegistry,
+  type ModuleTypeEnv,
   typeToString,
 } from "../src/checker";
 
@@ -1319,6 +1321,50 @@ describe("Type Inference", () => {
         );
         expect(exhaustivenessErrors).toHaveLength(0);
       });
+
+      it("accepts exhaustive match on booleans", () => {
+        // match b when true -> 1 when false -> 0 end
+        const { diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.match(ast.bool(true), [
+            ast.case_(ast.plit(true), ast.int(1)),
+            ast.case_(ast.plit(false), ast.int(0)),
+          ]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors).toHaveLength(0);
+      });
+
+      it("reports non-exhaustive match on booleans missing false", () => {
+        // match b when true -> 1 end
+        const { diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.match(ast.bool(true), [ast.case_(ast.plit(true), ast.int(1))]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors.length).toBeGreaterThan(0);
+        expect(exhaustivenessErrors[0]!.message).toContain("false");
+      });
+
+      it("reports non-exhaustive match on booleans missing true", () => {
+        // match b when false -> 0 end
+        const { diagnostics } = infer(
+          baseEnv,
+          new Map(),
+          ast.match(ast.bool(false), [ast.case_(ast.plit(false), ast.int(0))]),
+        );
+        const exhaustivenessErrors = diagnostics.filter((d) =>
+          d.message.includes("Non-exhaustive"),
+        );
+        expect(exhaustivenessErrors.length).toBeGreaterThan(0);
+        expect(exhaustivenessErrors[0]!.message).toContain("true");
+      });
     });
 
     describe("empty match", () => {
@@ -2422,5 +2468,81 @@ describe("Type Inference", () => {
       const bProcessType = infoB.typeEnv.get("process")!;
       expect(bProcessType.vars.length).toBe(1); // One type variable
     });
+  });
+});
+
+describe("processUseStatements", () => {
+  // Helper to create a test module environment
+  const createTestModuleEnv = (): ModuleTypeEnv => {
+    const modA = ast.moduleDecl(
+      "ModA",
+      [], // declarations
+      [ast.recBinding("foo", ast.int(1)), ast.recBinding("bar", ast.int(2))],
+    );
+    const modB = ast.moduleDecl(
+      "ModB",
+      [], // declarations
+      [ast.recBinding("foo", ast.str("hello")), ast.recBinding("baz", ast.str("world"))],
+    );
+    const infoA = processModule(modA);
+    const infoB = processModule(modB);
+    const moduleEnv: ModuleTypeEnv = new Map();
+    moduleEnv.set("ModA", infoA);
+    moduleEnv.set("ModB", infoB);
+    return moduleEnv;
+  };
+
+  it("imports names without collision", () => {
+    const moduleEnv = createTestModuleEnv();
+    const uses = [ast.useDecl("ModA", ast.importSpecific([ast.importItem("foo")]))];
+
+    const { localEnv, diagnostics } = processUseStatements(uses, moduleEnv);
+
+    expect(localEnv.has("foo")).toBe(true);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("detects collision when importing same name from different modules", () => {
+    const moduleEnv = createTestModuleEnv();
+    const uses = [
+      ast.useDecl("ModA", ast.importSpecific([ast.importItem("foo")])),
+      ast.useDecl("ModB", ast.importSpecific([ast.importItem("foo")])),
+    ];
+
+    const { diagnostics } = processUseStatements(uses, moduleEnv);
+
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics[0]!.message).toContain("foo");
+    expect(diagnostics[0]!.message).toContain("already imported");
+  });
+
+  it("detects collision with existing environment", () => {
+    const moduleEnv = createTestModuleEnv();
+
+    // Create an existing environment with 'bar'
+    const existingEnv: TypeEnv = new Map();
+    existingEnv.set("bar", { vars: [], constraints: [], type: { kind: "TCon", name: "Int" } });
+
+    // Try to import 'bar' from ModA
+    const uses = [ast.useDecl("ModA", ast.importSpecific([ast.importItem("bar")]))];
+
+    const { diagnostics } = processUseStatements(uses, moduleEnv, existingEnv);
+
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics[0]!.message).toContain("bar");
+    expect(diagnostics[0]!.message).toContain("prelude");
+  });
+
+  it("allows importing different names from same module", () => {
+    const moduleEnv = createTestModuleEnv();
+    const uses = [
+      ast.useDecl("ModA", ast.importSpecific([ast.importItem("foo"), ast.importItem("bar")])),
+    ];
+
+    const { localEnv, diagnostics } = processUseStatements(uses, moduleEnv);
+
+    expect(localEnv.has("foo")).toBe(true);
+    expect(localEnv.has("bar")).toBe(true);
+    expect(diagnostics).toHaveLength(0);
   });
 });

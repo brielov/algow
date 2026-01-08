@@ -750,10 +750,13 @@ const parseTypeAtomSimple = (state: ParserState): ast.TypeExpr | null => {
 // EXPRESSIONS (PRATT PARSER)
 // =============================================================================
 
-const parseExpr = (state: ParserState): ast.Expr => parsePrecedence(state, Bp.None);
+const parseExpr = (state: ParserState): ast.Expr => parsePrecedence(state, Bp.None, true);
 
-const parsePrecedence = (state: ParserState, minBp: number): ast.Expr => {
-  let left = parsePrefix(state);
+/** Parse expression without allowing naked lambdas at the top level */
+const parseExprNoLambda = (state: ParserState): ast.Expr => parsePrecedence(state, Bp.None, false);
+
+const parsePrecedence = (state: ParserState, minBp: number, allowLambda = true): ast.Expr => {
+  let left = allowLambda ? parsePrefix(state) : parsePrefixNoLambda(state);
 
   while (true) {
     const bp = infixBindingPower(state);
@@ -764,7 +767,12 @@ const parsePrecedence = (state: ParserState, minBp: number): ast.Expr => {
   return left;
 };
 
-const parsePrefix = (state: ParserState): ast.Expr => {
+/**
+ * Parse a prefix expression, optionally allowing naked lambdas.
+ * @param allowLambda - if true, x y -> body is parsed as a lambda.
+ *                      Set to false in function application context.
+ */
+const parsePrefixImpl = (state: ParserState, allowLambda: boolean): ast.Expr => {
   const token = state.current;
   const kind = token[0];
   const start = token[1];
@@ -800,7 +808,8 @@ const parsePrefix = (state: ParserState): ast.Expr => {
 
     case TokenKind.Lower: {
       // Check if this is a multi-param lambda: x y z -> body
-      if (isLambdaStart(state)) {
+      // Only allow naked lambdas at expression start, not as function arguments
+      if (allowLambda && isLambdaStart(state)) {
         return parseLambda(state);
       }
 
@@ -848,6 +857,12 @@ const parsePrefix = (state: ParserState): ast.Expr => {
     }
   }
 };
+
+/** Parse a prefix expression (allows naked lambdas at expression start) */
+const parsePrefix = (state: ParserState): ast.Expr => parsePrefixImpl(state, true);
+
+/** Parse a prefix expression without allowing naked lambdas (for function arguments) */
+const parsePrefixNoLambda = (state: ParserState): ast.Expr => parsePrefixImpl(state, false);
 
 const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr => {
   const kind = state.current[0];
@@ -960,7 +975,8 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
     }
 
     default: {
-      const right = parsePrefix(state);
+      // Use parsePrefixNoLambda to prevent `f x -> y` from being parsed as `f (x -> y)`
+      const right = parsePrefixNoLambda(state);
       const end = right.span?.end ?? state.current[1];
       return ast.app(left, right, span(start, end));
     }
@@ -1197,10 +1213,11 @@ const parseMatch = (state: ParserState): ast.Expr => {
     }
 
     // Parse optional guard: when pattern if condition -> body
+    // Use parseExprNoLambda to avoid `f x -> ...` being parsed as lambda
     let guard: ast.Expr | undefined;
     if (at(state, TokenKind.If)) {
       advance(state);
-      guard = parseExpr(state);
+      guard = parseExprNoLambda(state);
     }
 
     expect(state, TokenKind.Arrow, "expected '->' after pattern");
@@ -1331,6 +1348,7 @@ const PATTERN_STARTS = new Set([
   TokenKind.Int,
   TokenKind.Float,
   TokenKind.String,
+  TokenKind.Char,
   TokenKind.True,
   TokenKind.False,
   TokenKind.LParen,

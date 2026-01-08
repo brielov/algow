@@ -119,35 +119,65 @@ const processProgram = (program: Program) => {
   if (program.modules.length > 0) {
     // User has custom modules - need to reprocess all
     const moduleEnv = processModules(allModules);
-    const { localEnv, localRegistry, constructorNames, foreignFunctions } = processUseStatements(
-      allUses,
-      moduleEnv,
-    );
+    // Process prelude first (no collision checking)
+    const {
+      localEnv: preludeEnv,
+      localRegistry: preludeRegistry,
+      constructorNames: preludeConstructors,
+      foreignFunctions: preludeForeign,
+    } = processUseStatements(preludeUses, moduleEnv);
+    // Process user use statements with collision checking against prelude
+    const {
+      localEnv: userEnv,
+      localRegistry: userRegistry,
+      constructorNames: userConstructors,
+      foreignFunctions: userForeign,
+      diagnostics: useDiagnostics,
+    } = processUseStatements(program.uses, moduleEnv, preludeEnv);
+    // Merge environments
+    const typeEnv = new Map(preludeEnv);
+    for (const [k, v] of userEnv) typeEnv.set(k, v);
+    const registry = new Map(preludeRegistry);
+    for (const [k, v] of userRegistry) registry.set(k, v);
+    const foreignFunctions = new Map(preludeForeign);
+    for (const [k, v] of userForeign) foreignFunctions.set(k, v);
     return {
-      typeEnv: localEnv,
-      registry: localRegistry,
-      constructorNames,
+      typeEnv,
+      registry,
+      constructorNames: [...preludeConstructors, ...userConstructors],
       allModules,
       allUses,
       moduleEnv,
       foreignFunctions,
+      useDiagnostics,
     };
   }
 
   // No user modules - use cached prelude, only process user use statements
   if (program.uses.length > 0) {
-    const { localEnv, localRegistry, constructorNames, foreignFunctions } = processUseStatements(
-      allUses,
-      preludeCache.moduleEnv,
-    );
+    const {
+      localEnv: userEnv,
+      localRegistry: userRegistry,
+      constructorNames: userConstructors,
+      foreignFunctions: userForeign,
+      diagnostics: useDiagnostics,
+    } = processUseStatements(program.uses, preludeCache.moduleEnv, preludeCache.typeEnv);
+    // Merge with prelude
+    const typeEnv = new Map(preludeCache.typeEnv);
+    for (const [k, v] of userEnv) typeEnv.set(k, v);
+    const registry = new Map(preludeCache.registry);
+    for (const [k, v] of userRegistry) registry.set(k, v);
+    const foreignFunctions = new Map(preludeCache.foreignFunctions);
+    for (const [k, v] of userForeign) foreignFunctions.set(k, v);
     return {
-      typeEnv: localEnv,
-      registry: localRegistry,
-      constructorNames,
+      typeEnv,
+      registry,
+      constructorNames: [...preludeCache.constructorNames, ...userConstructors],
       allModules,
       allUses,
       moduleEnv: preludeCache.moduleEnv,
       foreignFunctions,
+      useDiagnostics,
     };
   }
 
@@ -160,6 +190,7 @@ const processProgram = (program: Program) => {
     allUses,
     moduleEnv: preludeCache.moduleEnv,
     foreignFunctions: preludeCache.foreignFunctions,
+    useDiagnostics: [] as Diagnostic[],
   };
 };
 
@@ -889,7 +920,13 @@ export const createServer = (transport: Transport): void => {
       allUses,
       moduleEnv,
       foreignFunctions,
+      useDiagnostics,
     } = processProgram(parseResult.program);
+
+    // Add use statement diagnostics (shadowing errors)
+    for (const diag of useDiagnostics) {
+      lspDiagnostics.push(convertDiagnostic(text, diag));
+    }
 
     // Convert to expression (includes module bindings)
     const expr = programToExpr(parseResult.program, allModules, allUses);
