@@ -50,6 +50,7 @@ import {
 import {
   check,
   type ConstructorRegistry,
+  type ModuleTypeEnv,
   processModules,
   processUseStatements,
   type Type,
@@ -61,6 +62,9 @@ import type { Diagnostic } from "../diagnostics";
 import { createConstructorEnv, evaluate, RuntimeError, valueToString } from "../eval";
 import { parse, programToExpr, type Program } from "../parser";
 import { modules as preludeModules } from "../prelude";
+import { lowerToIR } from "../lower";
+import { generateJS } from "../backend/js";
+import { printIR } from "../ir";
 
 import { positionToOffset, spanToRange } from "./positions";
 import {
@@ -112,7 +116,14 @@ const processProgram = (program: Program) => {
     // User has custom modules - need to reprocess all
     const moduleEnv = processModules(allModules);
     const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
-    return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+    return {
+      typeEnv: localEnv,
+      registry: localRegistry,
+      constructorNames,
+      allModules,
+      allUses,
+      moduleEnv,
+    };
   }
 
   // No user modules - use cached prelude, only process user use statements
@@ -121,7 +132,14 @@ const processProgram = (program: Program) => {
       allUses,
       preludeCache.moduleEnv,
     );
-    return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+    return {
+      typeEnv: localEnv,
+      registry: localRegistry,
+      constructorNames,
+      allModules,
+      allUses,
+      moduleEnv: preludeCache.moduleEnv,
+    };
   }
 
   // No user modules or uses - fully cached
@@ -131,6 +149,7 @@ const processProgram = (program: Program) => {
     constructorNames: preludeCache.constructorNames,
     allModules,
     allUses,
+    moduleEnv: preludeCache.moduleEnv,
   };
 };
 
@@ -151,6 +170,7 @@ type DocumentState = {
   readonly constructorNames: readonly string[];
   readonly allModules: readonly ast.ModuleDecl[];
   readonly allUses: readonly ast.UseDecl[];
+  readonly moduleEnv: ModuleTypeEnv;
 };
 
 // =============================================================================
@@ -213,6 +233,26 @@ type EvaluateResult = {
   readonly error?: string;
 };
 
+type CompileParams = {
+  readonly textDocument: TextDocumentIdentifier;
+};
+
+type CompileResult = {
+  readonly success: boolean;
+  readonly code?: string;
+  readonly error?: string;
+};
+
+type EmitIRParams = {
+  readonly textDocument: TextDocumentIdentifier;
+};
+
+type EmitIRResult = {
+  readonly success: boolean;
+  readonly ir?: string;
+  readonly error?: string;
+};
+
 // =============================================================================
 // SERVER CREATION
 // =============================================================================
@@ -270,6 +310,12 @@ export const createServer = (transport: Transport): void => {
           break;
         case "algow/evaluate":
           transport.send(successResponse(id, handleEvaluate(params as EvaluateParams)));
+          break;
+        case "algow/compile":
+          transport.send(successResponse(id, handleCompile(params as CompileParams)));
+          break;
+        case "algow/emitIR":
+          transport.send(successResponse(id, handleEmitIR(params as EmitIRParams)));
           break;
         default:
           transport.send(errorResponse(id, -32601, `Method not found: ${method}`));
@@ -448,6 +494,9 @@ export const createServer = (transport: Transport): void => {
   const COMPLETION_KIND_FIELD = 5 as CompletionItemKind;
   const COMPLETION_KIND_KEYWORD = 14 as CompletionItemKind;
 
+  // LSP CompletionItemKind for modules
+  const COMPLETION_KIND_MODULE = 9 as CompletionItemKind;
+
   const handleCompletion = (params: TextDocumentPositionParams): CompletionList | null => {
     const doc = documents.get(params.textDocument.uri);
     if (!doc) return null;
@@ -455,20 +504,35 @@ export const createServer = (transport: Transport): void => {
     const offset = positionToOffset(doc.text, params.position);
     const items: CompletionItem[] = [];
 
-    // Check if we're after a dot (record field access)
+    // Check if we're after a dot (record field access or module member access)
     const beforeCursor = doc.text.slice(0, offset);
     const dotMatch = beforeCursor.match(/(\w+)\s*\.\s*$/);
 
     if (dotMatch) {
-      // Record field completion
-      const varName = dotMatch[1]!;
-      const fieldItems = getRecordFieldCompletions(doc, varName);
-      items.push(...fieldItems);
+      const name = dotMatch[1]!;
+
+      // Check if this is a module name (starts with uppercase)
+      if (name[0] && name[0] === name[0].toUpperCase() && /[A-Z]/.test(name[0])) {
+        // Module member completion
+        const moduleItems = getModuleMemberCompletions(doc, name);
+        if (moduleItems.length > 0) {
+          items.push(...moduleItems);
+        } else {
+          // Fall back to record field completion if no module found
+          const fieldItems = getRecordFieldCompletions(doc, name);
+          items.push(...fieldItems);
+        }
+      } else {
+        // Record field completion (lowercase identifier)
+        const fieldItems = getRecordFieldCompletions(doc, name);
+        items.push(...fieldItems);
+      }
     } else {
-      // General completions from typeEnv (includes prelude), constructors, keywords
+      // General completions from typeEnv (includes prelude), constructors, keywords, modules
       items.push(...getTypeEnvCompletions(doc));
       items.push(...getConstructorCompletions(doc));
       items.push(...getKeywordCompletions());
+      items.push(...getModuleCompletions(doc));
     }
 
     return { isIncomplete: false, items };
@@ -579,6 +643,10 @@ export const createServer = (transport: Transport): void => {
       "when",
       "end",
       "type",
+      "module",
+      "use",
+      "as",
+      "and",
       "true",
       "false",
     ];
@@ -587,6 +655,53 @@ export const createServer = (transport: Transport): void => {
       label: kw,
       kind: COMPLETION_KIND_KEYWORD,
     }));
+  };
+
+  /**
+   * Get completions for module names (for use statements or qualified access).
+   */
+  const getModuleCompletions = (doc: DocumentState): CompletionItem[] => {
+    const items: CompletionItem[] = [];
+    for (const moduleName of doc.moduleEnv.keys()) {
+      items.push({
+        label: moduleName,
+        kind: COMPLETION_KIND_MODULE,
+        detail: "module",
+      });
+    }
+    return items;
+  };
+
+  /**
+   * Get completions for members of a module (after Module.)
+   */
+  const getModuleMemberCompletions = (doc: DocumentState, moduleName: string): CompletionItem[] => {
+    const items: CompletionItem[] = [];
+    const moduleInfo = doc.moduleEnv.get(moduleName);
+
+    if (!moduleInfo) return items;
+
+    // Add all bindings from the module
+    for (const [name, scheme] of moduleInfo.typeEnv) {
+      items.push({
+        label: name,
+        kind: COMPLETION_KIND_FUNCTION,
+        detail: typeToString(scheme.type),
+      });
+    }
+
+    // Add all constructors from the module
+    for (const [typeName, constructors] of moduleInfo.registry) {
+      for (const conName of constructors) {
+        items.push({
+          label: conName,
+          kind: COMPLETION_KIND_CONSTRUCTOR,
+          detail: typeName,
+        });
+      }
+    }
+
+    return items;
   };
 
   const handleEvaluate = (params: EvaluateParams): EvaluateResult => {
@@ -617,6 +732,70 @@ export const createServer = (transport: Transport): void => {
     }
   };
 
+  const handleCompile = (params: CompileParams): CompileResult => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc || !doc.program) {
+      return { success: false, error: "No document found" };
+    }
+
+    // Don't compile if there are errors
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
+      return { success: false, error: "Cannot compile: document has errors" };
+    }
+
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
+    if (!expr) {
+      return { success: false, error: "No expression to compile" };
+    }
+
+    try {
+      // Type check to get CheckOutput (needed for lowering)
+      const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
+
+      // Lower to IR
+      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+
+      // Generate JavaScript
+      const { code } = generateJS(ir, doc.constructorNames);
+
+      return { success: true, code };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  };
+
+  const handleEmitIR = (params: EmitIRParams): EmitIRResult => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc || !doc.program) {
+      return { success: false, error: "No document found" };
+    }
+
+    // Don't emit IR if there are errors
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
+      return { success: false, error: "Cannot emit IR: document has errors" };
+    }
+
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
+    if (!expr) {
+      return { success: false, error: "No expression to compile" };
+    }
+
+    try {
+      // Type check to get CheckOutput (needed for lowering)
+      const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols!, doc.moduleEnv);
+
+      // Lower to IR
+      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+
+      // Print IR
+      const irText = printIR(ir);
+
+      return { success: true, ir: irText };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  };
+
   // Analyze document and produce diagnostics
   const analyzeDocument = (uri: string, version: number, text: string): DocumentState => {
     const lspDiagnostics: LspDiagnostic[] = [];
@@ -628,7 +807,7 @@ export const createServer = (transport: Transport): void => {
     }
 
     // Process prelude + user modules
-    const { typeEnv, registry, constructorNames, allModules, allUses } = processProgram(
+    const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv } = processProgram(
       parseResult.program,
     );
 
@@ -647,7 +826,7 @@ export const createServer = (transport: Transport): void => {
       }
 
       // Type checking phase: infer types
-      const checkResult = check(typeEnv, registry, expr, symbols);
+      const checkResult = check(typeEnv, registry, expr, symbols, moduleEnv);
       types = checkResult.types;
 
       for (const diag of checkResult.diagnostics) {
@@ -668,6 +847,7 @@ export const createServer = (transport: Transport): void => {
       constructorNames,
       allModules,
       allUses,
+      moduleEnv,
     };
   };
 

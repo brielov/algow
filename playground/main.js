@@ -8,44 +8,44 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 
 // playground/main.ts
 var defaultCode = `-- Algow Playground
--- Hover over any identifier to see its inferred type.
+-- Hover over identifiers to see inferred types.
 -- Ctrl/Cmd+Click to go to definitions.
--- F2 to rename a symbol across all occurrences.
+-- F2 to rename symbols.
 
--- Standard types and functions from prelude:
--- type Maybe a = Nothing | Just a
--- type Either a b = Left a | Right b
--- type List a = Nil | Cons a (List a)
--- map, filter, foldr, foldl, head, tail, length, etc.
+-- Standard prelude modules: Maybe, Either, List, Core
+-- Type 'List.' to see module member completions!
 
--- Functions use 'let', recursive ones use 'let rec'
-let double = x -> x * 2
-let isPositive = x -> x > 0
-let add = x y -> x + y
+-- Define a custom module
+module Math
+  let square x = x * x
+  let cube x = x * x * x
+end
 
--- Lists use bracket notation
+-- Import module bindings
+use Math (..)
+
+-- Functions and pattern matching
+let double x = x * 2
 let numbers = [1, 2, 3, 4, 5]
 
--- Pattern matching uses 'match/when/end'
 let rec sum xs = match xs
   when Nil -> 0
   when Cons x rest -> x + sum rest
 end
 
--- Or-patterns for multiple cases
+-- Or-patterns
 let describe n = match n
   when 0 | 1 -> "small"
   when _ -> "big"
 end
 
--- Try these expressions (change the last line):
+-- Try these (change the last line):
 -- map double numbers
--- filter isPositive [0, 1, -2, 3]
--- foldr add 0 numbers
--- head numbers
--- length numbers
+-- map square numbers
+-- filter (x -> x > 2) numbers
+-- sum numbers
 
-map double numbers
+map square numbers
 `;
 __require.config({
   paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" }
@@ -53,7 +53,22 @@ __require.config({
 __require(["vs/editor/editor.main"], () => {
   monaco.languages.register({ id: "algow", extensions: [".alg"] });
   monaco.languages.setMonarchTokensProvider("algow", {
-    keywords: ["let", "rec", "in", "if", "then", "else", "match", "when", "end", "type", "module", "use", "as", "and"],
+    keywords: [
+      "let",
+      "rec",
+      "in",
+      "if",
+      "then",
+      "else",
+      "match",
+      "when",
+      "end",
+      "type",
+      "module",
+      "use",
+      "as",
+      "and"
+    ],
     literals: ["true", "false"],
     tokenizer: {
       root: [
@@ -87,7 +102,20 @@ __require(["vs/editor/editor.main"], () => {
   const worker = new Worker("./worker.js", { type: "module" });
   const statusEl = document.getElementById("status");
   const outputEl = document.getElementById("output");
-  const bridge = createLspBridge(worker, editor, statusEl, outputEl);
+  const jsEl = document.getElementById("js");
+  const irEl = document.getElementById("ir");
+  const tabs = document.querySelectorAll(".output-tab");
+  const contents = document.querySelectorAll(".output-content");
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const targetId = tab.dataset.tab;
+      tabs.forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      contents.forEach((c) => c.classList.remove("active"));
+      document.getElementById(targetId).classList.add("active");
+    });
+  });
+  const bridge = createLspBridge(worker, editor, statusEl, outputEl, jsEl, irEl);
   bridge.start();
 });
 function mapCompletionKind(lspKind) {
@@ -106,7 +134,7 @@ function mapCompletionKind(lspKind) {
       return monaco.languages.CompletionItemKind.Text;
   }
 }
-function createLspBridge(worker, editor, statusEl, outputEl) {
+function createLspBridge(worker, editor, statusEl, outputEl, jsEl, irEl) {
   const model = editor.getModel();
   const uri = model.uri.toString();
   let requestId = 0;
@@ -173,19 +201,56 @@ function createLspBridge(worker, editor, statusEl, outputEl) {
             const result = await sendRequest("algow/evaluate", {
               textDocument: { uri }
             });
-            outputEl.className = "output-content " + (result.success ? "success" : "error");
+            outputEl.className = "output-content " + (outputEl.classList.contains("active") ? "active " : "") + (result.success ? "success" : "error");
             outputEl.textContent = result.success ? result.value : result.error;
           } catch {
-            outputEl.className = "output-content error";
+            outputEl.className = "output-content " + (outputEl.classList.contains("active") ? "active " : "") + "error";
             outputEl.textContent = "Evaluation failed";
           }
+        };
+        const compile = async () => {
+          try {
+            const result = await sendRequest("algow/compile", {
+              textDocument: { uri }
+            });
+            jsEl.className = "output-content " + (jsEl.classList.contains("active") ? "active " : "") + (result.success ? "code" : "error");
+            jsEl.textContent = result.success ? result.code : result.error;
+          } catch {
+            jsEl.className = "output-content " + (jsEl.classList.contains("active") ? "active " : "") + "error";
+            jsEl.textContent = "Compilation failed";
+          }
+        };
+        const emitIR = async () => {
+          try {
+            const result = await sendRequest("algow/emitIR", {
+              textDocument: { uri }
+            });
+            irEl.className = "output-content " + (irEl.classList.contains("active") ? "active " : "") + (result.success ? "code" : "error");
+            irEl.textContent = result.success ? result.ir : result.error;
+          } catch {
+            irEl.className = "output-content " + (irEl.classList.contains("active") ? "active " : "") + "error";
+            irEl.textContent = "IR generation failed";
+          }
+        };
+        const updateAll = async () => {
+          await Promise.all([evaluate(), compile(), emitIR()]);
         };
         const scheduleEvaluate = () => {
           if (evaluateTimeout)
             clearTimeout(evaluateTimeout);
-          outputEl.className = "output-content pending";
-          outputEl.textContent = "Evaluating...";
-          evaluateTimeout = setTimeout(evaluate, 300);
+          if (outputEl.classList.contains("active")) {
+            outputEl.className = "output-content active pending";
+            outputEl.textContent = "Evaluating...";
+          }
+          if (jsEl.classList.contains("active")) {
+            jsEl.className = "output-content active pending";
+            jsEl.textContent = "Compiling...";
+          }
+          if (irEl.classList.contains("active")) {
+            irEl.className = "output-content active pending";
+            irEl.textContent = "Generating IR...";
+          }
+          evaluateTimeout = setTimeout(updateAll, 300);
         };
         scheduleEvaluate();
         let version = 1;

@@ -1503,25 +1503,22 @@ export const programToExpr = (
     }
   }
 
-  // Wrap with imported module bindings
+  // Wrap with module bindings
+  // For qualified access to work at runtime, we need ALL module bindings in scope,
+  // regardless of the import style (use Module, use Module (..), or use Module (items))
   const importedBindings: ast.RecBinding[] = [];
+  const seenModules = new Set<string>();
+
   for (const use of uses) {
+    // Skip if we've already processed this module
+    if (seenModules.has(use.moduleName)) continue;
+    seenModules.add(use.moduleName);
+
     const mod = modules.find((m) => m.name === use.moduleName);
     if (!mod) continue;
 
-    if (use.imports?.kind === "All") {
-      // Import all bindings from the module
-      importedBindings.push(...mod.bindings);
-    } else if (use.imports?.kind === "Specific") {
-      // Import only the specified items
-      for (const item of use.imports.items) {
-        // Find matching binding by name (for functions)
-        const binding = mod.bindings.find((b) => b.name === item.name);
-        if (binding) {
-          importedBindings.push(binding);
-        }
-      }
-    }
+    // Always import ALL bindings from the module for runtime qualified access
+    importedBindings.push(...mod.bindings);
   }
 
   if (importedBindings.length > 0) {

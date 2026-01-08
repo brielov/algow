@@ -2997,35 +2997,48 @@ export const processModule = (
   const fullRegistry: ConstructorRegistry = new Map(baseRegistry);
   for (const [k, v] of registry) fullRegistry.set(k, v);
 
-  // Type-check module bindings
+  // Type-check module bindings using the same algorithm as inferLetRec
   if (mod.bindings.length > 0) {
-    // Build a LetRec expression from the bindings to type-check them together
-    const dummyBody = ast.num(0);
-    const letRec = ast.letRec(mod.bindings, dummyBody);
-
-    // Type-check with constructors in scope
-    const allConstructors = [...(baseRegistry?.values() ?? [])].flat();
-    allConstructors.push(...constructorNames);
-
     // Use empty symbol table for module type-checking (no LSP features needed)
     const emptySymbols: SymbolTable = { definitions: [], references: [] };
-    const checkResult = check(env, fullRegistry, letRec, emptySymbols);
+    const ctx = createContext(emptySymbols);
 
-    // Extract the inferred types for each binding
-    if (letRec.kind === "LetRec") {
-      const subst = checkResult.subst;
-      for (const binding of letRec.bindings) {
-        const bindingScheme = env.get(binding.name);
-        if (bindingScheme) {
-          // Already in env from check
-        } else {
-          // Infer the type from the binding's value
-          const bindingResult = check(env, fullRegistry, binding.value, emptySymbols);
-          const resolvedType = applySubst(subst, bindingResult.type);
-          const scheme = generalize(env, resolvedType);
-          env.set(binding.name, scheme);
-        }
-      }
+    // Step 1: Create placeholder type variables for ALL bindings
+    const placeholders = new Map<string, Type>();
+    const envWithPlaceholders = new Map(env);
+
+    for (const binding of mod.bindings) {
+      const placeholder = freshTypeVar(ctx);
+      placeholders.set(binding.name, placeholder);
+      envWithPlaceholders.set(binding.name, scheme([], placeholder));
+    }
+
+    // Step 2: Infer types for all values with placeholders in scope
+    let subst: Subst = new Map();
+    const valueTypes = new Map<string, Type>();
+
+    for (const binding of mod.bindings) {
+      const [s, valueType] = inferExpr(
+        ctx,
+        applySubstEnv(subst, envWithPlaceholders),
+        fullRegistry,
+        binding.value,
+      );
+      subst = composeSubst(subst, s);
+      valueTypes.set(binding.name, valueType);
+
+      // Unify with placeholder to propagate constraints
+      const placeholder = applySubst(subst, placeholders.get(binding.name)!);
+      const s2 = unify(ctx, placeholder, valueType);
+      subst = composeSubst(subst, s2);
+    }
+
+    // Step 3: Generalize all bindings and add to environment
+    const env1 = applySubstEnv(subst, env);
+    for (const binding of mod.bindings) {
+      const valueType = applySubst(subst, valueTypes.get(binding.name)!);
+      const generalizedScheme = generalize(env1, valueType);
+      env.set(binding.name, generalizedScheme);
     }
   }
 

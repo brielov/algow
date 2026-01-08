@@ -614,3 +614,115 @@ export const irProgram = (functions: readonly IRFunction[], main: IRExpr): IRPro
   functions,
   main,
 });
+
+// =============================================================================
+// IR PRETTY PRINTING
+// =============================================================================
+
+/**
+ * Pretty print an IR expression for debugging.
+ */
+export const printIR = (expr: IRExpr, indent = 0): string => {
+  const pad = "  ".repeat(indent);
+
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      return pad + printAtom(expr.atom);
+
+    case "IRLet":
+      return (
+        pad +
+        `let ${expr.name} = ${printBinding(expr.binding, indent)}\n` +
+        printIR(expr.body, indent)
+      );
+
+    case "IRLetRec": {
+      const bindings = expr.bindings
+        .map((b) => `${pad}  ${b.name} = ${printBinding(b.binding, indent + 1)}`)
+        .join("\n");
+      return `${pad}let rec\n${bindings}\n${pad}in\n${printIR(expr.body, indent)}`;
+    }
+  }
+};
+
+const printAtom = (atom: IRAtom): string => {
+  switch (atom.kind) {
+    case "IRLit":
+      return typeof atom.value === "string" ? `"${atom.value}"` : String(atom.value);
+    case "IRVar":
+      return atom.name;
+  }
+};
+
+const printBinding = (binding: IRBinding, indent: number): string => {
+  const pad = "  ".repeat(indent);
+
+  switch (binding.kind) {
+    case "IRAtomBinding":
+      return printAtom(binding.atom);
+
+    case "IRAppBinding":
+      return `${printAtom(binding.func)} ${printAtom(binding.arg)}`;
+
+    case "IRBinOpBinding":
+      return `${printAtom(binding.left)} ${binding.op} ${printAtom(binding.right)}`;
+
+    case "IRIfBinding":
+      return (
+        `if ${printAtom(binding.cond)} then\n` +
+        printIR(binding.thenBranch, indent + 1) +
+        `\n${pad}else\n` +
+        printIR(binding.elseBranch, indent + 1)
+      );
+
+    case "IRTupleBinding":
+      return `(${binding.elements.map(printAtom).join(", ")})`;
+
+    case "IRRecordBinding":
+      return `{ ${binding.fields.map((f) => `${f.name} = ${printAtom(f.value)}`).join(", ")} }`;
+
+    case "IRFieldAccessBinding":
+      return `${printAtom(binding.record)}.${binding.field}`;
+
+    case "IRTupleIndexBinding":
+      return `${printAtom(binding.tuple)}.${binding.index}`;
+
+    case "IRMatchBinding": {
+      const cases = binding.cases
+        .map((c) => {
+          const guard = c.guard ? ` if ${printIR(c.guard, 0).trim()}` : "";
+          return `${pad}  | ${printPattern(c.pattern)}${guard} -> ${printIR(c.body, indent + 2).trim()}`;
+        })
+        .join("\n");
+      return `match ${printAtom(binding.scrutinee)}\n${cases}`;
+    }
+
+    case "IRLambdaBinding":
+      return `\\${binding.param} -> ${printIR(binding.body, indent).trim()}`;
+
+    case "IRClosureBinding":
+      return `closure(${binding.funcId}, [${binding.captures.map(printAtom).join(", ")}])`;
+  }
+};
+
+const printPattern = (pattern: IRPattern): string => {
+  switch (pattern.kind) {
+    case "IRPVar":
+      return pattern.name;
+    case "IRPWildcard":
+      return "_";
+    case "IRPLit":
+      return typeof pattern.value === "string" ? `"${pattern.value}"` : String(pattern.value);
+    case "IRPCon":
+      if (pattern.args.length === 0) return pattern.name;
+      return `${pattern.name} ${pattern.args.map(printPattern).join(" ")}`;
+    case "IRPTuple":
+      return `(${pattern.elements.map(printPattern).join(", ")})`;
+    case "IRPRecord":
+      return `{ ${pattern.fields.map((f) => `${f.name} = ${printPattern(f.pattern)}`).join(", ")} }`;
+    case "IRPAs":
+      return `${printPattern(pattern.pattern)} as ${pattern.name}`;
+    case "IRPOr":
+      return pattern.alternatives.map(printPattern).join(" | ");
+  }
+};

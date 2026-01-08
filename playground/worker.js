@@ -508,7 +508,9 @@ var createContext2 = (symbols, moduleEnv = new Map, moduleAliases = new Map) => 
     symbols,
     definitionMap,
     moduleEnv,
-    moduleAliases
+    moduleAliases,
+    typeVarCounter: 0,
+    spanTypes: new Map
   };
 };
 var addError = (ctx, message, span) => {
@@ -522,6 +524,7 @@ var recordType = (ctx, span, type) => {
   if (def) {
     ctx.types.set(def, type);
   }
+  ctx.spanTypes.set(key, type);
 };
 var tvar = (name) => ({ kind: "TVar", name });
 var tcon = (name) => ({ kind: "TCon", name });
@@ -656,9 +659,8 @@ var bindVar2 = (ctx, name, type) => {
   }
   return new Map([[name, type]]);
 };
-var typeVarCounter = 0;
-var freshTypeVar = () => {
-  return tvar(`t${typeVarCounter++}`);
+var freshTypeVar = (ctx) => {
+  return tvar(`t${ctx.typeVarCounter++}`);
 };
 var unifyRecords = (ctx, t1, t2) => {
   const fields1 = new Set(t1.fields.keys());
@@ -724,16 +726,16 @@ var unifyRecords = (ctx, t1, t2) => {
     addError(ctx, `Record field mismatch: missing fields { ${[...onlyIn1].join(", ")} }`);
     return currentSubst;
   }
-  const freshRow = freshTypeVar();
+  const freshRow = freshTypeVar(ctx);
   const s1 = unify(ctx, row1, trecord(extraFields2, freshRow));
   currentSubst = composeSubst(currentSubst, s1);
   const s2 = unify(ctx, applySubst(currentSubst, row2), trecord(extraFields1, freshRow));
   return composeSubst(currentSubst, s2);
 };
-var instantiate = (s) => {
+var instantiate = (ctx, s) => {
   const freshVars = new Map;
   for (const name of s.vars) {
-    freshVars.set(name, freshTypeVar());
+    freshVars.set(name, freshTypeVar(ctx));
   }
   return applySubst(freshVars, s.type);
 };
@@ -853,7 +855,6 @@ var solveConstraints = (ctx, constraints) => {
   }
 };
 var check = (env, registry, expr, symbols, moduleEnv = new Map, moduleAliases = new Map) => {
-  typeVarCounter = 0;
   const ctx = createContext2(symbols, moduleEnv, moduleAliases);
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
@@ -863,7 +864,8 @@ var check = (env, registry, expr, symbols, moduleEnv = new Map, moduleAliases = 
     type,
     constraints: finalConstraints,
     diagnostics: ctx.diagnostics,
-    types: ctx.types
+    types: ctx.types,
+    spanTypes: ctx.spanTypes
   };
 };
 var inferExpr = (ctx, env, registry, expr) => {
@@ -906,43 +908,43 @@ var inferFieldAccess = (ctx, env, registry, expr) => {
   const [s1, recordType2, constraints] = inferExpr(ctx, env, registry, expr.record);
   const resolvedType = applySubst(s1, recordType2);
   if (resolvedType.kind === "TVar") {
-    const fieldType2 = freshTypeVar();
-    const rowVar = freshTypeVar();
+    const fieldType2 = freshTypeVar(ctx);
+    const rowVar = freshTypeVar(ctx);
     const openRecord = trecord([[expr.field, fieldType2]], rowVar);
     const s2 = unify(ctx, resolvedType, openRecord);
     return [composeSubst(s1, s2), applySubst(s2, fieldType2), constraints];
   }
   if (resolvedType.kind !== "TRecord") {
     addError(ctx, `Cannot access field '${expr.field}' on non-record type: ${typeToString(resolvedType)}`);
-    return [s1, freshTypeVar(), constraints];
+    return [s1, freshTypeVar(ctx), constraints];
   }
   const fieldType = resolvedType.fields.get(expr.field);
   if (fieldType) {
     return [s1, fieldType, constraints];
   }
   if (resolvedType.row) {
-    const newFieldType = freshTypeVar();
-    const newRowVar = freshTypeVar();
+    const newFieldType = freshTypeVar(ctx);
+    const newRowVar = freshTypeVar(ctx);
     const s2 = unify(ctx, resolvedType.row, trecord([[expr.field, newFieldType]], newRowVar));
     return [composeSubst(s1, s2), applySubst(s2, newFieldType), constraints];
   }
   addError(ctx, `Record has no field '${expr.field}'. Available: ${[...resolvedType.fields.keys()].join(", ")}`);
-  return [s1, freshTypeVar(), constraints];
+  return [s1, freshTypeVar(ctx), constraints];
 };
 var inferTupleIndex = (ctx, env, registry, expr) => {
   const [s1, tupleType, constraints] = inferExpr(ctx, env, registry, expr.tuple);
   const resolvedType = applySubst(s1, tupleType);
   if (resolvedType.kind === "TVar") {
-    const elementType = freshTypeVar();
+    const elementType = freshTypeVar(ctx);
     return [s1, elementType, constraints];
   }
   if (resolvedType.kind !== "TTuple") {
     addError(ctx, `Cannot index into non-tuple type: ${typeToString(resolvedType)}`);
-    return [s1, freshTypeVar(), constraints];
+    return [s1, freshTypeVar(ctx), constraints];
   }
   if (expr.index < 0 || expr.index >= resolvedType.elements.length) {
     addError(ctx, `Tuple index ${expr.index} out of bounds for tuple of ${resolvedType.elements.length} element(s)`);
-    return [s1, freshTypeVar(), constraints];
+    return [s1, freshTypeVar(ctx), constraints];
   }
   return [s1, resolvedType.elements[expr.index], constraints];
 };
@@ -962,10 +964,10 @@ var inferAbs = (ctx, env, registry, expr) => {
   let paramType;
   let subst = new Map;
   if (expr.paramType) {
-    const annotatedType = instantiateTypeExpr(expr.paramType);
+    const annotatedType = instantiateTypeExpr(ctx, expr.paramType);
     paramType = annotatedType;
   } else {
-    paramType = freshTypeVar();
+    paramType = freshTypeVar(ctx);
   }
   const newEnv = new Map(env);
   newEnv.set(expr.param, scheme([], paramType));
@@ -980,7 +982,7 @@ var inferAbs = (ctx, env, registry, expr) => {
 var inferApp = (ctx, env, registry, expr) => {
   const [s1, funcType, c1] = inferExpr(ctx, env, registry, expr.func);
   const [s2, paramType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.param);
-  const returnType = freshTypeVar();
+  const returnType = freshTypeVar(ctx);
   const s3 = unify(ctx, applySubst(s2, funcType), tfun(paramType, returnType));
   const subst = composeSubst(composeSubst(s1, s2), s3);
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
@@ -1034,7 +1036,7 @@ var inferIf = (ctx, env, registry, expr) => {
 var inferLet = (ctx, env, registry, expr) => {
   let [s1, valueType, c1] = inferExpr(ctx, env, registry, expr.value);
   if (expr.returnType) {
-    const annotatedType = instantiateTypeExpr(expr.returnType);
+    const annotatedType = instantiateTypeExpr(ctx, expr.returnType);
     let currentType = applySubst(s1, valueType);
     while (currentType.kind === "TFun") {
       currentType = currentType.ret;
@@ -1060,7 +1062,7 @@ var inferLetRec = (ctx, env, registry, expr) => {
   const placeholders = new Map;
   const envWithPlaceholders = new Map(env);
   for (const binding of expr.bindings) {
-    const placeholder = freshTypeVar();
+    const placeholder = freshTypeVar(ctx);
     placeholders.set(binding.name, placeholder);
     envWithPlaceholders.set(binding.name, scheme([], placeholder));
   }
@@ -1071,7 +1073,7 @@ var inferLetRec = (ctx, env, registry, expr) => {
     let [s, valueType, c] = inferExpr(ctx, applySubstEnv(subst, envWithPlaceholders), registry, binding.value);
     subst = composeSubst(subst, s);
     if (binding.returnType) {
-      const annotatedType = instantiateTypeExpr(binding.returnType);
+      const annotatedType = instantiateTypeExpr(ctx, binding.returnType);
       let currentType = applySubst(subst, valueType);
       while (currentType.kind === "TFun") {
         currentType = currentType.ret;
@@ -1105,23 +1107,23 @@ var inferLetRec = (ctx, env, registry, expr) => {
 var inferVar = (ctx, env, expr) => {
   const s = env.get(expr.name);
   if (!s) {
-    return [new Map, freshTypeVar(), []];
+    return [new Map, freshTypeVar(ctx), []];
   }
-  return [new Map, instantiate(s), []];
+  return [new Map, instantiate(ctx, s), []];
 };
 var inferQualifiedVar = (ctx, expr) => {
   const realModule = ctx.moduleAliases.get(expr.moduleName) ?? expr.moduleName;
   const mod = ctx.moduleEnv.get(realModule);
   if (!mod) {
     addError(ctx, `Unknown module: ${expr.moduleName}`, expr.span);
-    return [new Map, freshTypeVar(), []];
+    return [new Map, freshTypeVar(ctx), []];
   }
   const s = mod.typeEnv.get(expr.member);
   if (!s) {
     addError(ctx, `Module '${expr.moduleName}' does not export '${expr.member}'`, expr.span);
-    return [new Map, freshTypeVar(), []];
+    return [new Map, freshTypeVar(ctx), []];
   }
-  return [new Map, instantiate(s), []];
+  return [new Map, instantiate(ctx, s), []];
 };
 var inferTuple = (ctx, env, registry, expr) => {
   if (expr.elements.length === 0) {
@@ -1165,7 +1167,7 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
         addError(ctx, `Unknown constructor: ${pattern.name}`, pattern.span);
         return [subst, new Map];
       }
-      const conType = instantiate(conScheme);
+      const conType = instantiate(ctx, conScheme);
       const argTypes = [];
       let resultType = conType;
       while (resultType.kind === "TFun") {
@@ -1201,7 +1203,7 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
         addError(ctx, `Module '${pattern.moduleName}' does not export '${pattern.constructor}'`, pattern.span);
         return [subst, new Map];
       }
-      const conType = instantiate(conScheme);
+      const conType = instantiate(ctx, conScheme);
       const argTypes = [];
       let resultType = conType;
       while (resultType.kind === "TFun") {
@@ -1232,7 +1234,7 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
         let currentSubst2 = subst;
         const allBindings2 = new Map;
         for (const field2 of pattern.fields) {
-          const fieldType = freshTypeVar();
+          const fieldType = freshTypeVar(ctx);
           fieldTypes.set(field2.name, fieldType);
           const [s2, bindings] = inferPattern(ctx, env, field2.pattern, fieldType, currentSubst2);
           currentSubst2 = s2;
@@ -1240,7 +1242,7 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
             allBindings2.set(name, type);
           }
         }
-        const rowVar = freshTypeVar();
+        const rowVar = freshTypeVar(ctx);
         const recordType2 = trecord([...fieldTypes.entries()], rowVar);
         const s = unify(ctx, applySubst(currentSubst2, expectedType), recordType2);
         return [composeSubst(currentSubst2, s), allBindings2];
@@ -1254,8 +1256,8 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
       for (const field2 of pattern.fields) {
         let fieldType = expectedResolved.fields.get(field2.name);
         if (!fieldType && expectedResolved.row) {
-          const newFieldType = freshTypeVar();
-          const newRowVar = freshTypeVar();
+          const newFieldType = freshTypeVar(ctx);
+          const newRowVar = freshTypeVar(ctx);
           const s2 = unify(ctx, applySubst(currentSubst, expectedResolved.row), trecord([[field2.name, newFieldType]], newRowVar));
           currentSubst = composeSubst(currentSubst, s2);
           fieldType = applySubst(currentSubst, newFieldType);
@@ -1279,7 +1281,7 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
         let currentSubst2 = subst;
         const allBindings2 = new Map;
         for (const elem of pattern.elements) {
-          const elemType = freshTypeVar();
+          const elemType = freshTypeVar(ctx);
           elemTypes.push(elemType);
           const [s2, bindings] = inferPattern(ctx, env, elem, elemType, currentSubst2);
           currentSubst2 = s2;
@@ -1355,7 +1357,7 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
 var inferMatch = (ctx, env, registry, expr) => {
   if (expr.cases.length === 0) {
     addError(ctx, "Match expression must have at least one case");
-    return [new Map, freshTypeVar(), []];
+    return [new Map, freshTypeVar(ctx), []];
   }
   const [s1, scrutineeType, c1] = inferExpr(ctx, env, registry, expr.expr);
   let subst = s1;
@@ -1425,7 +1427,7 @@ var typeExprToType = (texpr) => {
   }
 };
 var PRIMITIVE_TYPES = new Set(["number", "string", "boolean"]);
-var instantiateTypeExpr = (texpr) => {
+var instantiateTypeExpr = (ctx, texpr) => {
   const varMapping = new Map;
   const convert = (t) => {
     switch (t.kind) {
@@ -1441,7 +1443,7 @@ var instantiateTypeExpr = (texpr) => {
         }
         let fresh = varMapping.get(t.name);
         if (!fresh) {
-          fresh = freshTypeVar();
+          fresh = freshTypeVar(ctx);
           varMapping.set(t.name, fresh);
         }
         return fresh;
@@ -1536,7 +1538,7 @@ var toSimplePattern = (p) => {
     case "QualifiedPCon":
       return {
         kind: "Con",
-        name: `${p.moduleName}.${p.constructor}`,
+        name: p.constructor,
         args: p.args.map(toSimplePattern)
       };
     case "PTuple":
@@ -1758,23 +1760,30 @@ var processModule = (mod, baseEnv, baseRegistry) => {
   for (const [k, v] of registry)
     fullRegistry.set(k, v);
   if (mod.bindings.length > 0) {
-    const dummyBody = num(0);
-    const letRec2 = letRec(mod.bindings, dummyBody);
-    const allConstructors = [...baseRegistry?.values() ?? []].flat();
-    allConstructors.push(...constructorNames);
     const emptySymbols = { definitions: [], references: [] };
-    const checkResult = check(env, fullRegistry, letRec2, emptySymbols);
-    if (letRec2.kind === "LetRec") {
-      const subst = checkResult.subst;
-      for (const binding of letRec2.bindings) {
-        const bindingScheme = env.get(binding.name);
-        if (bindingScheme) {} else {
-          const bindingResult = check(env, fullRegistry, binding.value, emptySymbols);
-          const resolvedType = applySubst(subst, bindingResult.type);
-          const scheme2 = generalize(env, resolvedType);
-          env.set(binding.name, scheme2);
-        }
-      }
+    const ctx = createContext2(emptySymbols);
+    const placeholders = new Map;
+    const envWithPlaceholders = new Map(env);
+    for (const binding of mod.bindings) {
+      const placeholder = freshTypeVar(ctx);
+      placeholders.set(binding.name, placeholder);
+      envWithPlaceholders.set(binding.name, scheme([], placeholder));
+    }
+    let subst = new Map;
+    const valueTypes = new Map;
+    for (const binding of mod.bindings) {
+      const [s, valueType] = inferExpr(ctx, applySubstEnv(subst, envWithPlaceholders), fullRegistry, binding.value);
+      subst = composeSubst(subst, s);
+      valueTypes.set(binding.name, valueType);
+      const placeholder = applySubst(subst, placeholders.get(binding.name));
+      const s2 = unify(ctx, placeholder, valueType);
+      subst = composeSubst(subst, s2);
+    }
+    const env1 = applySubstEnv(subst, env);
+    for (const binding of mod.bindings) {
+      const valueType = applySubst(subst, valueTypes.get(binding.name));
+      const generalizedScheme = generalize(env1, valueType);
+      env.set(binding.name, generalizedScheme);
     }
   }
   return { typeEnv: env, registry: fullRegistry, constructorNames };
@@ -1851,6 +1860,9 @@ var processUseStatements = (uses, moduleEnv) => {
 var baseEnv = new Map;
 
 // src/eval.ts
+var assertNever = (x) => {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+};
 var vnum = (value) => ({ kind: "VNum", value });
 var vstr = (value) => ({ kind: "VStr", value });
 var vbool = (value) => ({ kind: "VBool", value });
@@ -1891,6 +1903,9 @@ var evaluate = (env, expr) => {
       return vbool(expr.value);
     case "Var": {
       const value = env.get(expr.name);
+      if (!value) {
+        throw new RuntimeError(`Undefined variable: ${expr.name}`);
+      }
       if (value.kind === "VRef") {
         if (value.value === null) {
           throw new RuntimeError(`Uninitialized recursive binding: ${expr.name}`);
@@ -1944,16 +1959,37 @@ var evaluate = (env, expr) => {
     }
     case "FieldAccess": {
       const record2 = evaluate(env, expr.record);
-      return record2.fields.get(expr.field);
+      const value = record2.fields.get(expr.field);
+      if (value === undefined) {
+        throw new RuntimeError(`Record has no field '${expr.field}'`);
+      }
+      return value;
     }
     case "TupleIndex": {
       const tuple2 = evaluate(env, expr.tuple);
-      return tuple2.elements[expr.index];
+      const value = tuple2.elements[expr.index];
+      if (value === undefined) {
+        throw new RuntimeError(`Tuple index ${expr.index} out of bounds`);
+      }
+      return value;
     }
-    case "QualifiedVar":
-      throw new RuntimeError(`Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` + `Add 'use ${expr.moduleName} (..)' to import all bindings.`);
+    case "QualifiedVar": {
+      const value = env.get(expr.member);
+      if (!value) {
+        throw new RuntimeError(`Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` + `Add 'use ${expr.moduleName} (..)' to import all bindings.`);
+      }
+      if (value.kind === "VRef") {
+        if (value.value === null) {
+          throw new RuntimeError(`Uninitialized recursive binding: ${expr.member}`);
+        }
+        return value.value;
+      }
+      return value;
+    }
     case "Match":
       return evalMatch(env, expr);
+    default:
+      return assertNever(expr);
   }
 };
 var apply = (func, arg) => {
@@ -2018,13 +2054,21 @@ var valuesEqual = (a, b) => {
       const bCon = b;
       if (a.name !== bCon.name || a.args.length !== bCon.args.length)
         return false;
-      return a.args.every((arg, i) => valuesEqual(arg, bCon.args[i]));
+      for (let i = 0;i < a.args.length; i++) {
+        if (!valuesEqual(a.args[i], bCon.args[i]))
+          return false;
+      }
+      return true;
     }
     case "VTuple": {
       const bTuple = b;
       if (a.elements.length !== bTuple.elements.length)
         return false;
-      return a.elements.every((elem, i) => valuesEqual(elem, bTuple.elements[i]));
+      for (let i = 0;i < a.elements.length; i++) {
+        if (!valuesEqual(a.elements[i], bTuple.elements[i]))
+          return false;
+      }
+      return true;
     }
     case "VRecord": {
       const bRecord = b;
@@ -2144,6 +2188,8 @@ var matchPattern = (pattern, value) => {
       }
       return { matched: false };
     }
+    default:
+      return assertNever(pattern);
   }
 };
 var evalMatch = (env, expr) => {
@@ -2749,7 +2795,7 @@ var parseConstructor = (state) => {
   const name = text(state, nameToken);
   const fields = [];
   while (atAny(state, 3 /* Lower */, 4 /* Upper */, 42 /* LParen */) && !atNewStatement(state)) {
-    const field2 = parseTypeAtom(state);
+    const field2 = parseTypeAtomSimple(state);
     if (field2)
       fields.push(field2);
     else
@@ -3141,6 +3187,7 @@ var infixBindingPower = (state) => {
     case 16 /* False */:
     case 42 /* LParen */:
     case 44 /* LBrace */:
+    case 46 /* LBracket */:
       if (state.lexer.atLineStart) {
         return 0 /* None */;
       }
@@ -3553,20 +3600,15 @@ var programToExpr = (program, modules = [], uses = []) => {
     }
   }
   const importedBindings = [];
+  const seenModules = new Set;
   for (const use of uses) {
+    if (seenModules.has(use.moduleName))
+      continue;
+    seenModules.add(use.moduleName);
     const mod = modules.find((m) => m.name === use.moduleName);
     if (!mod)
       continue;
-    if (use.imports?.kind === "All") {
-      importedBindings.push(...mod.bindings);
-    } else if (use.imports?.kind === "Specific") {
-      for (const item of use.imports.items) {
-        const binding = mod.bindings.find((b) => b.name === item.name);
-        if (binding) {
-          importedBindings.push(binding);
-        }
-      }
-    }
+    importedBindings.push(...mod.bindings);
   }
   if (importedBindings.length > 0) {
     expr = letRec(importedBindings, expr);
@@ -3641,6 +3683,1415 @@ var coreModule = moduleDecl("Core", [], [
 ]);
 var modules = [maybeModule, eitherModule, listModule, coreModule];
 
+// src/ir.ts
+var irLit = (value, type) => ({
+  kind: "IRLit",
+  value,
+  type
+});
+var irVar = (name, type) => ({
+  kind: "IRVar",
+  name,
+  type
+});
+var irAtomExpr = (atom) => ({
+  kind: "IRAtomExpr",
+  atom,
+  type: atom.type
+});
+var irLet = (name, binding, body) => ({
+  kind: "IRLet",
+  name,
+  binding,
+  body,
+  type: body.type
+});
+var irRecBinding = (name, binding) => ({
+  name,
+  binding
+});
+var irLetRec = (bindings, body) => ({
+  kind: "IRLetRec",
+  bindings,
+  body,
+  type: body.type
+});
+var irAtomBinding = (atom) => ({
+  kind: "IRAtomBinding",
+  atom,
+  type: atom.type
+});
+var irAppBinding = (func, arg, type) => ({
+  kind: "IRAppBinding",
+  func,
+  arg,
+  type
+});
+var irBinOpBinding = (op, left, right, operandType, type) => ({
+  kind: "IRBinOpBinding",
+  op,
+  left,
+  right,
+  operandType,
+  type
+});
+var irIfBinding = (cond, thenBranch, elseBranch, type) => ({
+  kind: "IRIfBinding",
+  cond,
+  thenBranch,
+  elseBranch,
+  type
+});
+var irTupleBinding = (elements, type) => ({
+  kind: "IRTupleBinding",
+  elements,
+  type
+});
+var irRecordBinding = (fields, type) => ({
+  kind: "IRRecordBinding",
+  fields,
+  type
+});
+var irRecordField = (name, value) => ({
+  name,
+  value
+});
+var irFieldAccessBinding = (record2, field2, type) => ({
+  kind: "IRFieldAccessBinding",
+  record: record2,
+  field: field2,
+  type
+});
+var irTupleIndexBinding = (tuple2, index, type) => ({
+  kind: "IRTupleIndexBinding",
+  tuple: tuple2,
+  index,
+  type
+});
+var irMatchBinding = (scrutinee, cases, type) => ({
+  kind: "IRMatchBinding",
+  scrutinee,
+  cases,
+  type
+});
+var irLambdaBinding = (param, paramType, body, type, tailRecursive) => ({
+  kind: "IRLambdaBinding",
+  param,
+  paramType,
+  body,
+  type,
+  tailRecursive
+});
+var irPVar = (name, type) => ({
+  kind: "IRPVar",
+  name,
+  type
+});
+var irPWildcard = (type) => ({
+  kind: "IRPWildcard",
+  type
+});
+var irPCon = (name, args, type) => ({
+  kind: "IRPCon",
+  name,
+  args,
+  type
+});
+var irPLit = (value, type) => ({
+  kind: "IRPLit",
+  value,
+  type
+});
+var irPTuple = (elements, type) => ({
+  kind: "IRPTuple",
+  elements,
+  type
+});
+var irPRecord = (fields, type) => ({
+  kind: "IRPRecord",
+  fields,
+  type
+});
+var irPRecordField = (name, pattern) => ({
+  name,
+  pattern
+});
+var irPAs = (pattern, name, type) => ({
+  kind: "IRPAs",
+  pattern,
+  name,
+  type
+});
+var irPOr = (alternatives, type) => ({
+  kind: "IRPOr",
+  alternatives,
+  type
+});
+var irCase = (pattern, body, guard) => ({
+  pattern,
+  guard,
+  body
+});
+var printIR = (expr, indent = 0) => {
+  const pad = "  ".repeat(indent);
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      return pad + printAtom(expr.atom);
+    case "IRLet":
+      return pad + `let ${expr.name} = ${printBinding(expr.binding, indent)}
+` + printIR(expr.body, indent);
+    case "IRLetRec": {
+      const bindings = expr.bindings.map((b) => `${pad}  ${b.name} = ${printBinding(b.binding, indent + 1)}`).join(`
+`);
+      return `${pad}let rec
+${bindings}
+${pad}in
+${printIR(expr.body, indent)}`;
+    }
+  }
+};
+var printAtom = (atom) => {
+  switch (atom.kind) {
+    case "IRLit":
+      return typeof atom.value === "string" ? `"${atom.value}"` : String(atom.value);
+    case "IRVar":
+      return atom.name;
+  }
+};
+var printBinding = (binding, indent) => {
+  const pad = "  ".repeat(indent);
+  switch (binding.kind) {
+    case "IRAtomBinding":
+      return printAtom(binding.atom);
+    case "IRAppBinding":
+      return `${printAtom(binding.func)} ${printAtom(binding.arg)}`;
+    case "IRBinOpBinding":
+      return `${printAtom(binding.left)} ${binding.op} ${printAtom(binding.right)}`;
+    case "IRIfBinding":
+      return `if ${printAtom(binding.cond)} then
+` + printIR(binding.thenBranch, indent + 1) + `
+${pad}else
+` + printIR(binding.elseBranch, indent + 1);
+    case "IRTupleBinding":
+      return `(${binding.elements.map(printAtom).join(", ")})`;
+    case "IRRecordBinding":
+      return `{ ${binding.fields.map((f) => `${f.name} = ${printAtom(f.value)}`).join(", ")} }`;
+    case "IRFieldAccessBinding":
+      return `${printAtom(binding.record)}.${binding.field}`;
+    case "IRTupleIndexBinding":
+      return `${printAtom(binding.tuple)}.${binding.index}`;
+    case "IRMatchBinding": {
+      const cases = binding.cases.map((c) => {
+        const guard = c.guard ? ` if ${printIR(c.guard, 0).trim()}` : "";
+        return `${pad}  | ${printPattern(c.pattern)}${guard} -> ${printIR(c.body, indent + 2).trim()}`;
+      }).join(`
+`);
+      return `match ${printAtom(binding.scrutinee)}
+${cases}`;
+    }
+    case "IRLambdaBinding":
+      return `\\${binding.param} -> ${printIR(binding.body, indent).trim()}`;
+    case "IRClosureBinding":
+      return `closure(${binding.funcId}, [${binding.captures.map(printAtom).join(", ")}])`;
+  }
+};
+var printPattern = (pattern) => {
+  switch (pattern.kind) {
+    case "IRPVar":
+      return pattern.name;
+    case "IRPWildcard":
+      return "_";
+    case "IRPLit":
+      return typeof pattern.value === "string" ? `"${pattern.value}"` : String(pattern.value);
+    case "IRPCon":
+      if (pattern.args.length === 0)
+        return pattern.name;
+      return `${pattern.name} ${pattern.args.map(printPattern).join(" ")}`;
+    case "IRPTuple":
+      return `(${pattern.elements.map(printPattern).join(", ")})`;
+    case "IRPRecord":
+      return `{ ${pattern.fields.map((f) => `${f.name} = ${printPattern(f.pattern)}`).join(", ")} }`;
+    case "IRPAs":
+      return `${printPattern(pattern.pattern)} as ${pattern.name}`;
+    case "IRPOr":
+      return pattern.alternatives.map(printPattern).join(" | ");
+  }
+};
+
+// src/lower.ts
+var assertNever2 = (x) => {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+};
+var createContext3 = (typeEnv, checkOutput) => ({
+  varCounter: 0,
+  typeEnv: new Map(typeEnv),
+  subst: checkOutput.subst,
+  spanTypes: checkOutput.spanTypes
+});
+var freshVar = (ctx, prefix = "_t") => {
+  return `${prefix}${ctx.varCounter++}`;
+};
+var extendEnv2 = (ctx, name, type) => {
+  ctx.typeEnv.set(name, { vars: [], constraints: [], type });
+};
+var lookupSpanType = (ctx, span2) => {
+  if (!span2)
+    return null;
+  const key = `${span2.start}:${span2.end}`;
+  const type = ctx.spanTypes.get(key);
+  return type ? applySubst(ctx.subst, type) : null;
+};
+var lookupType = (ctx, name) => {
+  const scheme2 = ctx.typeEnv.get(name);
+  if (!scheme2) {
+    throw new Error(`Unknown variable during lowering: ${name}`);
+  }
+  return applySubst(ctx.subst, scheme2.type);
+};
+var getReturnType = (type) => {
+  if (type.kind === "TFun") {
+    return type.ret;
+  }
+  return { kind: "TVar", name: "_return" };
+};
+var getFieldType = (type, field2) => {
+  if (type.kind === "TRecord") {
+    const fieldType = type.fields.get(field2);
+    if (fieldType) {
+      return fieldType;
+    }
+  }
+  throw new Error(`Expected record type with field ${field2}, got ${type.kind}`);
+};
+var tNum2 = { kind: "TCon", name: "number" };
+var tStr2 = { kind: "TCon", name: "string" };
+var tBool2 = { kind: "TCon", name: "boolean" };
+var normalize = (ctx, expr) => {
+  switch (expr.kind) {
+    case "Num":
+      return { bindings: [], atom: irLit(expr.value, tNum2) };
+    case "Str":
+      return { bindings: [], atom: irLit(expr.value, tStr2) };
+    case "Bool":
+      return { bindings: [], atom: irLit(expr.value, tBool2) };
+    case "Var": {
+      const type2 = lookupType(ctx, expr.name);
+      return { bindings: [], atom: irVar(expr.name, type2) };
+    }
+  }
+  const lowered = lowerExpr(ctx, expr);
+  if (lowered.kind === "IRAtomExpr") {
+    return { bindings: [], atom: lowered.atom };
+  }
+  const name = freshVar(ctx);
+  const type = lowered.type;
+  extendEnv2(ctx, name, type);
+  const { bindings, finalBinding } = extractBindings(lowered);
+  return {
+    bindings: [...bindings, { name, binding: finalBinding }],
+    atom: irVar(name, type)
+  };
+};
+var extractBindings = (expr) => {
+  const bindings = [];
+  let current = expr;
+  while (current.kind === "IRLet" || current.kind === "IRLetRec") {
+    if (current.kind === "IRLet") {
+      bindings.push({ name: current.name, binding: current.binding });
+    } else {
+      for (const b of current.bindings) {
+        bindings.push({ name: b.name, binding: b.binding });
+      }
+    }
+    current = current.body;
+  }
+  if (current.kind !== "IRAtomExpr") {
+    throw new Error("Expected atom at end of ANF expression");
+  }
+  if (bindings.length > 0) {
+    const lastBinding = bindings.pop();
+    return { bindings, finalBinding: lastBinding.binding };
+  }
+  return { bindings: [], finalBinding: irAtomBinding(current.atom) };
+};
+var normalizeMany = (ctx, exprs) => {
+  const allBindings = [];
+  const atoms = [];
+  for (const expr of exprs) {
+    const result = normalize(ctx, expr);
+    allBindings.push(...result.bindings);
+    atoms.push(result.atom);
+  }
+  return { bindings: allBindings, atoms };
+};
+var wrapWithBindings = (bindings, body) => {
+  let result = body;
+  for (let i = bindings.length - 1;i >= 0; i--) {
+    const { name, binding } = bindings[i];
+    result = irLet(name, binding, result);
+  }
+  return result;
+};
+var lowerExpr = (ctx, expr) => {
+  switch (expr.kind) {
+    case "Num":
+      return irAtomExpr(irLit(expr.value, tNum2));
+    case "Str":
+      return irAtomExpr(irLit(expr.value, tStr2));
+    case "Bool":
+      return irAtomExpr(irLit(expr.value, tBool2));
+    case "Var": {
+      const type = lookupType(ctx, expr.name);
+      return irAtomExpr(irVar(expr.name, type));
+    }
+    case "Let":
+      return lowerLet(ctx, expr);
+    case "LetRec":
+      return lowerLetRec(ctx, expr);
+    case "Abs":
+      return lowerAbs(ctx, expr);
+    case "App":
+      return lowerApp(ctx, expr);
+    case "BinOp":
+      return lowerBinOp(ctx, expr);
+    case "If":
+      return lowerIf(ctx, expr);
+    case "Tuple":
+      return lowerTuple(ctx, expr);
+    case "Record":
+      return lowerRecord(ctx, expr);
+    case "FieldAccess":
+      return lowerFieldAccess(ctx, expr);
+    case "TupleIndex":
+      return lowerTupleIndex(ctx, expr);
+    case "Match":
+      return lowerMatch(ctx, expr);
+    case "QualifiedVar": {
+      const scheme2 = ctx.typeEnv.get(expr.member);
+      if (scheme2) {
+        return irAtomExpr(irVar(expr.member, applySubst(ctx.subst, scheme2.type)));
+      }
+      throw new Error(`Qualified access (${expr.moduleName}.${expr.member}) requires importing the module. ` + `Add 'use ${expr.moduleName} (..)' to import all bindings.`);
+    }
+    default:
+      return assertNever2(expr);
+  }
+};
+var lowerLet = (ctx, expr) => {
+  const valueIR = lowerExpr(ctx, expr.value);
+  const { bindings, finalBinding } = extractBindings(valueIR);
+  extendEnv2(ctx, expr.name, finalBinding.type);
+  const bodyIR = lowerExpr(ctx, expr.body);
+  const letExpr = irLet(expr.name, finalBinding, bodyIR);
+  return wrapWithBindings(bindings, letExpr);
+};
+var lowerLetRec = (ctx, expr) => {
+  for (const binding of expr.bindings) {
+    const placeholderType = { kind: "TVar", name: `_rec_${binding.name}` };
+    extendEnv2(ctx, binding.name, placeholderType);
+  }
+  const irBindings = [];
+  const allPreBindings = [];
+  for (const binding of expr.bindings) {
+    const valueIR = lowerExpr(ctx, binding.value);
+    const { bindings: preBindings, finalBinding } = extractBindings(valueIR);
+    for (const b of preBindings) {
+      allPreBindings.push(b);
+    }
+    irBindings.push(irRecBinding(binding.name, finalBinding));
+    extendEnv2(ctx, binding.name, finalBinding.type);
+  }
+  const bodyIR = lowerExpr(ctx, expr.body);
+  const letRecExpr = irLetRec(irBindings, bodyIR);
+  return wrapWithBindings(allPreBindings, letRecExpr);
+};
+var lowerAbs = (ctx, expr) => {
+  const paramType = lookupSpanType(ctx, expr.paramSpan) ?? {
+    kind: "TVar",
+    name: `_param${ctx.varCounter++}`
+  };
+  const savedEnv = new Map(ctx.typeEnv);
+  extendEnv2(ctx, expr.param, paramType);
+  const bodyIR = lowerExpr(ctx, expr.body);
+  ctx.typeEnv = savedEnv;
+  const funcType = { kind: "TFun", param: paramType, ret: bodyIR.type };
+  const binding = irLambdaBinding(expr.param, paramType, bodyIR, funcType);
+  const name = freshVar(ctx, "_fn");
+  extendEnv2(ctx, name, funcType);
+  return irLet(name, binding, irAtomExpr(irVar(name, funcType)));
+};
+var lowerApp = (ctx, expr) => {
+  const funcResult = normalize(ctx, expr.func);
+  const argResult = normalize(ctx, expr.param);
+  const funcType = funcResult.atom.type;
+  const returnType = getReturnType(funcType);
+  const binding = irAppBinding(funcResult.atom, argResult.atom, returnType);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, returnType);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, returnType)));
+  return wrapWithBindings([...funcResult.bindings, ...argResult.bindings], result);
+};
+var lowerBinOp = (ctx, expr) => {
+  const leftResult = normalize(ctx, expr.left);
+  const rightResult = normalize(ctx, expr.right);
+  const operandType = leftResult.atom.type;
+  let resultType;
+  switch (expr.op) {
+    case "+":
+      resultType = operandType;
+      break;
+    case "-":
+    case "*":
+    case "/":
+      resultType = tNum2;
+      break;
+    case "<":
+    case "<=":
+    case ">":
+    case ">=":
+    case "==":
+    case "!=":
+      resultType = tBool2;
+      break;
+  }
+  const binding = irBinOpBinding(expr.op, leftResult.atom, rightResult.atom, operandType, resultType);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, resultType);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, resultType)));
+  return wrapWithBindings([...leftResult.bindings, ...rightResult.bindings], result);
+};
+var lowerIf = (ctx, expr) => {
+  const condResult = normalize(ctx, expr.cond);
+  const thenIR = lowerExpr(ctx, expr.then);
+  const elseIR = lowerExpr(ctx, expr.else);
+  const resultType = thenIR.type;
+  const binding = irIfBinding(condResult.atom, thenIR, elseIR, resultType);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, resultType);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, resultType)));
+  return wrapWithBindings(condResult.bindings, result);
+};
+var lowerTuple = (ctx, expr) => {
+  if (expr.elements.length === 1) {
+    return lowerExpr(ctx, expr.elements[0]);
+  }
+  const { bindings, atoms } = normalizeMany(ctx, expr.elements);
+  const elementTypes = atoms.map((a) => a.type);
+  const tupleType = { kind: "TTuple", elements: elementTypes };
+  const binding = irTupleBinding(atoms, tupleType);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, tupleType);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, tupleType)));
+  return wrapWithBindings(bindings, result);
+};
+var lowerRecord = (ctx, expr) => {
+  const fieldExprs = expr.fields.map((f) => f.value);
+  const { bindings, atoms } = normalizeMany(ctx, fieldExprs);
+  const irFields = expr.fields.map((f, i) => irRecordField(f.name, atoms[i]));
+  const fieldTypes = new Map;
+  for (let i = 0;i < expr.fields.length; i++) {
+    fieldTypes.set(expr.fields[i].name, atoms[i].type);
+  }
+  const recordType2 = { kind: "TRecord", fields: fieldTypes, row: null };
+  const binding = irRecordBinding(irFields, recordType2);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, recordType2);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, recordType2)));
+  return wrapWithBindings(bindings, result);
+};
+var lowerFieldAccess = (ctx, expr) => {
+  const recordResult = normalize(ctx, expr.record);
+  const fieldType = getFieldType(recordResult.atom.type, expr.field);
+  const binding = irFieldAccessBinding(recordResult.atom, expr.field, fieldType);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, fieldType);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, fieldType)));
+  return wrapWithBindings(recordResult.bindings, result);
+};
+var lowerTupleIndex = (ctx, expr) => {
+  const tupleResult = normalize(ctx, expr.tuple);
+  const tupleType = tupleResult.atom.type;
+  if (tupleType.kind !== "TTuple") {
+    throw new Error(`Expected tuple type, got ${tupleType.kind}`);
+  }
+  const elementType = tupleType.elements[expr.index];
+  const binding = irTupleIndexBinding(tupleResult.atom, expr.index, elementType);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, elementType);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, elementType)));
+  return wrapWithBindings(tupleResult.bindings, result);
+};
+var lowerMatch = (ctx, expr) => {
+  const scrutineeResult = normalize(ctx, expr.expr);
+  const irCases = [];
+  let resultType = null;
+  for (const case_2 of expr.cases) {
+    const irPattern = lowerPattern(case_2.pattern, scrutineeResult.atom.type);
+    const savedEnv = new Map(ctx.typeEnv);
+    extendPatternBindings(ctx, case_2.pattern, scrutineeResult.atom.type);
+    let guardIR;
+    if (case_2.guard) {
+      guardIR = lowerExpr(ctx, case_2.guard);
+    }
+    const bodyIR = lowerExpr(ctx, case_2.body);
+    resultType = bodyIR.type;
+    ctx.typeEnv = savedEnv;
+    irCases.push(irCase(irPattern, bodyIR, guardIR));
+  }
+  if (!resultType) {
+    throw new Error("Match expression has no cases");
+  }
+  const binding = irMatchBinding(scrutineeResult.atom, irCases, resultType);
+  const name = freshVar(ctx);
+  extendEnv2(ctx, name, resultType);
+  const result = irLet(name, binding, irAtomExpr(irVar(name, resultType)));
+  return wrapWithBindings(scrutineeResult.bindings, result);
+};
+var lowerPattern = (pattern, type) => {
+  switch (pattern.kind) {
+    case "PVar":
+      return irPVar(pattern.name, type);
+    case "PWildcard":
+      return irPWildcard(type);
+    case "PLit": {
+      let litType;
+      if (typeof pattern.value === "number") {
+        litType = tNum2;
+      } else if (typeof pattern.value === "string") {
+        litType = tStr2;
+      } else {
+        litType = tBool2;
+      }
+      return irPLit(pattern.value, litType);
+    }
+    case "PCon": {
+      const args = pattern.args.map((arg, i) => {
+        const argType = { kind: "TVar", name: `_arg${i}` };
+        return lowerPattern(arg, argType);
+      });
+      return irPCon(pattern.name, args, type);
+    }
+    case "QualifiedPCon": {
+      const args = pattern.args.map((arg, i) => {
+        const argType = { kind: "TVar", name: `_arg${i}` };
+        return lowerPattern(arg, argType);
+      });
+      return irPCon(pattern.constructor, args, type);
+    }
+    case "PTuple": {
+      const elementTypes = type.kind === "TTuple" ? type.elements : [];
+      const elements = pattern.elements.map((elem, i) => {
+        const elemType = elementTypes[i] ?? { kind: "TVar", name: `_elem${i}` };
+        return lowerPattern(elem, elemType);
+      });
+      return irPTuple(elements, type);
+    }
+    case "PRecord": {
+      const fields = pattern.fields.map((f) => {
+        const fieldType = type.kind === "TRecord" ? type.fields.get(f.name) ?? { kind: "TVar", name: `_field_${f.name}` } : { kind: "TVar", name: `_field_${f.name}` };
+        return irPRecordField(f.name, lowerPattern(f.pattern, fieldType));
+      });
+      return irPRecord(fields, type);
+    }
+    case "PAs": {
+      const innerPattern = lowerPattern(pattern.pattern, type);
+      return irPAs(innerPattern, pattern.name, type);
+    }
+    case "POr": {
+      const alternatives = pattern.alternatives.map((alt) => lowerPattern(alt, type));
+      return irPOr(alternatives, type);
+    }
+  }
+};
+var extendPatternBindings = (ctx, pattern, type) => {
+  switch (pattern.kind) {
+    case "PVar":
+      extendEnv2(ctx, pattern.name, type);
+      break;
+    case "PWildcard":
+    case "PLit":
+      break;
+    case "PCon":
+      for (let i = 0;i < pattern.args.length; i++) {
+        const argType = { kind: "TVar", name: `_arg${i}` };
+        extendPatternBindings(ctx, pattern.args[i], argType);
+      }
+      break;
+    case "QualifiedPCon":
+      for (let i = 0;i < pattern.args.length; i++) {
+        const argType = { kind: "TVar", name: `_arg${i}` };
+        extendPatternBindings(ctx, pattern.args[i], argType);
+      }
+      break;
+    case "PTuple": {
+      const elementTypes = type.kind === "TTuple" ? type.elements : [];
+      for (let i = 0;i < pattern.elements.length; i++) {
+        const elemType = elementTypes[i] ?? { kind: "TVar", name: `_elem${i}` };
+        extendPatternBindings(ctx, pattern.elements[i], elemType);
+      }
+      break;
+    }
+    case "PRecord":
+      for (const f of pattern.fields) {
+        const fieldType = type.kind === "TRecord" ? type.fields.get(f.name) ?? { kind: "TVar", name: `_field_${f.name}` } : { kind: "TVar", name: `_field_${f.name}` };
+        extendPatternBindings(ctx, f.pattern, fieldType);
+      }
+      break;
+    case "PAs":
+      extendEnv2(ctx, pattern.name, type);
+      extendPatternBindings(ctx, pattern.pattern, type);
+      break;
+    case "POr":
+      if (pattern.alternatives.length > 0) {
+        extendPatternBindings(ctx, pattern.alternatives[0], type);
+      }
+      break;
+  }
+};
+var lowerToIR = (expr, typeEnv, checkOutput) => {
+  const ctx = createContext3(typeEnv, checkOutput);
+  return lowerExpr(ctx, expr);
+};
+
+// src/backend/runtime.ts
+var RUNTIME = `// Algow Runtime
+"use strict";
+
+/**
+ * Apply a function to an argument.
+ * Handles both closures and partial constructor application.
+ */
+const $apply = (fn, arg) => {
+  if (typeof fn === "function") {
+    return fn(arg);
+  }
+  // Constructor - partial application
+  return { $tag: fn.$tag, $args: [...fn.$args, arg] };
+};
+
+/**
+ * Create a constructor value.
+ */
+const $con = (tag, ...args) => ({ $tag: tag, $args: args });
+
+/**
+ * Deep structural equality for values.
+ */
+const $eq = (a, b) => {
+  // Same reference or primitive equality
+  if (a === b) return true;
+
+  // Different types
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== "object" || a === null) return false;
+
+  // Constructor equality
+  if ("$tag" in a && "$tag" in b) {
+    if (a.$tag !== b.$tag) return false;
+    if (a.$args.length !== b.$args.length) return false;
+    return a.$args.every((x, i) => $eq(x, b.$args[i]));
+  }
+
+  // Array (tuple) equality
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((x, i) => $eq(x, b[i]));
+  }
+
+  // Object (record) equality
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => k in b && $eq(a[k], b[k]));
+};
+
+`;
+
+// src/backend/js.ts
+var assertNever3 = (x) => {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+};
+var createContext4 = (constructorNames) => ({
+  indent: 0,
+  lines: [],
+  constructors: new Set(constructorNames)
+});
+var emit = (ctx, code) => {
+  const indentation = "  ".repeat(ctx.indent);
+  ctx.lines.push(indentation + code);
+};
+var toJsId = (name) => {
+  return name.replace(/[^a-zA-Z0-9_$]/g, "_");
+};
+var genExpr = (ctx, expr) => {
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      return genAtom(ctx, expr.atom);
+    case "IRLet": {
+      const binding = genBinding(ctx, expr.binding);
+      const jsName = toJsId(expr.name);
+      emit(ctx, `const ${jsName} = ${binding};`);
+      return genExpr(ctx, expr.body);
+    }
+    case "IRLetRec": {
+      const hasLambda = expr.bindings.some((b) => b.binding.kind === "IRLambdaBinding");
+      if (hasLambda) {
+        for (const { name } of expr.bindings) {
+          emit(ctx, `let ${toJsId(name)};`);
+        }
+        for (const { name, binding } of expr.bindings) {
+          const bindingCode = genBinding(ctx, binding);
+          emit(ctx, `${toJsId(name)} = ${bindingCode};`);
+        }
+      } else {
+        for (const { name, binding } of expr.bindings) {
+          const bindingCode = genBinding(ctx, binding);
+          emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
+        }
+      }
+      return genExpr(ctx, expr.body);
+    }
+    default:
+      return assertNever3(expr);
+  }
+};
+var genAtom = (ctx, atom) => {
+  switch (atom.kind) {
+    case "IRLit":
+      if (typeof atom.value === "string") {
+        return JSON.stringify(atom.value);
+      }
+      return String(atom.value);
+    case "IRVar": {
+      if (ctx.constructors.has(atom.name)) {
+        return `$con("${atom.name}")`;
+      }
+      return toJsId(atom.name);
+    }
+    default:
+      return assertNever3(atom);
+  }
+};
+var genBinding = (ctx, binding) => {
+  switch (binding.kind) {
+    case "IRAtomBinding":
+      return genAtom(ctx, binding.atom);
+    case "IRAppBinding": {
+      const func = genAtom(ctx, binding.func);
+      const arg = genAtom(ctx, binding.arg);
+      if (binding.func.kind === "IRVar" && ctx.constructors.has(binding.func.name)) {
+        return `$apply(${func}, ${arg})`;
+      }
+      return `${func}(${arg})`;
+    }
+    case "IRBinOpBinding":
+      return genBinOp(ctx, binding);
+    case "IRIfBinding":
+      return genIf(ctx, binding);
+    case "IRTupleBinding": {
+      const elements = binding.elements.map((e) => genAtom(ctx, e));
+      return `[${elements.join(", ")}]`;
+    }
+    case "IRRecordBinding": {
+      const fields = binding.fields.map((f) => `${f.name}: ${genAtom(ctx, f.value)}`);
+      return `{ ${fields.join(", ")} }`;
+    }
+    case "IRFieldAccessBinding": {
+      const record2 = genAtom(ctx, binding.record);
+      return `${record2}.${binding.field}`;
+    }
+    case "IRTupleIndexBinding": {
+      const tuple2 = genAtom(ctx, binding.tuple);
+      return `${tuple2}[${binding.index}]`;
+    }
+    case "IRMatchBinding":
+      return genMatch(ctx, binding);
+    case "IRLambdaBinding":
+      return genLambda(ctx, binding);
+    case "IRClosureBinding": {
+      const captures = binding.captures.map((c) => genAtom(ctx, c));
+      return `{ $fn: ${binding.funcId}, $env: [${captures.join(", ")}] }`;
+    }
+    default:
+      return assertNever3(binding);
+  }
+};
+var genBinOp = (ctx, binding) => {
+  const left = genAtom(ctx, binding.left);
+  const right = genAtom(ctx, binding.right);
+  switch (binding.op) {
+    case "+":
+    case "-":
+    case "*":
+    case "/":
+    case "<":
+    case ">":
+    case "<=":
+    case ">=":
+      return `(${left} ${binding.op} ${right})`;
+    case "==":
+      if (isComplexType(binding.operandType)) {
+        return `$eq(${left}, ${right})`;
+      }
+      return `(${left} === ${right})`;
+    case "!=":
+      if (isComplexType(binding.operandType)) {
+        return `!$eq(${left}, ${right})`;
+      }
+      return `(${left} !== ${right})`;
+  }
+};
+var isComplexType = (type) => {
+  switch (type.kind) {
+    case "TCon":
+      return !["number", "string", "boolean"].includes(type.name);
+    case "TVar":
+      return true;
+    case "TFun":
+    case "TApp":
+    case "TRecord":
+    case "TTuple":
+      return true;
+  }
+};
+var genIf = (ctx, binding) => {
+  const cond = genAtom(ctx, binding.cond);
+  ctx.indent++;
+  const thenLines = [];
+  const savedLines = ctx.lines;
+  ctx.lines = thenLines;
+  const thenResult = genExpr(ctx, binding.thenBranch);
+  const thenCode = thenLines.length > 0 ? `(() => {
+${thenLines.join(`
+`)}
+${"  ".repeat(ctx.indent - 1)}return ${thenResult};
+${"  ".repeat(ctx.indent - 1)}})()` : thenResult;
+  const elseLines = [];
+  ctx.lines = elseLines;
+  const elseResult = genExpr(ctx, binding.elseBranch);
+  const elseCode = elseLines.length > 0 ? `(() => {
+${elseLines.join(`
+`)}
+${"  ".repeat(ctx.indent - 1)}return ${elseResult};
+${"  ".repeat(ctx.indent - 1)}})()` : elseResult;
+  ctx.lines = savedLines;
+  ctx.indent--;
+  return `(${cond} ? ${thenCode} : ${elseCode})`;
+};
+var genLambda = (ctx, binding) => {
+  if (binding.tailRecursive) {
+    return genTailRecursiveLambda(ctx, binding);
+  }
+  const param = toJsId(binding.param);
+  ctx.indent++;
+  const bodyLines = [];
+  const savedLines = ctx.lines;
+  ctx.lines = bodyLines;
+  const bodyResult = genExpr(ctx, binding.body);
+  ctx.lines = savedLines;
+  ctx.indent--;
+  if (bodyLines.length === 0) {
+    return `(${param}) => ${bodyResult}`;
+  }
+  const indentation = "  ".repeat(ctx.indent + 1);
+  const body = bodyLines.map((l) => indentation + l.trimStart()).join(`
+`);
+  return `(${param}) => {
+${body}
+${"  ".repeat(ctx.indent)}return ${bodyResult};
+${"  ".repeat(ctx.indent)}}`;
+};
+var genTailRecursiveLambda = (ctx, binding) => {
+  const tco = binding.tailRecursive;
+  const params = tco.params.map(toJsId);
+  const selfName = tco.selfName;
+  let innerBody = binding.body;
+  while (innerBody.kind === "IRLet" && innerBody.binding.kind === "IRLambdaBinding") {
+    innerBody = innerBody.binding.body;
+  }
+  ctx.indent++;
+  const bodyLines = [];
+  const savedLines = ctx.lines;
+  ctx.lines = bodyLines;
+  const bodyResult = genExprTCO(ctx, innerBody, selfName, params);
+  ctx.lines = savedLines;
+  ctx.indent--;
+  if (params.length === 1) {
+    const indentation2 = "  ".repeat(ctx.indent + 1);
+    const loopIndent2 = "  ".repeat(ctx.indent + 2);
+    const body2 = bodyLines.map((l) => loopIndent2 + l.trimStart()).join(`
+`);
+    return `(${params[0]}) => {
+${indentation2}while (true) {
+${body2}
+${loopIndent2}return ${bodyResult};
+${indentation2}}
+${"  ".repeat(ctx.indent)}}`;
+  }
+  let result = "";
+  for (let i = 0;i < params.length - 1; i++) {
+    result += `(${params[i]}) => `;
+  }
+  const lastParam = params[params.length - 1];
+  const indentation = "  ".repeat(ctx.indent + 1);
+  const loopIndent = "  ".repeat(ctx.indent + 2);
+  const body = bodyLines.map((l) => loopIndent + l.trimStart()).join(`
+`);
+  result += `(${lastParam}) => {
+${indentation}while (true) {
+${body}
+${loopIndent}return ${bodyResult};
+${indentation}}
+${"  ".repeat(ctx.indent)}}`;
+  return result;
+};
+var genExprTCO = (ctx, expr, selfName, params) => {
+  switch (expr.kind) {
+    case "IRAtomExpr":
+      return genAtom(ctx, expr.atom);
+    case "IRLet": {
+      const tailCallArgs = extractTailCallArgs(expr, selfName, params.length);
+      if (tailCallArgs) {
+        emitNonAppBindings(ctx, expr, selfName);
+        const assignments = params.map((p, i) => `${p} = ${genAtom(ctx, tailCallArgs[i])};`).join(" ");
+        emit(ctx, `${assignments} continue;`);
+        return "undefined";
+      }
+      const binding = genBindingTCO(ctx, expr.binding, selfName, params);
+      const jsName = toJsId(expr.name);
+      emit(ctx, `const ${jsName} = ${binding};`);
+      return genExprTCO(ctx, expr.body, selfName, params);
+    }
+    case "IRLetRec": {
+      const hasLambda = expr.bindings.some((b) => b.binding.kind === "IRLambdaBinding");
+      if (hasLambda) {
+        for (const { name } of expr.bindings) {
+          emit(ctx, `let ${toJsId(name)};`);
+        }
+        for (const { name, binding } of expr.bindings) {
+          const bindingCode = genBinding(ctx, binding);
+          emit(ctx, `${toJsId(name)} = ${bindingCode};`);
+        }
+      } else {
+        for (const { name, binding } of expr.bindings) {
+          const bindingCode = genBinding(ctx, binding);
+          emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
+        }
+      }
+      return genExprTCO(ctx, expr.body, selfName, params);
+    }
+  }
+};
+var emitNonAppBindings = (ctx, expr, selfName) => {
+  let current = expr;
+  while (current.kind === "IRLet") {
+    const { name, binding } = current;
+    if (binding.kind !== "IRAppBinding") {
+      const bindingCode = genBinding(ctx, binding);
+      emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
+    } else if (binding.func.kind === "IRVar" && binding.func.name !== selfName) {
+      const isPartialApp = isPartOfTailCallChain(expr, name, selfName);
+      if (!isPartialApp) {
+        const bindingCode = genBinding(ctx, binding);
+        emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
+      }
+    }
+    current = current.body;
+  }
+};
+var isPartOfTailCallChain = (expr, bindingName, selfName) => {
+  const bindings = [];
+  let current = expr;
+  while (current.kind === "IRLet") {
+    bindings.push({ name: current.name, binding: current.binding });
+    current = current.body;
+  }
+  if (current.kind !== "IRAtomExpr" || current.atom.kind !== "IRVar") {
+    return false;
+  }
+  let targetVar = current.atom.name;
+  for (let i = bindings.length - 1;i >= 0; i--) {
+    const { name, binding } = bindings[i];
+    if (name === targetVar && binding.kind === "IRAppBinding") {
+      if (name === bindingName) {
+        return true;
+      }
+      if (binding.func.kind === "IRVar") {
+        if (binding.func.name === selfName) {
+          return false;
+        }
+        targetVar = binding.func.name;
+      } else {
+        return false;
+      }
+    }
+  }
+  return false;
+};
+var extractTailCallArgs = (expr, selfName, paramCount) => {
+  const bindings = [];
+  let current = expr;
+  while (current.kind === "IRLet") {
+    bindings.push({ name: current.name, binding: current.binding });
+    current = current.body;
+  }
+  if (current.kind !== "IRAtomExpr" || current.atom.kind !== "IRVar") {
+    return null;
+  }
+  const resultVar = current.atom.name;
+  const args = [];
+  let targetVar = resultVar;
+  for (let i = bindings.length - 1;i >= 0; i--) {
+    const { name, binding } = bindings[i];
+    if (name === targetVar && binding.kind === "IRAppBinding") {
+      args.unshift(binding.arg);
+      if (binding.func.kind === "IRVar") {
+        if (binding.func.name === selfName) {
+          if (args.length === paramCount) {
+            return args;
+          }
+          return null;
+        }
+        targetVar = binding.func.name;
+      } else {
+        return null;
+      }
+    }
+  }
+  return null;
+};
+var genBindingTCO = (ctx, binding, selfName, params) => {
+  switch (binding.kind) {
+    case "IRIfBinding":
+      return genIfTCO(ctx, binding, selfName, params);
+    case "IRMatchBinding":
+      return genMatchTCO(ctx, binding, selfName, params);
+    default:
+      return genBinding(ctx, binding);
+  }
+};
+var genIfTCO = (ctx, binding, selfName, params) => {
+  const cond = genAtom(ctx, binding.cond);
+  ctx.indent++;
+  const thenLines = [];
+  const savedLines = ctx.lines;
+  ctx.lines = thenLines;
+  const thenResult = genExprTCO(ctx, binding.thenBranch, selfName, params);
+  const thenHasContinue = thenLines.some((l) => l.includes("continue;"));
+  const thenCode = thenHasContinue ? `(() => {
+${thenLines.join(`
+`)}
+${"  ".repeat(ctx.indent - 1)}return ${thenResult};
+${"  ".repeat(ctx.indent - 1)}})()` : thenLines.length > 0 ? `(() => {
+${thenLines.join(`
+`)}
+${"  ".repeat(ctx.indent - 1)}return ${thenResult};
+${"  ".repeat(ctx.indent - 1)}})()` : thenResult;
+  const elseLines = [];
+  ctx.lines = elseLines;
+  const elseResult = genExprTCO(ctx, binding.elseBranch, selfName, params);
+  const elseHasContinue = elseLines.some((l) => l.includes("continue;"));
+  const elseCode = elseHasContinue ? `(() => {
+${elseLines.join(`
+`)}
+${"  ".repeat(ctx.indent - 1)}return ${elseResult};
+${"  ".repeat(ctx.indent - 1)}})()` : elseLines.length > 0 ? `(() => {
+${elseLines.join(`
+`)}
+${"  ".repeat(ctx.indent - 1)}return ${elseResult};
+${"  ".repeat(ctx.indent - 1)}})()` : elseResult;
+  ctx.lines = savedLines;
+  ctx.indent--;
+  if (thenHasContinue || elseHasContinue) {
+    emit(ctx, `if (${cond}) {`);
+    for (const line of thenLines) {
+      emit(ctx, "  " + line.trimStart());
+    }
+    if (!thenHasContinue) {
+      emit(ctx, `  return ${thenResult};`);
+    }
+    emit(ctx, `} else {`);
+    for (const line of elseLines) {
+      emit(ctx, "  " + line.trimStart());
+    }
+    if (!elseHasContinue) {
+      emit(ctx, `  return ${elseResult};`);
+    }
+    emit(ctx, `}`);
+    return "undefined";
+  }
+  return `(${cond} ? ${thenCode} : ${elseCode})`;
+};
+var genMatchTCO = (ctx, binding, selfName, params) => {
+  const scrutinee = genAtom(ctx, binding.scrutinee);
+  const scrutineeVar = "_s";
+  const hasGuards = binding.cases.some((c) => c.guard !== undefined);
+  const caseResults = [];
+  for (const case_2 of binding.cases) {
+    ctx.indent += 2;
+    const bodyLines = [];
+    const savedLines = ctx.lines;
+    ctx.lines = bodyLines;
+    let guardResult;
+    if (case_2.guard) {
+      guardResult = genExpr(ctx, case_2.guard);
+    }
+    const bodyResult = genExprTCO(ctx, case_2.body, selfName, params);
+    const hasContinue = bodyLines.some((l) => l.includes("continue;"));
+    ctx.lines = savedLines;
+    ctx.indent -= 2;
+    caseResults.push({ case_: case_2, bodyLines, bodyResult, hasContinue, guardResult });
+  }
+  const anyContinue = caseResults.some((r) => r.hasContinue);
+  const lines = [];
+  if (anyContinue) {
+    emit(ctx, `let ${scrutineeVar} = ${scrutinee};`);
+    for (let i = 0;i < caseResults.length; i++) {
+      const { case_: case_2, bodyLines, bodyResult, hasContinue, guardResult } = caseResults[i];
+      const { condition, bindings } = genPatternMatch(scrutineeVar, case_2.pattern);
+      const prefix = hasGuards || i === 0 ? "if" : "} else if";
+      const suffix = hasGuards && i > 0 ? "}" : "";
+      if (suffix)
+        emit(ctx, suffix);
+      emit(ctx, `${prefix} (${condition}) {`);
+      ctx.indent++;
+      for (const [name, expr] of bindings) {
+        emit(ctx, `const ${toJsId(name)} = ${expr};`);
+      }
+      for (const line of bodyLines) {
+        emit(ctx, line.trimStart());
+      }
+      if (guardResult) {
+        if (hasContinue) {
+          emit(ctx, `if (${guardResult}) { /* continue handled above */ }`);
+        } else {
+          emit(ctx, `if (${guardResult}) { ${scrutineeVar} = ${bodyResult}; }`);
+        }
+      } else {
+        if (!hasContinue) {
+          emit(ctx, `${scrutineeVar} = ${bodyResult};`);
+        }
+      }
+      ctx.indent--;
+    }
+    emit(ctx, "}");
+    return scrutineeVar;
+  }
+  lines.push(`((${scrutineeVar}) => {`);
+  for (let i = 0;i < caseResults.length; i++) {
+    const { case_: case_2, bodyLines, bodyResult, guardResult } = caseResults[i];
+    const { condition, bindings } = genPatternMatch(scrutineeVar, case_2.pattern);
+    const prefix = hasGuards || i === 0 ? "if" : "} else if";
+    const suffix = hasGuards && i > 0 ? "}" : "";
+    if (suffix)
+      lines.push(`  ${suffix}`);
+    lines.push(`  ${prefix} (${condition}) {`);
+    for (const [name, expr] of bindings) {
+      lines.push(`    const ${toJsId(name)} = ${expr};`);
+    }
+    for (const line of bodyLines) {
+      lines.push("    " + line.trimStart());
+    }
+    if (guardResult) {
+      lines.push(`    if (${guardResult}) return ${bodyResult};`);
+    } else {
+      lines.push(`    return ${bodyResult};`);
+    }
+  }
+  lines.push("  }");
+  lines.push(`})(${scrutinee})`);
+  return lines.join(`
+` + "  ".repeat(ctx.indent));
+};
+var canUseSwitchDispatch = (cases) => {
+  if (cases.length === 0)
+    return false;
+  const tags = new Set;
+  for (const case_2 of cases) {
+    if (case_2.pattern.kind !== "IRPCon") {
+      return false;
+    }
+    if (tags.has(case_2.pattern.name)) {
+      return false;
+    }
+    tags.add(case_2.pattern.name);
+  }
+  return true;
+};
+var genNestedPatternConditions = (scrutineeVar, pattern) => {
+  const conditions = [];
+  const bindings = [];
+  for (let i = 0;i < pattern.args.length; i++) {
+    const argScrutinee = `${scrutineeVar}.$args[${i}]`;
+    const result = genPatternMatch(argScrutinee, pattern.args[i]);
+    if (result.condition !== "true") {
+      conditions.push(result.condition);
+    }
+    bindings.push(...result.bindings);
+  }
+  return { conditions, bindings };
+};
+var genMatchSwitch = (ctx, scrutineeVar, scrutinee, cases) => {
+  const lines = [];
+  lines.push(`((${scrutineeVar}) => {`);
+  lines.push(`  switch (${scrutineeVar}.$tag) {`);
+  for (const case_2 of cases) {
+    const pattern = case_2.pattern;
+    lines.push(`    case "${pattern.name}": {`);
+    const { conditions, bindings } = genNestedPatternConditions(scrutineeVar, pattern);
+    for (const [name, expr] of bindings) {
+      lines.push(`      const ${toJsId(name)} = ${expr};`);
+    }
+    ctx.indent += 3;
+    const bodyLines = [];
+    const savedLines = ctx.lines;
+    ctx.lines = bodyLines;
+    const bodyResult = genExpr(ctx, case_2.body);
+    ctx.lines = savedLines;
+    ctx.indent -= 3;
+    for (const line of bodyLines) {
+      lines.push("      " + line.trimStart());
+    }
+    if (conditions.length > 0) {
+      lines.push(`      if (${conditions.join(" && ")}) return ${bodyResult};`);
+      lines.push(`      break;`);
+    } else {
+      lines.push(`      return ${bodyResult};`);
+    }
+    lines.push(`    }`);
+  }
+  lines.push(`  }`);
+  lines.push(`})(${scrutinee})`);
+  return lines.join(`
+` + "  ".repeat(ctx.indent));
+};
+var genMatch = (ctx, binding) => {
+  const scrutinee = genAtom(ctx, binding.scrutinee);
+  const scrutineeVar = "_s";
+  const hasGuards = binding.cases.some((c) => c.guard !== undefined);
+  if (!hasGuards && canUseSwitchDispatch(binding.cases)) {
+    return genMatchSwitch(ctx, scrutineeVar, scrutinee, binding.cases);
+  }
+  const lines = [];
+  lines.push(`((${scrutineeVar}) => {`);
+  for (let i = 0;i < binding.cases.length; i++) {
+    const case_2 = binding.cases[i];
+    const { condition, bindings } = genPatternMatch(scrutineeVar, case_2.pattern);
+    const prefix = hasGuards || i === 0 ? "if" : "} else if";
+    const suffix = hasGuards && i > 0 ? "}" : "";
+    if (suffix)
+      lines.push(`  ${suffix}`);
+    lines.push(`  ${prefix} (${condition}) {`);
+    for (const [name, expr] of bindings) {
+      lines.push(`    const ${toJsId(name)} = ${expr};`);
+    }
+    ctx.indent += 2;
+    const bodyLines = [];
+    const savedLines = ctx.lines;
+    ctx.lines = bodyLines;
+    let guardResult;
+    if (case_2.guard) {
+      guardResult = genExpr(ctx, case_2.guard);
+    }
+    const bodyResult = genExpr(ctx, case_2.body);
+    ctx.lines = savedLines;
+    ctx.indent -= 2;
+    for (const line of bodyLines) {
+      lines.push("    " + line.trimStart());
+    }
+    if (guardResult) {
+      lines.push(`    if (${guardResult}) return ${bodyResult};`);
+    } else {
+      lines.push(`    return ${bodyResult};`);
+    }
+  }
+  lines.push("  }");
+  lines.push(`})(${scrutinee})`);
+  return lines.join(`
+` + "  ".repeat(ctx.indent));
+};
+var genPatternMatch = (scrutinee, pattern) => {
+  switch (pattern.kind) {
+    case "IRPVar":
+      return { condition: "true", bindings: [[pattern.name, scrutinee]] };
+    case "IRPWildcard":
+      return { condition: "true", bindings: [] };
+    case "IRPLit": {
+      const value = typeof pattern.value === "string" ? JSON.stringify(pattern.value) : String(pattern.value);
+      return { condition: `${scrutinee} === ${value}`, bindings: [] };
+    }
+    case "IRPCon": {
+      const conditions = [`${scrutinee}.$tag === "${pattern.name}"`];
+      const bindings = [];
+      for (let i = 0;i < pattern.args.length; i++) {
+        const argScrutinee = `${scrutinee}.$args[${i}]`;
+        const result = genPatternMatch(argScrutinee, pattern.args[i]);
+        if (result.condition !== "true") {
+          conditions.push(result.condition);
+        }
+        bindings.push(...result.bindings);
+      }
+      return { condition: conditions.join(" && "), bindings };
+    }
+    case "IRPTuple": {
+      const conditions = [];
+      const bindings = [];
+      for (let i = 0;i < pattern.elements.length; i++) {
+        const elemScrutinee = `${scrutinee}[${i}]`;
+        const result = genPatternMatch(elemScrutinee, pattern.elements[i]);
+        if (result.condition !== "true") {
+          conditions.push(result.condition);
+        }
+        bindings.push(...result.bindings);
+      }
+      return { condition: conditions.join(" && ") || "true", bindings };
+    }
+    case "IRPRecord": {
+      const conditions = [];
+      const bindings = [];
+      for (const field2 of pattern.fields) {
+        const fieldScrutinee = `${scrutinee}.${field2.name}`;
+        const result = genPatternMatch(fieldScrutinee, field2.pattern);
+        if (result.condition !== "true") {
+          conditions.push(result.condition);
+        }
+        bindings.push(...result.bindings);
+      }
+      return { condition: conditions.join(" && ") || "true", bindings };
+    }
+    case "IRPAs": {
+      const result = genPatternMatch(scrutinee, pattern.pattern);
+      result.bindings.push([pattern.name, scrutinee]);
+      return result;
+    }
+    case "IRPOr": {
+      const conditions = [];
+      let bindings = [];
+      for (let i = 0;i < pattern.alternatives.length; i++) {
+        const result = genPatternMatch(scrutinee, pattern.alternatives[i]);
+        conditions.push(`(${result.condition})`);
+        if (i === 0) {
+          bindings = result.bindings;
+        }
+      }
+      return { condition: conditions.join(" || "), bindings };
+    }
+  }
+};
+var generateJS = (irExpr, constructorNames) => {
+  const ctx = createContext4(constructorNames);
+  const result = genExpr(ctx, irExpr);
+  const code = [
+    RUNTIME,
+    "// Generated code",
+    ...ctx.lines,
+    `const $result = ${result};`,
+    "console.log($result);"
+  ].join(`
+`);
+  return { code, warnings: [] };
+};
+
 // src/lsp/positions.ts
 var offsetToPosition = (source, offset) => {
   let line = 0;
@@ -3696,12 +5147,50 @@ var notification = (method, params) => ({
 var SYNC_FULL = 1;
 var SEVERITY_ERROR = 1;
 var preludeUses = modules.map((mod) => useDecl(mod.name, importAll()));
+var preludeCache = (() => {
+  const moduleEnv = processModules(modules);
+  const { localEnv, localRegistry, constructorNames } = processUseStatements(preludeUses, moduleEnv);
+  return {
+    moduleEnv,
+    typeEnv: localEnv,
+    registry: localRegistry,
+    constructorNames: [...constructorNames]
+  };
+})();
 var processProgram = (program) => {
   const allModules = [...modules, ...program.modules];
   const allUses = [...preludeUses, ...program.uses];
-  const moduleEnv = processModules(allModules);
-  const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
-  return { typeEnv: localEnv, registry: localRegistry, constructorNames, allModules, allUses };
+  if (program.modules.length > 0) {
+    const moduleEnv = processModules(allModules);
+    const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, moduleEnv);
+    return {
+      typeEnv: localEnv,
+      registry: localRegistry,
+      constructorNames,
+      allModules,
+      allUses,
+      moduleEnv
+    };
+  }
+  if (program.uses.length > 0) {
+    const { localEnv, localRegistry, constructorNames } = processUseStatements(allUses, preludeCache.moduleEnv);
+    return {
+      typeEnv: localEnv,
+      registry: localRegistry,
+      constructorNames,
+      allModules,
+      allUses,
+      moduleEnv: preludeCache.moduleEnv
+    };
+  }
+  return {
+    typeEnv: preludeCache.typeEnv,
+    registry: preludeCache.registry,
+    constructorNames: preludeCache.constructorNames,
+    allModules,
+    allUses,
+    moduleEnv: preludeCache.moduleEnv
+  };
 };
 var createServer = (transport) => {
   const documents = new Map;
@@ -3740,6 +5229,12 @@ var createServer = (transport) => {
           break;
         case "algow/evaluate":
           transport.send(successResponse(id, handleEvaluate(params)));
+          break;
+        case "algow/compile":
+          transport.send(successResponse(id, handleCompile(params)));
+          break;
+        case "algow/emitIR":
+          transport.send(successResponse(id, handleEmitIR(params)));
           break;
         default:
           transport.send(errorResponse(id, -32601, `Method not found: ${method}`));
@@ -3891,6 +5386,7 @@ ${def.name}: ${typeToString(type)}
   const COMPLETION_KIND_CONSTRUCTOR = 4;
   const COMPLETION_KIND_FIELD = 5;
   const COMPLETION_KIND_KEYWORD = 14;
+  const COMPLETION_KIND_MODULE = 9;
   const handleCompletion = (params) => {
     const doc = documents.get(params.textDocument.uri);
     if (!doc)
@@ -3900,13 +5396,24 @@ ${def.name}: ${typeToString(type)}
     const beforeCursor = doc.text.slice(0, offset);
     const dotMatch = beforeCursor.match(/(\w+)\s*\.\s*$/);
     if (dotMatch) {
-      const varName = dotMatch[1];
-      const fieldItems = getRecordFieldCompletions(doc, varName);
-      items.push(...fieldItems);
+      const name = dotMatch[1];
+      if (name[0] && name[0] === name[0].toUpperCase() && /[A-Z]/.test(name[0])) {
+        const moduleItems = getModuleMemberCompletions(doc, name);
+        if (moduleItems.length > 0) {
+          items.push(...moduleItems);
+        } else {
+          const fieldItems = getRecordFieldCompletions(doc, name);
+          items.push(...fieldItems);
+        }
+      } else {
+        const fieldItems = getRecordFieldCompletions(doc, name);
+        items.push(...fieldItems);
+      }
     } else {
       items.push(...getTypeEnvCompletions(doc));
       items.push(...getConstructorCompletions(doc));
       items.push(...getKeywordCompletions());
+      items.push(...getModuleCompletions(doc));
     }
     return { isIncomplete: false, items };
   };
@@ -3984,6 +5491,10 @@ ${def.name}: ${typeToString(type)}
       "when",
       "end",
       "type",
+      "module",
+      "use",
+      "as",
+      "and",
       "true",
       "false"
     ];
@@ -3991,6 +5502,40 @@ ${def.name}: ${typeToString(type)}
       label: kw,
       kind: COMPLETION_KIND_KEYWORD
     }));
+  };
+  const getModuleCompletions = (doc) => {
+    const items = [];
+    for (const moduleName of doc.moduleEnv.keys()) {
+      items.push({
+        label: moduleName,
+        kind: COMPLETION_KIND_MODULE,
+        detail: "module"
+      });
+    }
+    return items;
+  };
+  const getModuleMemberCompletions = (doc, moduleName) => {
+    const items = [];
+    const moduleInfo = doc.moduleEnv.get(moduleName);
+    if (!moduleInfo)
+      return items;
+    for (const [name, scheme2] of moduleInfo.typeEnv) {
+      items.push({
+        label: name,
+        kind: COMPLETION_KIND_FUNCTION,
+        detail: typeToString(scheme2.type)
+      });
+    }
+    for (const [typeName, constructors] of moduleInfo.registry) {
+      for (const conName of constructors) {
+        items.push({
+          label: conName,
+          kind: COMPLETION_KIND_CONSTRUCTOR,
+          detail: typeName
+        });
+      }
+    }
+    return items;
   };
   const handleEvaluate = (params) => {
     const doc = documents.get(params.textDocument.uri);
@@ -4015,13 +5560,55 @@ ${def.name}: ${typeToString(type)}
       return { success: false, error: err.message };
     }
   };
+  const handleCompile = (params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc || !doc.program) {
+      return { success: false, error: "No document found" };
+    }
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
+      return { success: false, error: "Cannot compile: document has errors" };
+    }
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
+    if (!expr) {
+      return { success: false, error: "No expression to compile" };
+    }
+    try {
+      const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols, doc.moduleEnv);
+      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+      const { code } = generateJS(ir, doc.constructorNames);
+      return { success: true, code };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  };
+  const handleEmitIR = (params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc || !doc.program) {
+      return { success: false, error: "No document found" };
+    }
+    if (doc.diagnostics.some((d) => d.severity === SEVERITY_ERROR)) {
+      return { success: false, error: "Cannot emit IR: document has errors" };
+    }
+    const expr = programToExpr(doc.program, doc.allModules, doc.allUses);
+    if (!expr) {
+      return { success: false, error: "No expression to compile" };
+    }
+    try {
+      const checkResult = check(doc.typeEnv, doc.registry, expr, doc.symbols, doc.moduleEnv);
+      const ir = lowerToIR(expr, doc.typeEnv, checkResult);
+      const irText = printIR(ir);
+      return { success: true, ir: irText };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  };
   const analyzeDocument = (uri, version, text2) => {
     const lspDiagnostics = [];
     const parseResult = parse(text2);
     for (const diag of parseResult.diagnostics) {
       lspDiagnostics.push(convertDiagnostic(text2, diag));
     }
-    const { typeEnv, registry, constructorNames, allModules, allUses } = processProgram(parseResult.program);
+    const { typeEnv, registry, constructorNames, allModules, allUses, moduleEnv } = processProgram(parseResult.program);
     const expr = programToExpr(parseResult.program, allModules, allUses);
     let symbols = null;
     let types = null;
@@ -4031,7 +5618,7 @@ ${def.name}: ${typeToString(type)}
       for (const diag of bindResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
       }
-      const checkResult = check(typeEnv, registry, expr, symbols);
+      const checkResult = check(typeEnv, registry, expr, symbols, moduleEnv);
       types = checkResult.types;
       for (const diag of checkResult.diagnostics) {
         lspDiagnostics.push(convertDiagnostic(text2, diag));
@@ -4049,7 +5636,8 @@ ${def.name}: ${typeToString(type)}
       registry,
       constructorNames,
       allModules,
-      allUses
+      allUses,
+      moduleEnv
     };
   };
   const convertDiagnostic = (source, diag) => {
