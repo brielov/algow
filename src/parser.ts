@@ -685,9 +685,26 @@ const parseTypeAtom = (state: ParserState): ast.TypeExpr | null => {
 
   if (at(state, TokenKind.LParen)) {
     advance(state);
-    const inner = parseType(state); // Use parseType to handle function types inside parens
+    const first = parseType(state);
+    if (!first) {
+      expect(state, TokenKind.RParen, "expected ')' after type");
+      return null;
+    }
+
+    // Check for tuple type: (a, b, ...)
+    if (at(state, TokenKind.Comma)) {
+      const elements: ast.TypeExpr[] = [first];
+      while (at(state, TokenKind.Comma)) {
+        advance(state); // ,
+        const elem = parseType(state);
+        if (elem) elements.push(elem);
+      }
+      expect(state, TokenKind.RParen, "expected ')' after tuple type");
+      return ast.tytuple(elements);
+    }
+
     expect(state, TokenKind.RParen, "expected ')' after type");
-    return inner;
+    return first;
   }
 
   return null;
@@ -704,9 +721,26 @@ const parseTypeAtomSimple = (state: ParserState): ast.TypeExpr | null => {
 
   if (at(state, TokenKind.LParen)) {
     advance(state);
-    const inner = parseType(state); // Use parseType to handle function types inside parens
+    const first = parseType(state);
+    if (!first) {
+      expect(state, TokenKind.RParen, "expected ')' after type");
+      return null;
+    }
+
+    // Check for tuple type: (a, b, ...)
+    if (at(state, TokenKind.Comma)) {
+      const elements: ast.TypeExpr[] = [first];
+      while (at(state, TokenKind.Comma)) {
+        advance(state); // ,
+        const elem = parseType(state);
+        if (elem) elements.push(elem);
+      }
+      expect(state, TokenKind.RParen, "expected ')' after tuple type");
+      return ast.tytuple(elements);
+    }
+
     expect(state, TokenKind.RParen, "expected ')' after type");
-    return inner;
+    return first;
   }
 
   return null;

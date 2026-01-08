@@ -868,6 +868,80 @@ export const debugModule = ast.moduleDecl(
   ],
 );
 
+// =============================================================================
+// MAP MODULE (String keys only, backed by JS Map)
+// =============================================================================
+
+// Map is an opaque type - no constructors exposed
+const tMap = (v: ast.TypeExpr) => ast.tyapp(ast.tycon("Map"), v);
+
+export const mapModule = ast.moduleDecl(
+  "Map",
+  [],
+  [],
+  [
+    // empty : Map v
+    ast.foreignBinding("empty", tMap(tvar("v"))),
+    // singleton : String -> v -> Map v
+    ast.foreignBinding("singleton", fn(tString, fn(tvar("v"), tMap(tvar("v"))))),
+    // insert : String -> v -> Map v -> Map v
+    ast.foreignBinding("insert", fn(tString, fn(tvar("v"), fn(tMap(tvar("v")), tMap(tvar("v")))))),
+    // lookup : String -> Map v -> Maybe v
+    ast.foreignBinding("lookup", fn(tString, fn(tMap(tvar("v")), tMaybe(tvar("v"))))),
+    // delete : String -> Map v -> Map v
+    ast.foreignBinding("delete", fn(tString, fn(tMap(tvar("v")), tMap(tvar("v"))))),
+    // member : String -> Map v -> Bool
+    ast.foreignBinding("member", fn(tString, fn(tMap(tvar("v")), tBool))),
+    // size : Map v -> Int
+    ast.foreignBinding("size", fn(tMap(tvar("v")), tInt)),
+    // keys : Map v -> List String
+    ast.foreignBinding("keys", fn(tMap(tvar("v")), tList(tString))),
+    // values : Map v -> List v
+    ast.foreignBinding("values", fn(tMap(tvar("v")), tList(tvar("v")))),
+    // toList : Map v -> List (String, v)
+    ast.foreignBinding("toList", fn(tMap(tvar("v")), tList(ast.tytuple([tString, tvar("v")])))),
+    // fromList : List (String, v) -> Map v
+    ast.foreignBinding("fromList", fn(tList(ast.tytuple([tString, tvar("v")])), tMap(tvar("v")))),
+  ],
+);
+
+// =============================================================================
+// SET MODULE (String values only, backed by JS Set)
+// =============================================================================
+
+// Set is an opaque type - no constructors exposed
+const tSet = ast.tycon("Set");
+
+export const setModule = ast.moduleDecl(
+  "Set",
+  [],
+  [],
+  [
+    // empty : Set
+    ast.foreignBinding("empty", tSet),
+    // singleton : String -> Set
+    ast.foreignBinding("singleton", fn(tString, tSet)),
+    // insert : String -> Set -> Set
+    ast.foreignBinding("insert", fn(tString, fn(tSet, tSet))),
+    // delete : String -> Set -> Set
+    ast.foreignBinding("delete", fn(tString, fn(tSet, tSet))),
+    // member : String -> Set -> Bool
+    ast.foreignBinding("member", fn(tString, fn(tSet, tBool))),
+    // size : Set -> Int
+    ast.foreignBinding("size", fn(tSet, tInt)),
+    // toList : Set -> List String
+    ast.foreignBinding("toList", fn(tSet, tList(tString))),
+    // fromList : List String -> Set
+    ast.foreignBinding("fromList", fn(tList(tString), tSet)),
+    // union : Set -> Set -> Set
+    ast.foreignBinding("union", fn(tSet, fn(tSet, tSet))),
+    // intersect : Set -> Set -> Set
+    ast.foreignBinding("intersect", fn(tSet, fn(tSet, tSet))),
+    // difference : Set -> Set -> Set
+    ast.foreignBinding("difference", fn(tSet, fn(tSet, tSet))),
+  ],
+);
+
 /** All prelude modules */
 export const modules = [
   maybeModule,
@@ -882,4 +956,6 @@ export const modules = [
   boolModule,
   ioModule,
   debugModule,
+  mapModule,
+  setModule,
 ] as const;

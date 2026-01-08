@@ -276,8 +276,8 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      // Direct call since f is a known function (not a constructor)
-      expect(result.code).toContain("f(1)");
+      // Always use $apply to handle both functions and partial constructor applications
+      expect(result.code).toContain("$apply(f, 1)");
     });
   });
 
@@ -625,7 +625,8 @@ describe("Foreign Functions", () => {
     const body = ir.irAtomExpr(ir.irVar("_t", intType));
     const expr = ir.irLet("_t", binding, body);
     const result = generateJS(expr, []);
-    expect(result.code).toContain('$foreign["String"]["length"]("hello")');
+    // Always use $apply for consistent handling of all applications
+    expect(result.code).toContain('$apply($foreign["String"]["length"], "hello")');
   });
 
   it("generates curried foreign function applications", () => {
@@ -641,7 +642,8 @@ describe("Foreign Functions", () => {
     const expr = ir.irLet("_t1", binding1, body1);
 
     const result = generateJS(expr, []);
-    expect(result.code).toContain('$foreign["String"]["slice"]("hello")');
+    // Always use $apply for consistent handling of all applications
+    expect(result.code).toContain('$apply($foreign["String"]["slice"], "hello")');
   });
 
   it("includes $foreign in runtime", () => {

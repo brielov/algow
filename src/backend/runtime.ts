@@ -451,6 +451,126 @@ const $foreign = {
     // panic : String -> a (crashes with message)
     panic: (msg) => { throw new Error(msg); },
   },
+
+  // ==========================================================================
+  // Map Module (String keys only)
+  // ==========================================================================
+  Map: {
+    // empty : Map v
+    empty: new Map(),
+
+    // singleton : String -> v -> Map v
+    singleton: (k) => (v) => new Map([[k, v]]),
+
+    // insert : String -> v -> Map v -> Map v
+    insert: (k) => (v) => (m) => new Map(m).set(k, v),
+
+    // lookup : String -> Map v -> Maybe v
+    lookup: (k) => (m) => {
+      if (m.has(k)) return $con("Just", m.get(k));
+      return $con("Nothing");
+    },
+
+    // delete : String -> Map v -> Map v
+    delete: (k) => (m) => { const m2 = new Map(m); m2.delete(k); return m2; },
+
+    // member : String -> Map v -> Bool
+    member: (k) => (m) => m.has(k),
+
+    // size : Map v -> Int
+    size: (m) => m.size,
+
+    // keys : Map v -> List String
+    keys: (m) => {
+      let result = $con("Nil");
+      for (const k of [...m.keys()].reverse()) {
+        result = $con("Cons", k, result);
+      }
+      return result;
+    },
+
+    // values : Map v -> List v
+    values: (m) => {
+      let result = $con("Nil");
+      for (const v of [...m.values()].reverse()) {
+        result = $con("Cons", v, result);
+      }
+      return result;
+    },
+
+    // toList : Map v -> List (String, v)
+    toList: (m) => {
+      let result = $con("Nil");
+      for (const [k, v] of [...m.entries()].reverse()) {
+        result = $con("Cons", [k, v], result);
+      }
+      return result;
+    },
+
+    // fromList : List (String, v) -> Map v
+    fromList: (list) => {
+      const m = new Map();
+      let current = list;
+      while (current.$tag === "Cons") {
+        const [k, v] = current.$args[0];
+        m.set(k, v);
+        current = current.$args[1];
+      }
+      return m;
+    },
+  },
+
+  // ==========================================================================
+  // Set Module (String values only)
+  // ==========================================================================
+  Set: {
+    // empty : Set
+    empty: new Set(),
+
+    // singleton : String -> Set
+    singleton: (v) => new Set([v]),
+
+    // insert : String -> Set -> Set
+    insert: (v) => (s) => new Set(s).add(v),
+
+    // delete : String -> Set -> Set
+    delete: (v) => (s) => { const s2 = new Set(s); s2.delete(v); return s2; },
+
+    // member : String -> Set -> Bool
+    member: (v) => (s) => s.has(v),
+
+    // size : Set -> Int
+    size: (s) => s.size,
+
+    // toList : Set -> List String
+    toList: (s) => {
+      let result = $con("Nil");
+      for (const v of [...s].reverse()) {
+        result = $con("Cons", v, result);
+      }
+      return result;
+    },
+
+    // fromList : List String -> Set
+    fromList: (list) => {
+      const s = new Set();
+      let current = list;
+      while (current.$tag === "Cons") {
+        s.add(current.$args[0]);
+        current = current.$args[1];
+      }
+      return s;
+    },
+
+    // union : Set -> Set -> Set
+    union: (s1) => (s2) => s1.union(s2),
+
+    // intersect : Set -> Set -> Set
+    intersect: (s1) => (s2) => s1.intersection(s2),
+
+    // difference : Set -> Set -> Set
+    difference: (s1) => (s2) => s1.difference(s2),
+  },
 };
 
 `;

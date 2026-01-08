@@ -2407,7 +2407,11 @@ describe("Type Inference", () => {
         [],
         [ast.recBinding("process", ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))))],
       );
-      const modB = ast.moduleDecl("B", [], [ast.recBinding("process", ast.abs("s", ast.var_("s")))]);
+      const modB = ast.moduleDecl(
+        "B",
+        [],
+        [ast.recBinding("process", ast.abs("s", ast.var_("s")))],
+      );
 
       const infoA = processModule(modA);
       const infoB = processModule(modB);

@@ -2353,6 +2353,8 @@ const typeExprToType = (texpr: ast.TypeExpr): Type => {
       return tfun(typeExprToType(texpr.param), typeExprToType(texpr.ret));
     case "TyVar":
       return tvar(texpr.name);
+    case "TyTuple":
+      return ttuple(texpr.elements.map(typeExprToType));
   }
 };
 
@@ -2395,6 +2397,8 @@ const instantiateTypeExpr = (ctx: CheckContext, texpr: ast.TypeExpr): Type => {
         }
         return fresh;
       }
+      case "TyTuple":
+        return ttuple(t.elements.map(convert));
     }
   };
 

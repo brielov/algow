@@ -26,7 +26,9 @@ export type Value =
   | VCon
   | VTuple
   | VRecord
-  | VRef;
+  | VRef
+  | VMap
+  | VSet;
 
 /** Foreign function - a native JS function */
 export type VForeign = {
@@ -97,6 +99,18 @@ export type VRef = {
   value: Value | null; // Intentionally mutable - filled after closure creation
 };
 
+/** Map value (string keys to values) */
+export type VMap = {
+  readonly kind: "VMap";
+  readonly value: Map<string, Value>;
+};
+
+/** Set value (string values) */
+export type VSet = {
+  readonly kind: "VSet";
+  readonly value: Set<string>;
+};
+
 // =============================================================================
 // Value Constructors
 // =============================================================================
@@ -121,6 +135,8 @@ export const vtuple = (elements: readonly Value[]): Value => ({ kind: "VTuple", 
 export const vrecord = (fields: ReadonlyMap<string, Value>): Value => ({ kind: "VRecord", fields });
 export const vref = (): VRef => ({ kind: "VRef", value: null });
 export const vforeign = (fn: (arg: Value) => Value): VForeign => ({ kind: "VForeign", fn });
+export const vmap = (value: Map<string, Value>): VMap => ({ kind: "VMap", value });
+export const vset = (value: Set<string>): VSet => ({ kind: "VSet", value });
 
 // =============================================================================
 // Foreign Function Registry
@@ -415,6 +431,112 @@ const foreignRegistry: Record<string, Record<string, Value>> = {
     ),
     panic: vforeign((msg) => {
       throw new RuntimeError((msg as VStr).value);
+    }),
+  },
+  Map: {
+    empty: vmap(new Map()),
+    singleton: vforeign(curry2((k, v) => vmap(new Map([[(k as VStr).value, v]])))),
+    insert: vforeign(
+      curry3((k, v, m) => {
+        const newMap = new Map((m as VMap).value);
+        newMap.set((k as VStr).value, v);
+        return vmap(newMap);
+      }),
+    ),
+    lookup: vforeign(
+      curry2((k, m) => {
+        const key = (k as VStr).value;
+        const map = (m as VMap).value;
+        if (map.has(key)) return vcon("Just", [map.get(key)!]);
+        return vcon("Nothing");
+      }),
+    ),
+    delete: vforeign(
+      curry2((k, m) => {
+        const newMap = new Map((m as VMap).value);
+        newMap.delete((k as VStr).value);
+        return vmap(newMap);
+      }),
+    ),
+    member: vforeign(curry2((k, m) => vbool((m as VMap).value.has((k as VStr).value)))),
+    size: vforeign((m) => vint((m as VMap).value.size)),
+    keys: vforeign((m) => {
+      let result: Value = vcon("Nil");
+      const keys = Array.from((m as VMap).value.keys()).reverse();
+      for (const key of keys) {
+        result = vcon("Cons", [vstr(key), result]);
+      }
+      return result;
+    }),
+    values: vforeign((m) => {
+      let result: Value = vcon("Nil");
+      const values = Array.from((m as VMap).value.values()).reverse();
+      for (const val of values) {
+        result = vcon("Cons", [val, result]);
+      }
+      return result;
+    }),
+    toList: vforeign((m) => {
+      let result: Value = vcon("Nil");
+      const entries = Array.from((m as VMap).value.entries()).reverse();
+      for (const [k, v] of entries) {
+        result = vcon("Cons", [vtuple([vstr(k), v]), result]);
+      }
+      return result;
+    }),
+    fromList: vforeign((list) => {
+      const map = new Map<string, Value>();
+      let current = list as VCon;
+      while (current.name === "Cons") {
+        const tuple = current.args[0] as VTuple;
+        map.set((tuple.elements[0] as VStr).value, tuple.elements[1]!);
+        current = current.args[1] as VCon;
+      }
+      return vmap(map);
+    }),
+  },
+  Set: {
+    empty: vset(new Set()),
+    singleton: vforeign((v) => vset(new Set([(v as VStr).value]))),
+    insert: vforeign(
+      curry2((v, s) => {
+        const newSet = new Set((s as VSet).value);
+        newSet.add((v as VStr).value);
+        return vset(newSet);
+      }),
+    ),
+    delete: vforeign(
+      curry2((v, s) => {
+        const newSet = new Set((s as VSet).value);
+        newSet.delete((v as VStr).value);
+        return vset(newSet);
+      }),
+    ),
+    member: vforeign(curry2((v, s) => vbool((s as VSet).value.has((v as VStr).value)))),
+    size: vforeign((s) => vint((s as VSet).value.size)),
+    union: vforeign(curry2((s1, s2) => vset((s1 as VSet).value.union((s2 as VSet).value)))),
+    intersect: vforeign(
+      curry2((s1, s2) => vset((s1 as VSet).value.intersection((s2 as VSet).value))),
+    ),
+    difference: vforeign(
+      curry2((s1, s2) => vset((s1 as VSet).value.difference((s2 as VSet).value))),
+    ),
+    toList: vforeign((s) => {
+      let result: Value = vcon("Nil");
+      const values = Array.from((s as VSet).value).reverse();
+      for (const v of values) {
+        result = vcon("Cons", [vstr(v), result]);
+      }
+      return result;
+    }),
+    fromList: vforeign((list) => {
+      const set = new Set<string>();
+      let current = list as VCon;
+      while (current.name === "Cons") {
+        set.add((current.args[0] as VStr).value);
+        current = current.args[1] as VCon;
+      }
+      return vset(set);
     }),
   },
 };
@@ -720,7 +842,9 @@ const valuesEqual = (a: Value, b: Value): boolean => {
     case "VClosure":
     case "VForeign":
     case "VRef":
-      // Functions and refs are not comparable
+    case "VMap":
+    case "VSet":
+      // Functions, refs, maps, and sets are not comparable
       return false;
   }
 };
@@ -930,6 +1054,16 @@ export const valueToString = (value: Value): string => {
     }
     case "VRef":
       return value.value ? valueToString(value.value) : "<uninitialized>";
+    case "VMap": {
+      const entries = [...value.value.entries()]
+        .map(([k, v]) => `"${k}": ${valueToString(v)}`)
+        .join(", ");
+      return `Map { ${entries} }`;
+    }
+    case "VSet": {
+      const members = [...value.value].map((v) => `"${v}"`).join(", ");
+      return `Set { ${members} }`;
+    }
   }
 };
 

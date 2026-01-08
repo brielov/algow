@@ -1,3 +1,11 @@
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined")
+    return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+
 // src/ast.ts
 var int = (value, span) => ({ kind: "Int", value, span });
 var float = (value, span) => ({ kind: "Float", value, span });
@@ -1992,8 +2000,22 @@ var vtuple = (elements) => ({ kind: "VTuple", elements });
 var vrecord = (fields) => ({ kind: "VRecord", fields });
 var vref = () => ({ kind: "VRef", value: null });
 var vforeign = (fn) => ({ kind: "VForeign", fn });
+var vmap = (value) => ({ kind: "VMap", value });
+var vset = (value) => ({ kind: "VSet", value });
 var curry2 = (f) => (a) => vforeign((b) => f(a, b));
 var curry3 = (f) => (a) => vforeign((b) => vforeign((c) => f(a, b, c)));
+var toIOError = (err, path) => {
+  const code = err.code;
+  if (code === "ENOENT")
+    return vcon("FileNotFound", [vstr(path)]);
+  if (code === "EACCES" || code === "EPERM")
+    return vcon("PermissionDenied", [vstr(path)]);
+  if (code === "EISDIR")
+    return vcon("IsDirectory", [vstr(path)]);
+  if (code === "EEXIST")
+    return vcon("AlreadyExists", [vstr(path)]);
+  return vcon("UnknownError", [vstr(err.message ?? "Unknown error")]);
+};
 var foreignRegistry = {
   String: {
     length: vforeign((s) => vint(s.value.length)),
@@ -2088,6 +2110,266 @@ var foreignRegistry = {
     }),
     toUpper: vforeign((c) => vchar(c.value.toUpperCase())),
     toLower: vforeign((c) => vchar(c.value.toLowerCase()))
+  },
+  Int: {
+    add: vforeign(curry2((a, b) => vint(a.value + b.value))),
+    sub: vforeign(curry2((a, b) => vint(a.value - b.value))),
+    mul: vforeign(curry2((a, b) => vint(a.value * b.value))),
+    div: vforeign(curry2((a, b) => vint(Math.trunc(a.value / b.value)))),
+    mod: vforeign(curry2((a, b) => vint(a.value % b.value))),
+    neg: vforeign((a) => vint(-a.value)),
+    abs: vforeign((a) => vint(Math.abs(a.value))),
+    eq: vforeign(curry2((a, b) => vbool(a.value === b.value))),
+    lt: vforeign(curry2((a, b) => vbool(a.value < b.value))),
+    le: vforeign(curry2((a, b) => vbool(a.value <= b.value))),
+    gt: vforeign(curry2((a, b) => vbool(a.value > b.value))),
+    ge: vforeign(curry2((a, b) => vbool(a.value >= b.value))),
+    toFloat: vforeign((a) => vfloat(a.value)),
+    toString: vforeign((a) => vstr(String(a.value))),
+    fromString: vforeign((s) => {
+      const n = parseInt(s.value, 10);
+      if (Number.isNaN(n))
+        return vcon("Nothing");
+      return vcon("Just", [vint(n)]);
+    })
+  },
+  Float: {
+    add: vforeign(curry2((a, b) => vfloat(a.value + b.value))),
+    sub: vforeign(curry2((a, b) => vfloat(a.value - b.value))),
+    mul: vforeign(curry2((a, b) => vfloat(a.value * b.value))),
+    div: vforeign(curry2((a, b) => vfloat(a.value / b.value))),
+    neg: vforeign((a) => vfloat(-a.value)),
+    abs: vforeign((a) => vfloat(Math.abs(a.value))),
+    eq: vforeign(curry2((a, b) => vbool(a.value === b.value))),
+    lt: vforeign(curry2((a, b) => vbool(a.value < b.value))),
+    le: vforeign(curry2((a, b) => vbool(a.value <= b.value))),
+    gt: vforeign(curry2((a, b) => vbool(a.value > b.value))),
+    ge: vforeign(curry2((a, b) => vbool(a.value >= b.value))),
+    floor: vforeign((a) => vint(Math.floor(a.value))),
+    ceil: vforeign((a) => vint(Math.ceil(a.value))),
+    round: vforeign((a) => vint(Math.round(a.value))),
+    sqrt: vforeign((a) => vfloat(Math.sqrt(a.value))),
+    pow: vforeign(curry2((a, b) => vfloat(Math.pow(a.value, b.value)))),
+    sin: vforeign((a) => vfloat(Math.sin(a.value))),
+    cos: vforeign((a) => vfloat(Math.cos(a.value))),
+    tan: vforeign((a) => vfloat(Math.tan(a.value))),
+    log: vforeign((a) => vfloat(Math.log(a.value))),
+    exp: vforeign((a) => vfloat(Math.exp(a.value))),
+    toString: vforeign((a) => vstr(String(a.value))),
+    fromString: vforeign((s) => {
+      const n = parseFloat(s.value);
+      if (Number.isNaN(n))
+        return vcon("Nothing");
+      return vcon("Just", [vfloat(n)]);
+    })
+  },
+  IO: {
+    print: vforeign((s) => {
+      process.stdout.write(s.value);
+      return vcon("Unit");
+    }),
+    printLine: vforeign((s) => {
+      console.log(s.value);
+      return vcon("Unit");
+    }),
+    readLine: vforeign((_) => {
+      try {
+        const fs = (()=>{throw new Error("Cannot require module "+"fs");})();
+        const buf = Buffer.alloc(1024);
+        const n = fs.readSync(0, buf, 0, buf.length);
+        return vcon("Right", [vstr(buf.toString("utf8", 0, n).replace(/\r?\n$/, ""))]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err, "<stdin>")]);
+      }
+    }),
+    readFile: vforeign((path) => {
+      const pathStr = path.value;
+      try {
+        const fs = (()=>{throw new Error("Cannot require module "+"fs");})();
+        return vcon("Right", [vstr(fs.readFileSync(pathStr, "utf8"))]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err, pathStr)]);
+      }
+    }),
+    writeFile: vforeign(curry2((path, content) => {
+      const pathStr = path.value;
+      try {
+        const fs = (()=>{throw new Error("Cannot require module "+"fs");})();
+        fs.writeFileSync(pathStr, content.value, "utf8");
+        return vcon("Right", [vcon("Unit")]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err, pathStr)]);
+      }
+    })),
+    appendFile: vforeign(curry2((path, content) => {
+      const pathStr = path.value;
+      try {
+        const fs = (()=>{throw new Error("Cannot require module "+"fs");})();
+        fs.appendFileSync(pathStr, content.value, "utf8");
+        return vcon("Right", [vcon("Unit")]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err, pathStr)]);
+      }
+    })),
+    fileExists: vforeign((path) => {
+      const fs = (() => ({}));
+      return vbool(fs.existsSync(path.value));
+    }),
+    deleteFile: vforeign((path) => {
+      const pathStr = path.value;
+      try {
+        const fs = (()=>{throw new Error("Cannot require module "+"fs");})();
+        fs.unlinkSync(pathStr);
+        return vcon("Right", [vcon("Unit")]);
+      } catch (err) {
+        return vcon("Left", [toIOError(err, pathStr)]);
+      }
+    }),
+    args: vforeign((_) => {
+      const args = process.argv.slice(2);
+      let result = vcon("Nil");
+      for (let i = args.length - 1;i >= 0; i--) {
+        result = vcon("Cons", [vstr(args[i]), result]);
+      }
+      return result;
+    }),
+    exit: vforeign((code) => {
+      process.exit(code.value);
+    }),
+    getEnv: vforeign((name) => {
+      const value = process.env[name.value];
+      if (value === undefined)
+        return vcon("Nothing");
+      return vcon("Just", [vstr(value)]);
+    })
+  },
+  Debug: {
+    log: vforeign((x) => {
+      console.log(valueToString(x));
+      return x;
+    }),
+    trace: vforeign(curry2((label, x) => {
+      console.log(`${label.value}:`, valueToString(x));
+      return x;
+    })),
+    panic: vforeign((msg) => {
+      throw new RuntimeError(msg.value);
+    })
+  },
+  Map: {
+    empty: vmap(new Map),
+    singleton: vforeign(curry2((k, v) => vmap(new Map([[k.value, v]])))),
+    insert: vforeign(curry3((k, v, m) => {
+      const newMap = new Map(m.value);
+      newMap.set(k.value, v);
+      return vmap(newMap);
+    })),
+    lookup: vforeign(curry2((k, m) => {
+      const key = k.value;
+      const map = m.value;
+      if (map.has(key))
+        return vcon("Just", [map.get(key)]);
+      return vcon("Nothing");
+    })),
+    delete: vforeign(curry2((k, m) => {
+      const newMap = new Map(m.value);
+      newMap.delete(k.value);
+      return vmap(newMap);
+    })),
+    member: vforeign(curry2((k, m) => vbool(m.value.has(k.value)))),
+    size: vforeign((m) => vint(m.value.size)),
+    keys: vforeign((m) => {
+      let result = vcon("Nil");
+      const keys = Array.from(m.value.keys()).reverse();
+      for (const key of keys) {
+        result = vcon("Cons", [vstr(key), result]);
+      }
+      return result;
+    }),
+    values: vforeign((m) => {
+      let result = vcon("Nil");
+      const values = Array.from(m.value.values()).reverse();
+      for (const val of values) {
+        result = vcon("Cons", [val, result]);
+      }
+      return result;
+    }),
+    toList: vforeign((m) => {
+      let result = vcon("Nil");
+      const entries = Array.from(m.value.entries()).reverse();
+      for (const [k, v] of entries) {
+        result = vcon("Cons", [vtuple([vstr(k), v]), result]);
+      }
+      return result;
+    }),
+    fromList: vforeign((list) => {
+      const map = new Map;
+      let current = list;
+      while (current.name === "Cons") {
+        const tuple2 = current.args[0];
+        map.set(tuple2.elements[0].value, tuple2.elements[1]);
+        current = current.args[1];
+      }
+      return vmap(map);
+    })
+  },
+  Set: {
+    empty: vset(new Set),
+    singleton: vforeign((v) => vset(new Set([v.value]))),
+    insert: vforeign(curry2((v, s) => {
+      const newSet = new Set(s.value);
+      newSet.add(v.value);
+      return vset(newSet);
+    })),
+    delete: vforeign(curry2((v, s) => {
+      const newSet = new Set(s.value);
+      newSet.delete(v.value);
+      return vset(newSet);
+    })),
+    member: vforeign(curry2((v, s) => vbool(s.value.has(v.value)))),
+    size: vforeign((s) => vint(s.value.size)),
+    union: vforeign(curry2((s1, s2) => {
+      const result = new Set(s1.value);
+      for (const v of s2.value)
+        result.add(v);
+      return vset(result);
+    })),
+    intersect: vforeign(curry2((s1, s2) => {
+      const set1 = s1.value;
+      const set2 = s2.value;
+      const result = new Set;
+      for (const v of set1) {
+        if (set2.has(v))
+          result.add(v);
+      }
+      return vset(result);
+    })),
+    difference: vforeign(curry2((s1, s2) => {
+      const set2 = s2.value;
+      const result = new Set;
+      for (const v of s1.value) {
+        if (!set2.has(v))
+          result.add(v);
+      }
+      return vset(result);
+    })),
+    toList: vforeign((s) => {
+      let result = vcon("Nil");
+      const values = Array.from(s.value).reverse();
+      for (const v of values) {
+        result = vcon("Cons", [vstr(v), result]);
+      }
+      return result;
+    }),
+    fromList: vforeign((list) => {
+      const set = new Set;
+      let current = list;
+      while (current.name === "Cons") {
+        set.add(current.args[0].value);
+        current = current.args[1];
+      }
+      return vset(set);
+    })
   }
 };
 var emptyEnv = new Map;
@@ -2195,13 +2477,14 @@ var evaluate = (env, expr) => {
           return foreignFn;
         }
       }
-      const value = env.get(expr.member);
+      const qualifiedName = `${expr.moduleName}.${expr.member}`;
+      const value = env.get(qualifiedName);
       if (!value) {
-        throw new RuntimeError(`Unknown qualified access: ${expr.moduleName}.${expr.member}`);
+        throw new RuntimeError(`Unknown qualified access: ${qualifiedName}`);
       }
       if (value.kind === "VRef") {
         if (value.value === null) {
-          throw new RuntimeError(`Uninitialized recursive binding: ${expr.member}`);
+          throw new RuntimeError(`Uninitialized recursive binding: ${qualifiedName}`);
         }
         return value.value;
       }
@@ -2332,6 +2615,8 @@ var valuesEqual = (a, b) => {
     case "VClosure":
     case "VForeign":
     case "VRef":
+    case "VMap":
+    case "VSet":
       return false;
   }
 };
@@ -2493,6 +2778,14 @@ var valueToString = (value) => {
     }
     case "VRef":
       return value.value ? valueToString(value.value) : "<uninitialized>";
+    case "VMap": {
+      const entries = [...value.value.entries()].map(([k, v]) => `"${k}": ${valueToString(v)}`).join(", ");
+      return `Map { ${entries} }`;
+    }
+    case "VSet": {
+      const members = [...value.value].map((v) => `"${v}"`).join(", ");
+      return `Set { ${members} }`;
+    }
   }
 };
 var createConstructorEnv = (constructorNames) => {
@@ -3979,19 +4272,22 @@ var programToExpr = (program, modules = [], uses = []) => {
       expr = let_(binding.name, value, expr, undefined, binding.nameSpan, binding.returnType);
     }
   }
-  const importedBindings = [];
   const seenModules = new Set;
   for (const use of uses) {
     if (seenModules.has(use.moduleName))
       continue;
     seenModules.add(use.moduleName);
     const mod = modules.find((m) => m.name === use.moduleName);
-    if (!mod)
+    if (!mod || mod.bindings.length === 0)
       continue;
-    importedBindings.push(...mod.bindings);
-  }
-  if (importedBindings.length > 0) {
-    expr = letRec(importedBindings, expr);
+    const qualifiedBindings = [];
+    for (const binding of mod.bindings) {
+      qualifiedBindings.push(recBinding(`${mod.name}.${binding.name}`, var_(binding.name), binding.nameSpan, binding.returnType));
+    }
+    if (qualifiedBindings.length > 0) {
+      expr = letRec(qualifiedBindings, expr);
+    }
+    expr = letRec(mod.bindings, expr);
   }
   return expr;
 };
@@ -4002,6 +4298,14 @@ var either = dataDecl("Either", ["a", "b"], [conDecl("Left", [tyvar("a")]), conD
 var list = dataDecl("List", ["a"], [
   conDecl("Nil", []),
   conDecl("Cons", [tyvar("a"), tyapp(tycon("List"), tyvar("a"))])
+]);
+var unit = dataDecl("Unit", [], [conDecl("Unit", [])]);
+var ioError = dataDecl("IOError", [], [
+  conDecl("FileNotFound", [tycon("string")]),
+  conDecl("PermissionDenied", [tycon("string")]),
+  conDecl("IsDirectory", [tycon("string")]),
+  conDecl("AlreadyExists", [tycon("string")]),
+  conDecl("UnknownError", [tycon("string")])
 ]);
 var mapExpr = abs("f", abs("xs", match(var_("xs"), [
   case_(pcon("Nil", []), var_("Nil")),
@@ -4036,13 +4340,114 @@ var foldlExpr = abs("f", abs("z", abs("xs", match(var_("xs"), [
   case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(app(var_("foldl"), var_("f")), app(app(var_("f"), var_("z")), var_("x"))), var_("rest")))
 ]))));
 var reverseExpr = abs("xs", app(app(app(var_("foldl"), abs("acc", abs("x", app(app(var_("Cons"), var_("x")), var_("acc"))))), var_("Nil")), var_("xs")));
-var concatExpr = abs("xs", abs("ys", app(app(app(var_("foldr"), var_("Cons")), var_("ys")), var_("xs"))));
+var appendExpr = abs("xs", abs("ys", app(app(app(var_("foldr"), var_("Cons")), var_("ys")), var_("xs"))));
+var concatExpr = abs("xss", match(var_("xss"), [
+  case_(pcon("Nil", []), var_("Nil")),
+  case_(pcon("Cons", [pvar("xs"), pvar("rest")]), app(app(app(var_("foldr"), var_("Cons")), app(var_("concat"), var_("rest"))), var_("xs")))
+]));
+var takeExpr = abs("n", abs("xs", if_(binOp("<=", var_("n"), int(0)), var_("Nil"), match(var_("xs"), [
+  case_(pcon("Nil", []), var_("Nil")),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), app(app(var_("Cons"), var_("x")), app(app(var_("take"), binOp("-", var_("n"), int(1))), var_("rest"))))
+]))));
+var dropExpr = abs("n", abs("xs", if_(binOp("<=", var_("n"), int(0)), var_("xs"), match(var_("xs"), [
+  case_(pcon("Nil", []), var_("Nil")),
+  case_(pcon("Cons", [pwildcard(), pvar("rest")]), app(app(var_("drop"), binOp("-", var_("n"), int(1))), var_("rest")))
+]))));
+var zipExpr = abs("xs", abs("ys", match(tuple([var_("xs"), var_("ys")]), [
+  case_(ptuple([
+    pcon("Cons", [pvar("x"), pvar("xrest")]),
+    pcon("Cons", [pvar("y"), pvar("yrest")])
+  ]), app(app(var_("Cons"), tuple([var_("x"), var_("y")])), app(app(var_("zip"), var_("xrest")), var_("yrest")))),
+  case_(pwildcard(), var_("Nil"))
+])));
+var anyExpr = abs("p", abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), bool(false)),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), if_(app(var_("p"), var_("x")), bool(true), app(app(var_("any"), var_("p")), var_("rest"))))
+])));
+var allExpr = abs("p", abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), bool(true)),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), if_(app(var_("p"), var_("x")), app(app(var_("all"), var_("p")), var_("rest")), bool(false)))
+])));
+var findExpr = abs("p", abs("xs", match(var_("xs"), [
+  case_(pcon("Nil", []), var_("Nothing")),
+  case_(pcon("Cons", [pvar("x"), pvar("rest")]), if_(app(var_("p"), var_("x")), app(var_("Just"), var_("x")), app(app(var_("find"), var_("p")), var_("rest"))))
+])));
 var idExpr = abs("x", var_("x"));
 var constExpr = abs("x", abs("_", var_("x")));
 var composeExpr = abs("f", abs("g", abs("x", app(var_("f"), app(var_("g"), var_("x"))))));
 var flipExpr = abs("f", abs("a", abs("b", app(app(var_("f"), var_("b")), var_("a")))));
-var maybeModule = moduleDecl("Maybe", [maybe], []);
-var eitherModule = moduleDecl("Either", [either], []);
+var notExpr = abs("b", if_(var_("b"), bool(false), bool(true)));
+var boolEqExpr = abs("a", abs("b", if_(var_("a"), var_("b"), app(var_("not"), var_("b")))));
+var isJustExpr = abs("m", match(var_("m"), [
+  case_(pcon("Nothing", []), bool(false)),
+  case_(pcon("Just", [pwildcard()]), bool(true))
+]));
+var isNothingExpr = abs("m", match(var_("m"), [
+  case_(pcon("Nothing", []), bool(true)),
+  case_(pcon("Just", [pwildcard()]), bool(false))
+]));
+var maybeMapExpr = abs("f", abs("m", match(var_("m"), [
+  case_(pcon("Nothing", []), var_("Nothing")),
+  case_(pcon("Just", [pvar("x")]), app(var_("Just"), app(var_("f"), var_("x"))))
+])));
+var maybeFlatMapExpr = abs("f", abs("m", match(var_("m"), [
+  case_(pcon("Nothing", []), var_("Nothing")),
+  case_(pcon("Just", [pvar("x")]), app(var_("f"), var_("x")))
+])));
+var maybeWithDefaultExpr = abs("def", abs("m", match(var_("m"), [
+  case_(pcon("Nothing", []), var_("def")),
+  case_(pcon("Just", [pvar("x")]), var_("x"))
+])));
+var maybeToListExpr = abs("m", match(var_("m"), [
+  case_(pcon("Nothing", []), var_("Nil")),
+  case_(pcon("Just", [pvar("x")]), app(app(var_("Cons"), var_("x")), var_("Nil")))
+]));
+var isLeftExpr = abs("e", match(var_("e"), [
+  case_(pcon("Left", [pwildcard()]), bool(true)),
+  case_(pcon("Right", [pwildcard()]), bool(false))
+]));
+var isRightExpr = abs("e", match(var_("e"), [
+  case_(pcon("Left", [pwildcard()]), bool(false)),
+  case_(pcon("Right", [pwildcard()]), bool(true))
+]));
+var eitherMapExpr = abs("f", abs("e", match(var_("e"), [
+  case_(pcon("Left", [pvar("a")]), app(var_("Left"), var_("a"))),
+  case_(pcon("Right", [pvar("b")]), app(var_("Right"), app(var_("f"), var_("b"))))
+])));
+var eitherMapLeftExpr = abs("f", abs("e", match(var_("e"), [
+  case_(pcon("Left", [pvar("a")]), app(var_("Left"), app(var_("f"), var_("a")))),
+  case_(pcon("Right", [pvar("b")]), app(var_("Right"), var_("b")))
+])));
+var eitherFlatMapExpr = abs("f", abs("e", match(var_("e"), [
+  case_(pcon("Left", [pvar("a")]), app(var_("Left"), var_("a"))),
+  case_(pcon("Right", [pvar("b")]), app(var_("f"), var_("b")))
+])));
+var eitherWithDefaultExpr = abs("def", abs("e", match(var_("e"), [
+  case_(pcon("Left", [pwildcard()]), var_("def")),
+  case_(pcon("Right", [pvar("b")]), var_("b"))
+])));
+var eitherFromMaybeExpr = abs("err", abs("m", match(var_("m"), [
+  case_(pcon("Nothing", []), app(var_("Left"), var_("err"))),
+  case_(pcon("Just", [pvar("x")]), app(var_("Right"), var_("x")))
+])));
+var maybeModule = moduleDecl("Maybe", [maybe], [
+  recBinding("isJust", isJustExpr),
+  recBinding("isNothing", isNothingExpr),
+  recBinding("map", maybeMapExpr),
+  recBinding("flatMap", maybeFlatMapExpr),
+  recBinding("withDefault", maybeWithDefaultExpr),
+  recBinding("toList", maybeToListExpr)
+]);
+var eitherModule = moduleDecl("Either", [either], [
+  recBinding("isLeft", isLeftExpr),
+  recBinding("isRight", isRightExpr),
+  recBinding("map", eitherMapExpr),
+  recBinding("mapLeft", eitherMapLeftExpr),
+  recBinding("flatMap", eitherFlatMapExpr),
+  recBinding("withDefault", eitherWithDefaultExpr),
+  recBinding("fromMaybe", eitherFromMaybeExpr)
+]);
+var unitModule = moduleDecl("Unit", [unit], []);
 var listModule = moduleDecl("List", [list], [
   recBinding("map", mapExpr),
   recBinding("filter", filterExpr),
@@ -4053,7 +4458,14 @@ var listModule = moduleDecl("List", [list], [
   recBinding("foldr", foldrExpr),
   recBinding("foldl", foldlExpr),
   recBinding("reverse", reverseExpr),
-  recBinding("concat", concatExpr)
+  recBinding("append", appendExpr),
+  recBinding("concat", concatExpr),
+  recBinding("take", takeExpr),
+  recBinding("drop", dropExpr),
+  recBinding("zip", zipExpr),
+  recBinding("any", anyExpr),
+  recBinding("all", allExpr),
+  recBinding("find", findExpr)
 ]);
 var coreModule = moduleDecl("Core", [], [
   recBinding("id", idExpr),
@@ -4066,9 +4478,13 @@ var tInt2 = tycon("Int");
 var tFloat2 = tycon("Float");
 var tBool2 = tycon("boolean");
 var tChar2 = tycon("char");
+var tUnit = tycon("Unit");
+var tIOError = tycon("IOError");
 var tMaybe = (t) => tyapp(tycon("Maybe"), t);
 var tList = (t) => tyapp(tycon("List"), t);
+var tEither = (a, b) => tyapp(tyapp(tycon("Either"), a), b);
 var fn = (a, b) => tyfun(a, b);
+var tvar2 = (name) => tyvar(name);
 var stringModule = moduleDecl("String", [], [], [
   foreignBinding("length", fn(tString, tInt2)),
   foreignBinding("concat", fn(tString, fn(tString, tString))),
@@ -4103,13 +4519,108 @@ var charModule = moduleDecl("Char", [], [], [
   foreignBinding("toUpper", fn(tChar2, tChar2)),
   foreignBinding("toLower", fn(tChar2, tChar2))
 ]);
+var intModule = moduleDecl("Int", [], [], [
+  foreignBinding("add", fn(tInt2, fn(tInt2, tInt2))),
+  foreignBinding("sub", fn(tInt2, fn(tInt2, tInt2))),
+  foreignBinding("mul", fn(tInt2, fn(tInt2, tInt2))),
+  foreignBinding("div", fn(tInt2, fn(tInt2, tInt2))),
+  foreignBinding("mod", fn(tInt2, fn(tInt2, tInt2))),
+  foreignBinding("neg", fn(tInt2, tInt2)),
+  foreignBinding("abs", fn(tInt2, tInt2)),
+  foreignBinding("eq", fn(tInt2, fn(tInt2, tBool2))),
+  foreignBinding("lt", fn(tInt2, fn(tInt2, tBool2))),
+  foreignBinding("le", fn(tInt2, fn(tInt2, tBool2))),
+  foreignBinding("gt", fn(tInt2, fn(tInt2, tBool2))),
+  foreignBinding("ge", fn(tInt2, fn(tInt2, tBool2))),
+  foreignBinding("toFloat", fn(tInt2, tFloat2)),
+  foreignBinding("toString", fn(tInt2, tString)),
+  foreignBinding("fromString", fn(tString, tMaybe(tInt2)))
+]);
+var floatModule = moduleDecl("Float", [], [], [
+  foreignBinding("add", fn(tFloat2, fn(tFloat2, tFloat2))),
+  foreignBinding("sub", fn(tFloat2, fn(tFloat2, tFloat2))),
+  foreignBinding("mul", fn(tFloat2, fn(tFloat2, tFloat2))),
+  foreignBinding("div", fn(tFloat2, fn(tFloat2, tFloat2))),
+  foreignBinding("neg", fn(tFloat2, tFloat2)),
+  foreignBinding("abs", fn(tFloat2, tFloat2)),
+  foreignBinding("eq", fn(tFloat2, fn(tFloat2, tBool2))),
+  foreignBinding("lt", fn(tFloat2, fn(tFloat2, tBool2))),
+  foreignBinding("le", fn(tFloat2, fn(tFloat2, tBool2))),
+  foreignBinding("gt", fn(tFloat2, fn(tFloat2, tBool2))),
+  foreignBinding("ge", fn(tFloat2, fn(tFloat2, tBool2))),
+  foreignBinding("floor", fn(tFloat2, tInt2)),
+  foreignBinding("ceil", fn(tFloat2, tInt2)),
+  foreignBinding("round", fn(tFloat2, tInt2)),
+  foreignBinding("sqrt", fn(tFloat2, tFloat2)),
+  foreignBinding("pow", fn(tFloat2, fn(tFloat2, tFloat2))),
+  foreignBinding("sin", fn(tFloat2, tFloat2)),
+  foreignBinding("cos", fn(tFloat2, tFloat2)),
+  foreignBinding("tan", fn(tFloat2, tFloat2)),
+  foreignBinding("log", fn(tFloat2, tFloat2)),
+  foreignBinding("exp", fn(tFloat2, tFloat2)),
+  foreignBinding("toString", fn(tFloat2, tString)),
+  foreignBinding("fromString", fn(tString, tMaybe(tFloat2)))
+]);
+var boolModule = moduleDecl("Bool", [], [recBinding("not", notExpr), recBinding("eq", boolEqExpr)]);
+var ioModule = moduleDecl("IO", [ioError], [], [
+  foreignBinding("print", fn(tString, tUnit)),
+  foreignBinding("printLine", fn(tString, tUnit)),
+  foreignBinding("readLine", fn(tUnit, tEither(tIOError, tString))),
+  foreignBinding("readFile", fn(tString, tEither(tIOError, tString))),
+  foreignBinding("writeFile", fn(tString, fn(tString, tEither(tIOError, tUnit)))),
+  foreignBinding("appendFile", fn(tString, fn(tString, tEither(tIOError, tUnit)))),
+  foreignBinding("fileExists", fn(tString, tBool2)),
+  foreignBinding("deleteFile", fn(tString, tEither(tIOError, tUnit))),
+  foreignBinding("args", fn(tUnit, tList(tString))),
+  foreignBinding("exit", fn(tInt2, tUnit)),
+  foreignBinding("getEnv", fn(tString, tMaybe(tString)))
+]);
+var debugModule = moduleDecl("Debug", [], [], [
+  foreignBinding("log", fn(tvar2("a"), tvar2("a"))),
+  foreignBinding("trace", fn(tString, fn(tvar2("a"), tvar2("a")))),
+  foreignBinding("panic", fn(tString, tvar2("a")))
+]);
+var tMap = (v) => tyapp(tycon("Map"), v);
+var mapModule = moduleDecl("Map", [], [], [
+  foreignBinding("empty", tMap(tvar2("v"))),
+  foreignBinding("singleton", fn(tString, fn(tvar2("v"), tMap(tvar2("v"))))),
+  foreignBinding("insert", fn(tString, fn(tvar2("v"), fn(tMap(tvar2("v")), tMap(tvar2("v")))))),
+  foreignBinding("lookup", fn(tString, fn(tMap(tvar2("v")), tMaybe(tvar2("v"))))),
+  foreignBinding("delete", fn(tString, fn(tMap(tvar2("v")), tMap(tvar2("v"))))),
+  foreignBinding("member", fn(tString, fn(tMap(tvar2("v")), tBool2))),
+  foreignBinding("size", fn(tMap(tvar2("v")), tInt2)),
+  foreignBinding("keys", fn(tMap(tvar2("v")), tList(tString))),
+  foreignBinding("values", fn(tMap(tvar2("v")), tList(tvar2("v"))))
+]);
+var tSet = tycon("Set");
+var setModule = moduleDecl("Set", [], [], [
+  foreignBinding("empty", tSet),
+  foreignBinding("singleton", fn(tString, tSet)),
+  foreignBinding("insert", fn(tString, fn(tSet, tSet))),
+  foreignBinding("delete", fn(tString, fn(tSet, tSet))),
+  foreignBinding("member", fn(tString, fn(tSet, tBool2))),
+  foreignBinding("size", fn(tSet, tInt2)),
+  foreignBinding("toList", fn(tSet, tList(tString))),
+  foreignBinding("fromList", fn(tList(tString), tSet)),
+  foreignBinding("union", fn(tSet, fn(tSet, tSet))),
+  foreignBinding("intersect", fn(tSet, fn(tSet, tSet))),
+  foreignBinding("difference", fn(tSet, fn(tSet, tSet)))
+]);
 var modules = [
   maybeModule,
   eitherModule,
   listModule,
   coreModule,
   stringModule,
-  charModule
+  charModule,
+  intModule,
+  floatModule,
+  unitModule,
+  boolModule,
+  ioModule,
+  debugModule,
+  mapModule,
+  setModule
 ];
 
 // src/ir.ts
@@ -5028,6 +5539,374 @@ const $foreign = {
 
     // toLower : Char -> Char
     toLower: (c) => c.toLowerCase(),
+  },
+
+  // ==========================================================================
+  // Int Module
+  // ==========================================================================
+  Int: {
+    // add : Int -> Int -> Int
+    add: (a) => (b) => a + b,
+
+    // sub : Int -> Int -> Int
+    sub: (a) => (b) => a - b,
+
+    // mul : Int -> Int -> Int
+    mul: (a) => (b) => a * b,
+
+    // div : Int -> Int -> Int (truncating division)
+    div: (a) => (b) => Math.trunc(a / b),
+
+    // mod : Int -> Int -> Int
+    mod: (a) => (b) => a % b,
+
+    // neg : Int -> Int
+    neg: (a) => -a,
+
+    // abs : Int -> Int
+    abs: (a) => Math.abs(a),
+
+    // eq : Int -> Int -> Bool
+    eq: (a) => (b) => a === b,
+
+    // lt : Int -> Int -> Bool
+    lt: (a) => (b) => a < b,
+
+    // le : Int -> Int -> Bool
+    le: (a) => (b) => a <= b,
+
+    // gt : Int -> Int -> Bool
+    gt: (a) => (b) => a > b,
+
+    // ge : Int -> Int -> Bool
+    ge: (a) => (b) => a >= b,
+
+    // toFloat : Int -> Float
+    toFloat: (a) => a,
+
+    // toString : Int -> String
+    toString: (a) => String(a),
+
+    // fromString : String -> Maybe Int
+    fromString: (s) => {
+      const n = parseInt(s, 10);
+      if (Number.isNaN(n)) return $con("Nothing");
+      return $con("Just", n);
+    },
+  },
+
+  // ==========================================================================
+  // Float Module
+  // ==========================================================================
+  Float: {
+    // add : Float -> Float -> Float
+    add: (a) => (b) => a + b,
+
+    // sub : Float -> Float -> Float
+    sub: (a) => (b) => a - b,
+
+    // mul : Float -> Float -> Float
+    mul: (a) => (b) => a * b,
+
+    // div : Float -> Float -> Float
+    div: (a) => (b) => a / b,
+
+    // neg : Float -> Float
+    neg: (a) => -a,
+
+    // abs : Float -> Float
+    abs: (a) => Math.abs(a),
+
+    // eq : Float -> Float -> Bool
+    eq: (a) => (b) => a === b,
+
+    // lt : Float -> Float -> Bool
+    lt: (a) => (b) => a < b,
+
+    // le : Float -> Float -> Bool
+    le: (a) => (b) => a <= b,
+
+    // gt : Float -> Float -> Bool
+    gt: (a) => (b) => a > b,
+
+    // ge : Float -> Float -> Bool
+    ge: (a) => (b) => a >= b,
+
+    // floor : Float -> Int
+    floor: (a) => Math.floor(a),
+
+    // ceil : Float -> Int
+    ceil: (a) => Math.ceil(a),
+
+    // round : Float -> Int
+    round: (a) => Math.round(a),
+
+    // sqrt : Float -> Float
+    sqrt: (a) => Math.sqrt(a),
+
+    // pow : Float -> Float -> Float
+    pow: (a) => (b) => Math.pow(a, b),
+
+    // sin : Float -> Float
+    sin: (a) => Math.sin(a),
+
+    // cos : Float -> Float
+    cos: (a) => Math.cos(a),
+
+    // tan : Float -> Float
+    tan: (a) => Math.tan(a),
+
+    // log : Float -> Float
+    log: (a) => Math.log(a),
+
+    // exp : Float -> Float
+    exp: (a) => Math.exp(a),
+
+    // toString : Float -> String
+    toString: (a) => String(a),
+
+    // fromString : String -> Maybe Float
+    fromString: (s) => {
+      const n = parseFloat(s);
+      if (Number.isNaN(n)) return $con("Nothing");
+      return $con("Just", n);
+    },
+  },
+
+  // ==========================================================================
+  // IO Module
+  // ==========================================================================
+  IO: {
+    // Helper to convert Node.js errors to IOError
+    _toIOError: (err, path) => {
+      const code = err.code;
+      if (code === "ENOENT") return $con("FileNotFound", path);
+      if (code === "EACCES" || code === "EPERM") return $con("PermissionDenied", path);
+      if (code === "EISDIR") return $con("IsDirectory", path);
+      if (code === "EEXIST") return $con("AlreadyExists", path);
+      return $con("UnknownError", err.message || String(err));
+    },
+
+    // print : String -> Unit
+    print: (s) => { process.stdout.write(s); return $con("Unit"); },
+
+    // printLine : String -> Unit
+    printLine: (s) => { console.log(s); return $con("Unit"); },
+
+    // readLine : Unit -> Either IOError String
+    readLine: (_) => {
+      try {
+        const fs = require("fs");
+        const buf = Buffer.alloc(1024);
+        const n = fs.readSync(0, buf, 0, buf.length);
+        return $con("Right", buf.toString("utf8", 0, n).replace(/\\r?\\n$/, ""));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, "<stdin>"));
+      }
+    },
+
+    // readFile : String -> Either IOError String
+    readFile: (path) => {
+      try {
+        const fs = require("fs");
+        return $con("Right", fs.readFileSync(path, "utf8"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // writeFile : String -> String -> Either IOError Unit
+    writeFile: (path) => (content) => {
+      try {
+        const fs = require("fs");
+        fs.writeFileSync(path, content, "utf8");
+        return $con("Right", $con("Unit"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // appendFile : String -> String -> Either IOError Unit
+    appendFile: (path) => (content) => {
+      try {
+        const fs = require("fs");
+        fs.appendFileSync(path, content, "utf8");
+        return $con("Right", $con("Unit"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // fileExists : String -> Bool
+    fileExists: (path) => {
+      const fs = require("fs");
+      return fs.existsSync(path);
+    },
+
+    // deleteFile : String -> Either IOError Unit
+    deleteFile: (path) => {
+      try {
+        const fs = require("fs");
+        fs.unlinkSync(path);
+        return $con("Right", $con("Unit"));
+      } catch (err) {
+        return $con("Left", $foreign.IO._toIOError(err, path));
+      }
+    },
+
+    // args : Unit -> List String
+    args: (_) => {
+      const args = process.argv.slice(2);
+      let result = $con("Nil");
+      for (let i = args.length - 1; i >= 0; i--) {
+        result = $con("Cons", args[i], result);
+      }
+      return result;
+    },
+
+    // exit : Int -> Unit
+    exit: (code) => { process.exit(code); },
+
+    // getEnv : String -> Maybe String
+    getEnv: (name) => {
+      const value = process.env[name];
+      if (value === undefined) return $con("Nothing");
+      return $con("Just", value);
+    },
+  },
+
+  // ==========================================================================
+  // Debug Module
+  // ==========================================================================
+  Debug: {
+    // log : a -> a (prints value, returns it)
+    log: (x) => { console.log(x); return x; },
+
+    // trace : String -> a -> a (prints label + value, returns value)
+    trace: (label) => (x) => { console.log(label + ":", x); return x; },
+
+    // panic : String -> a (crashes with message)
+    panic: (msg) => { throw new Error(msg); },
+  },
+
+  // ==========================================================================
+  // Map Module (String keys only)
+  // ==========================================================================
+  Map: {
+    // empty : Map v
+    empty: new Map(),
+
+    // singleton : String -> v -> Map v
+    singleton: (k) => (v) => new Map([[k, v]]),
+
+    // insert : String -> v -> Map v -> Map v
+    insert: (k) => (v) => (m) => new Map(m).set(k, v),
+
+    // lookup : String -> Map v -> Maybe v
+    lookup: (k) => (m) => {
+      if (m.has(k)) return $con("Just", m.get(k));
+      return $con("Nothing");
+    },
+
+    // delete : String -> Map v -> Map v
+    delete: (k) => (m) => { const m2 = new Map(m); m2.delete(k); return m2; },
+
+    // member : String -> Map v -> Bool
+    member: (k) => (m) => m.has(k),
+
+    // size : Map v -> Int
+    size: (m) => m.size,
+
+    // keys : Map v -> List String
+    keys: (m) => {
+      let result = $con("Nil");
+      for (const k of [...m.keys()].reverse()) {
+        result = $con("Cons", k, result);
+      }
+      return result;
+    },
+
+    // values : Map v -> List v
+    values: (m) => {
+      let result = $con("Nil");
+      for (const v of [...m.values()].reverse()) {
+        result = $con("Cons", v, result);
+      }
+      return result;
+    },
+
+    // toList : Map v -> List (String, v)
+    toList: (m) => {
+      let result = $con("Nil");
+      for (const [k, v] of [...m.entries()].reverse()) {
+        result = $con("Cons", [k, v], result);
+      }
+      return result;
+    },
+
+    // fromList : List (String, v) -> Map v
+    fromList: (list) => {
+      const m = new Map();
+      let current = list;
+      while (current.$tag === "Cons") {
+        const [k, v] = current.$args[0];
+        m.set(k, v);
+        current = current.$args[1];
+      }
+      return m;
+    },
+  },
+
+  // ==========================================================================
+  // Set Module (String values only)
+  // ==========================================================================
+  Set: {
+    // empty : Set
+    empty: new Set(),
+
+    // singleton : String -> Set
+    singleton: (v) => new Set([v]),
+
+    // insert : String -> Set -> Set
+    insert: (v) => (s) => new Set(s).add(v),
+
+    // delete : String -> Set -> Set
+    delete: (v) => (s) => { const s2 = new Set(s); s2.delete(v); return s2; },
+
+    // member : String -> Set -> Bool
+    member: (v) => (s) => s.has(v),
+
+    // size : Set -> Int
+    size: (s) => s.size,
+
+    // toList : Set -> List String
+    toList: (s) => {
+      let result = $con("Nil");
+      for (const v of [...s].reverse()) {
+        result = $con("Cons", v, result);
+      }
+      return result;
+    },
+
+    // fromList : List String -> Set
+    fromList: (list) => {
+      const s = new Set();
+      let current = list;
+      while (current.$tag === "Cons") {
+        s.add(current.$args[0]);
+        current = current.$args[1];
+      }
+      return s;
+    },
+
+    // union : Set -> Set -> Set
+    union: (s1) => (s2) => new Set([...s1, ...s2]),
+
+    // intersect : Set -> Set -> Set
+    intersect: (s1) => (s2) => new Set([...s1].filter(x => s2.has(x))),
+
+    // difference : Set -> Set -> Set
+    difference: (s1) => (s2) => new Set([...s1].filter(x => !s2.has(x))),
   },
 };
 

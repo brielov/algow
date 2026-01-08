@@ -144,13 +144,10 @@ const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
     case "IRAppBinding": {
       const func = genAtom(ctx, binding.func);
       const arg = genAtom(ctx, binding.arg);
-      // Use direct call when we know it's a function (not a constructor)
-      // Constructors need $apply for partial application support
-      if (binding.func.kind === "IRVar" && ctx.constructors.has(binding.func.name)) {
-        return `$apply(${func}, ${arg})`;
-      }
-      // Direct call for known functions
-      return `${func}(${arg})`;
+      // Always use $apply to handle both functions and partial constructor applications
+      // This is necessary because a variable might hold a partial constructor application
+      // which is an object, not a callable function
+      return `$apply(${func}, ${arg})`;
     }
 
     case "IRBinOpBinding":

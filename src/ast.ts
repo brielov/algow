@@ -608,7 +608,7 @@ export interface Match extends Node {
  * Type expressions come from the syntax (user-written), while Types are the
  * internal representation used by the inference algorithm.
  */
-export type TypeExpr = TyVar | TyCon | TyApp | TyFun;
+export type TypeExpr = TyVar | TyCon | TyApp | TyFun | TyTuple;
 
 /**
  * Type variable - a placeholder for any type.
@@ -664,6 +664,18 @@ export interface TyFun extends Node {
   readonly kind: "TyFun";
   readonly param: TypeExpr;
   readonly ret: TypeExpr;
+}
+
+/**
+ * Tuple type - a fixed-size collection of heterogeneous types.
+ *
+ * Example: `(Int, String)` is TyTuple([TyCon("Int"), TyCon("String")])
+ *
+ * Tuple types have a fixed arity known at compile time.
+ */
+export interface TyTuple extends Node {
+  readonly kind: "TyTuple";
+  readonly elements: readonly TypeExpr[];
 }
 
 // =============================================================================
@@ -1015,6 +1027,12 @@ export const tyfun = (param: TypeExpr, ret: TypeExpr, span?: Span): TyFun => ({
   kind: "TyFun",
   param,
   ret,
+  span,
+});
+
+export const tytuple = (elements: readonly TypeExpr[], span?: Span): TyTuple => ({
+  kind: "TyTuple",
+  elements,
   span,
 });
 
