@@ -469,6 +469,12 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
     } else if (at(state, TokenKind.Let)) {
       const binding = parseModuleBinding(state);
       if (binding) bindings.push(binding);
+      // Handle 'and' for mutually recursive bindings
+      while (at(state, TokenKind.AndKw)) {
+        advance(state); // consume 'and'
+        const andBinding = parseModuleBindingAfterAnd(state);
+        if (andBinding) bindings.push(andBinding);
+      }
     } else if (at(state, TokenKind.Foreign)) {
       const foreign = parseForeignBinding(state);
       if (foreign) foreignBindings.push(foreign);
@@ -532,6 +538,20 @@ const parseModuleBinding = (state: ParserState): ast.RecBinding | null => {
   const recursive = at(state, TokenKind.Rec);
   if (recursive) advance(state);
 
+  return parseModuleBindingCore(state);
+};
+
+/**
+ * Parse a binding after 'and' keyword (used for mutually recursive bindings)
+ */
+const parseModuleBindingAfterAnd = (state: ParserState): ast.RecBinding | null => {
+  return parseModuleBindingCore(state);
+};
+
+/**
+ * Core binding parsing logic shared by let and and bindings
+ */
+const parseModuleBindingCore = (state: ParserState): ast.RecBinding | null => {
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
     synchronize(state);
