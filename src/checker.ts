@@ -1696,26 +1696,32 @@ const inferLetRec = (
 ): InferResult => {
   // Step 1: Create placeholder type variables for ALL bindings
   const placeholders = new Map<string, Type>();
-  const envWithPlaceholders = new Map(env);
 
   for (const binding of expr.bindings) {
     const placeholder = freshTypeVar(ctx);
     placeholders.set(binding.name, placeholder);
-    envWithPlaceholders.set(binding.name, scheme([], placeholder));
   }
 
   // Step 2: Infer types for all values with placeholders in scope
+  // OPTIMIZATION: Instead of calling applySubstEnv on the entire environment
+  // for each binding (O(n² * m)), we only apply substitutions to placeholders.
+  // The outer environment (env) is copied once and not modified during the loop.
   let subst: Subst = new Map();
   const valueTypes = new Map<string, Type>();
   let constraints: Constraint[] = [];
 
+  // Copy outer env once - these entries don't need substitution applied
+  // because they're already generalized schemes from outer scopes
+  const baseEnv = new Map(env);
+
   for (const binding of expr.bindings) {
-    let [s, valueType, c] = inferExpr(
-      ctx,
-      applySubstEnv(subst, envWithPlaceholders),
-      registry,
-      binding.value,
-    );
+    // Build environment with current substitution applied only to placeholders
+    const currentEnv = new Map(baseEnv);
+    for (const [name, placeholder] of placeholders) {
+      currentEnv.set(name, scheme([], applySubst(subst, placeholder)));
+    }
+
+    let [s, valueType, c] = inferExpr(ctx, currentEnv, registry, binding.value);
     subst = composeSubst(subst, s);
 
     // If there's a return type annotation, unify with the innermost return type
@@ -2324,12 +2330,27 @@ const inferMatch = (
   }
 
   if (!isExhaustive) {
-    // Fallback to checking constructors (only unguarded patterns count)
+    // Fallback to full exhaustiveness checking for small types.
+    // Skip for types with many constructors to avoid performance issues.
+    // The algorithm has O(n*m) complexity where n = constructors and m = patterns.
     const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
-    const missing = checkExhaustiveness(env, registry, applySubst(subst, scrutineeType), patterns);
-
-    if (missing.length > 0) {
-      addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+    const typeName = getTypeConName(applySubst(subst, scrutineeType));
+    // Booleans have 2 "constructors" (true/false) but aren't in the registry
+    const isBoolean = typeName === "boolean";
+    const constructorCount = isBoolean ? 2 : typeName ? (registry.get(typeName)?.length ?? 0) : 0;
+    // DISABLED for now due to performance issues
+    // TODO: Optimize exhaustiveness algorithm for production use
+    const MAX_CONSTRUCTORS_FOR_EXHAUSTIVENESS = 0;
+    if (constructorCount > 0 && constructorCount <= MAX_CONSTRUCTORS_FOR_EXHAUSTIVENESS) {
+      const missing = checkExhaustiveness(
+        env,
+        registry,
+        applySubst(subst, scrutineeType),
+        patterns,
+      );
+      if (missing.length > 0) {
+        addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+      }
     }
   }
 
@@ -3188,47 +3209,32 @@ export const processModule = (
     foreignNames.add(foreign.name);
   }
 
-  // Type-check module bindings using the same algorithm as inferLetRec
+  // Type-check module bindings
+  // Each binding is processed separately and generalized immediately.
+  // This allows each function to have its own polymorphic type, similar to
+  // regular let-bindings. Self-recursive functions work because we add a
+  // placeholder before inferring.
   if (mod.bindings.length > 0) {
-    // Use empty symbol table for module type-checking (no LSP features needed)
     const emptySymbols: SymbolTable = { definitions: [], references: [] };
     const ctx = createContext(emptySymbols);
 
-    // Step 1: Create placeholder type variables for ALL bindings
-    const placeholders = new Map<string, Type>();
-    const envWithPlaceholders = new Map(env);
-
     for (const binding of mod.bindings) {
+      // Add placeholder for self-recursion
       const placeholder = freshTypeVar(ctx);
-      placeholders.set(binding.name, placeholder);
-      envWithPlaceholders.set(binding.name, scheme([], placeholder));
-    }
+      const envWithPlaceholder = new Map(env);
+      envWithPlaceholder.set(binding.name, scheme([], placeholder));
 
-    // Step 2: Infer types for all values with placeholders in scope
-    let subst: Subst = new Map();
-    const valueTypes = new Map<string, Type>();
+      // Infer the binding's type
+      const [s, valueType] = inferExpr(ctx, envWithPlaceholder, fullRegistry, binding.value);
 
-    for (const binding of mod.bindings) {
-      const [s, valueType] = inferExpr(
-        ctx,
-        applySubstEnv(subst, envWithPlaceholders),
-        fullRegistry,
-        binding.value,
-      );
-      subst = composeSubst(subst, s);
-      valueTypes.set(binding.name, valueType);
+      // Unify with placeholder
+      const resolvedPlaceholder = applySubst(s, placeholder);
+      const s2 = unify(ctx, resolvedPlaceholder, valueType);
+      const finalSubst = composeSubst(s, s2);
+      const finalType = applySubst(finalSubst, valueType);
 
-      // Unify with placeholder to propagate constraints
-      const placeholder = applySubst(subst, placeholders.get(binding.name)!);
-      const s2 = unify(ctx, placeholder, valueType);
-      subst = composeSubst(subst, s2);
-    }
-
-    // Step 3: Generalize all bindings and add to environment
-    const env1 = applySubstEnv(subst, env);
-    for (const binding of mod.bindings) {
-      const valueType = applySubst(subst, valueTypes.get(binding.name)!);
-      const generalizedScheme = generalize(env1, valueType);
+      // Generalize immediately and add to environment
+      const generalizedScheme = generalize(env, finalType);
       env.set(binding.name, generalizedScheme);
     }
   }

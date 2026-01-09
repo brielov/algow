@@ -201,7 +201,11 @@ const processProgram = (program: Program) => {
     return {
       typeEnv,
       registry,
-      constructorNames: [...preludeCache.constructorNames, ...userConstructors, ...declConstructors],
+      constructorNames: [
+        ...preludeCache.constructorNames,
+        ...userConstructors,
+        ...declConstructors,
+      ],
       allModules,
       allUses,
       moduleEnv: preludeCache.moduleEnv,

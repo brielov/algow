@@ -975,8 +975,10 @@ const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr =>
     }
 
     default: {
-      // Use parsePrefixNoLambda to prevent `f x -> y` from being parsed as `f (x -> y)`
-      const right = parsePrefixNoLambda(state);
+      // Parse argument with application precedence to capture field accesses (e.g., Set.empty)
+      // but not lower-precedence operators. Use allowLambda=false to prevent
+      // `f x -> y` from being parsed as `f (x -> y)`
+      const right = parsePrecedence(state, bp, false);
       const end = right.span?.end ?? state.current[1];
       return ast.app(left, right, span(start, end));
     }

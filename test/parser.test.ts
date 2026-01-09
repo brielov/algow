@@ -696,21 +696,21 @@ describe("Parser", () => {
       );
     });
 
-    it("application then field access parses left-to-right", () => {
-      // f r.x parses as (f r).x because application happens first
+    it("field access binds tighter than application", () => {
+      // f r.x parses as f (r.x) because field access (70) > application (60)
       const result = parse("f r.x");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.fieldAccess(ast.app(ast.var_("f"), ast.var_("r")), "x"),
+        ast.app(ast.var_("f"), ast.fieldAccess(ast.var_("r"), "x")),
       );
     });
 
-    it("parentheses force field access first", () => {
-      // f (r.x) parses as f (r.x)
-      const result = parse("f (r.x)");
+    it("parentheses can force application first", () => {
+      // (f r).x applies f to r first, then accesses field x
+      const result = parse("(f r).x");
       expect(result.diagnostics).toHaveLength(0);
       expect(stripSpans(result.program.expr)).toEqual(
-        ast.app(ast.var_("f"), ast.fieldAccess(ast.var_("r"), "x")),
+        ast.fieldAccess(ast.app(ast.var_("f"), ast.var_("r")), "x"),
       );
     });
   });
