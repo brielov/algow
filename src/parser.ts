@@ -1720,80 +1720,69 @@ export const programToExpr = (
     }
   }
 
-  // Wrap with module bindings
-  // For qualified access to work at runtime, we need ALL module bindings in scope,
-  // regardless of the import style (use Module, use Module (..), or use Module (items))
-  // IMPORTANT: Each module's bindings must be in a separate letRec block to avoid
-  // incorrectly unifying functions with the same name across modules (e.g., Maybe.map vs Either.map)
-  // We also add qualified aliases (Module.name) for external access.
-  //
-  // IMPORTANT: We process uses in REVERSE order because letRec wrapping is inside-out.
-  // This ensures prelude modules (processed last) become the outermost scope, making
-  // qualified names like List.length available to user modules' internal use statements.
+  // STEP 1: Process use statements for unqualified aliases (wrapped first = innermost)
+  // This creates bindings like `name = QualifiedVar(Module, name)`
+  // QualifiedVar tells the type checker to look up from moduleEnv.
+  // At runtime, these are evaluated after qualified bindings (outer scope).
   const seenModules = new Set<string>();
-
-  // Helper to get all bindings from a module for use imports
-  const getModuleBindingNames = (moduleName: string): string[] => {
-    const mod = modules.find((m) => m.name === moduleName);
-    if (!mod) return [];
-    return mod.bindings.map((b) => b.name);
-  };
-
-  // Process in reverse order so prelude modules end up outermost
   for (let i = uses.length - 1; i >= 0; i--) {
     const use = uses[i]!;
-    // Skip if we've already processed this module
     if (seenModules.has(use.moduleName)) continue;
     seenModules.add(use.moduleName);
 
     const mod = modules.find((m) => m.name === use.moduleName);
     if (!mod || mod.bindings.length === 0) continue;
 
-    // Create qualified aliases for external access (e.g., Either.map = map)
-    // These go in the outer scope so they can reference the inner bindings
-    const qualifiedBindings: ast.RecBinding[] = [];
-    for (const binding of mod.bindings) {
-      qualifiedBindings.push(
-        ast.recBinding(
-          `${mod.name}.${binding.name}`,
-          ast.var_(binding.name), // reference the unqualified name
-          binding.nameSpan,
-          binding.returnType,
-        ),
+    // Determine which bindings to import unqualified based on import style
+    let namesToImport: string[] = [];
+    if (use.imports?.kind === "All") {
+      // use Module (..) - import all bindings
+      namesToImport = mod.bindings.map((b) => b.name);
+    } else if (use.imports?.kind === "Specific") {
+      // use Module (a, b, c) - import specific bindings
+      namesToImport = use.imports.items
+        .filter((item) => mod.bindings.some((b) => b.name === item.name))
+        .map((item) => item.name);
+    }
+    // Note: `use Module` (no imports) -> no unqualified aliases, only qualified access
+
+    if (namesToImport.length > 0) {
+      const unqualifiedBindings = namesToImport.map((name) =>
+        ast.recBinding(name, ast.qualifiedVar(mod.name, name)),
       );
+      expr = ast.letRec(unqualifiedBindings, expr);
+    }
+  }
+
+  // STEP 2: Process ALL modules for qualified access (wrapped last = outermost)
+  // This creates bindings like `Module.name = <actual implementation>`
+  // These have actual bodies for runtime evaluation.
+  // Being outermost means they're evaluated first and available to QualifiedVar lookups.
+  // The type checker detects `Module.name` bindings and looks up their types
+  // from moduleEnv instead of re-inferring them.
+  //
+  // IMPORTANT: We also include unqualified aliases (name = Var(Module.name)) in the
+  // SAME letRec block so that recursive references within the body work correctly.
+  // E.g., `let rec tokenize s = ... tokenize ... end` has Var("tokenize") in the body,
+  // but we renamed the binding to Module.tokenize, so we need an alias.
+  for (let i = modules.length - 1; i >= 0; i--) {
+    const mod = modules[i]!;
+    if (mod.bindings.length === 0) continue;
+
+    const bindings: ast.RecBinding[] = [];
+
+    // First, add qualified bindings with actual implementations
+    for (const b of mod.bindings) {
+      bindings.push(ast.recBinding(`${mod.name}.${b.name}`, b.value, b.nameSpan, b.returnType));
     }
 
-    // Handle module's internal use statements
-    // For each internal use like "use List (..)", we add bindings that alias
-    // the imported names to their qualified versions (e.g., length = List.length)
-    const moduleImportBindings: ast.RecBinding[] = [];
-    for (const internalUse of mod.uses) {
-      if (internalUse.imports?.kind === "All") {
-        // Import all bindings from the target module
-        const names = getModuleBindingNames(internalUse.moduleName);
-        for (const name of names) {
-          moduleImportBindings.push(
-            ast.recBinding(name, ast.qualifiedVar(internalUse.moduleName, name)),
-          );
-        }
-      } else if (internalUse.imports?.kind === "Specific") {
-        // Import specific items
-        for (const item of internalUse.imports.items) {
-          moduleImportBindings.push(
-            ast.recBinding(item.name, ast.qualifiedVar(internalUse.moduleName, item.name)),
-          );
-        }
-      }
+    // Then, add unqualified aliases for recursion support
+    // These allow Var("tokenize") to resolve to Var("Module.tokenize")
+    for (const b of mod.bindings) {
+      bindings.push(ast.recBinding(b.name, ast.var_(`${mod.name}.${b.name}`)));
     }
 
-    // Wrap: qualified aliases (innermost), then module bindings, then import aliases (outermost)
-    if (qualifiedBindings.length > 0) {
-      expr = ast.letRec(qualifiedBindings, expr);
-    }
-    expr = ast.letRec(mod.bindings, expr);
-    if (moduleImportBindings.length > 0) {
-      expr = ast.letRec(moduleImportBindings, expr);
-    }
+    expr = ast.letRec(bindings, expr);
   }
 
   return expr;

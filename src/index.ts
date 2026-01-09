@@ -138,7 +138,20 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
   const localRegistry = new Map(preludeRegistry);
   for (const [k, v] of userRegistry) localRegistry.set(k, v);
 
-  const constructorNames = [...preludeConstructors, ...userConstructors];
+  // Collect constructors from imported modules (for unqualified access)
+  const importedConstructors = [...preludeConstructors, ...userConstructors];
+
+  // Collect constructors from ALL modules (for qualified access in wrapped bindings)
+  // This is needed because programToExpr() wraps all module bindings, and those
+  // bindings may reference constructors via internal use statements
+  const allModuleConstructors: string[] = [];
+  for (const [, info] of moduleEnv) {
+    for (const name of info.constructorNames) {
+      if (!allModuleConstructors.includes(name)) {
+        allModuleConstructors.push(name);
+      }
+    }
+  }
 
   const aliases = new Map(preludeAliases);
   for (const [k, v] of userAliases) aliases.set(k, v);
@@ -160,7 +173,8 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
   const registry = new Map(localRegistry);
   for (const [k, v] of declRegistry) registry.set(k, v);
 
-  const allConstructorNames = [...constructorNames, ...declConstructors];
+  // Combine all constructor names: imported + all modules + top-level declarations
+  const allConstructorNames = [...new Set([...importedConstructors, ...allModuleConstructors, ...declConstructors])];
 
   return {
     typeEnv,

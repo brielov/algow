@@ -1752,6 +1752,30 @@ const inferLetRec = (
   const baseEnv = new Map(env);
 
   for (const binding of expr.bindings) {
+    // Check if this is a qualified binding (Module.name)
+    // If so, look up the type from moduleEnv instead of re-inferring
+    const dotIndex = binding.name.indexOf(".");
+    if (dotIndex > 0) {
+      const moduleName = binding.name.substring(0, dotIndex);
+      const memberName = binding.name.substring(dotIndex + 1);
+      const moduleInfo = ctx.moduleEnv.get(moduleName);
+
+      if (moduleInfo) {
+        const memberScheme = moduleInfo.typeEnv.get(memberName);
+        if (memberScheme) {
+          // Instantiate the scheme and use it as the type
+          const valueType = instantiate(ctx, memberScheme);
+          valueTypes.set(binding.name, valueType);
+
+          // Unify with placeholder to maintain consistency
+          const placeholder = applySubst(subst, placeholders.get(binding.name)!);
+          const s2 = unify(ctx, placeholder, valueType, binding.value.span);
+          subst = composeSubst(subst, s2);
+          continue; // Skip normal inference
+        }
+      }
+    }
+
     // Build environment with current substitution applied only to placeholders
     const currentEnv = new Map(baseEnv);
     for (const [name, placeholder] of placeholders) {

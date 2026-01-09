@@ -270,8 +270,12 @@ const bindLetRec = (ctx: BindContext, expr: ast.LetRec): void => {
   }
 
   // Bind all values (all names are in scope for mutual recursion)
+  // Skip qualified bindings (Module.name) - their bodies reference internal module scope
+  // which is not available in the global expression tree
   for (const binding of expr.bindings) {
-    bindExpr(ctx, binding.value);
+    if (!binding.name.includes(".")) {
+      bindExpr(ctx, binding.value);
+    }
   }
 
   // Bind body
