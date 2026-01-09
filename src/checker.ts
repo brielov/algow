@@ -505,6 +505,41 @@ const applySubstScheme = (subst: Subst, scheme_: Scheme): Scheme => {
 };
 
 /**
+ * Replace a type constructor name with a qualified version throughout a type.
+ * Used to create qualified constructor schemes that return qualified types.
+ *
+ * Example: qualifyResultType(`a -> Box a`, "Box", "Foo.Box") => `a -> Foo.Box a`
+ */
+const qualifyResultType = (type: Type, oldName: string, newName: string): Type => {
+  switch (type.kind) {
+    case "TCon":
+      return type.name === oldName ? tcon(newName) : type;
+    case "TVar":
+      return type;
+    case "TFun":
+      return tfun(
+        qualifyResultType(type.param, oldName, newName),
+        qualifyResultType(type.ret, oldName, newName),
+      );
+    case "TApp":
+      return tapp(
+        qualifyResultType(type.con, oldName, newName),
+        qualifyResultType(type.arg, oldName, newName),
+      );
+    case "TRecord": {
+      const newFields = new Map<string, Type>();
+      for (const [name, fieldType] of type.fields) {
+        newFields.set(name, qualifyResultType(fieldType, oldName, newName));
+      }
+      const newRow = type.row ? qualifyResultType(type.row, oldName, newName) : null;
+      return trecord([...newFields.entries()], newRow);
+    }
+    case "TTuple":
+      return ttuple(type.elements.map((t) => qualifyResultType(t, oldName, newName)));
+  }
+};
+
+/**
  * Apply a substitution to all schemes in an environment.
  *
  * Used when we learn new type information that should propagate to the context.
@@ -1813,8 +1848,15 @@ const inferQualifiedVar = (ctx: CheckContext, expr: ast.QualifiedVar): InferResu
     return [new Map(), freshTypeVar(ctx), []];
   }
 
-  // Look up member in module
-  const s = mod.typeEnv.get(expr.member);
+  // First try qualified name (for constructors with qualified types like Foo.Box)
+  const qualifiedName = `${realModule}.${expr.member}`;
+  let s = mod.typeEnv.get(qualifiedName);
+
+  // Fall back to unqualified member name
+  if (!s) {
+    s = mod.typeEnv.get(expr.member);
+  }
+
   if (!s) {
     addError(ctx, `Module '${expr.moduleName}' does not export '${expr.member}'`, expr.span);
     return [new Map(), freshTypeVar(ctx), []];
@@ -1988,7 +2030,15 @@ const inferPattern = (
         return [subst, new Map()];
       }
 
-      const conScheme = mod.typeEnv.get(pattern.constructor);
+      // First try qualified name (for constructors with qualified types like Foo.Box)
+      const qualifiedConName = `${realModule}.${pattern.constructor}`;
+      let conScheme = mod.typeEnv.get(qualifiedConName);
+
+      // Fall back to unqualified name
+      if (!conScheme) {
+        conScheme = mod.typeEnv.get(pattern.constructor);
+      }
+
       if (!conScheme) {
         addError(
           ctx,
@@ -2370,6 +2420,9 @@ const typeExprToType = (texpr: ast.TypeExpr): Type => {
       return tapp(typeExprToType(texpr.con), typeExprToType(texpr.arg));
     case "TyCon":
       return tcon(texpr.name);
+    case "TyQual":
+      // Qualified type reference: Module.Type becomes a type constructor named "Module.Type"
+      return tcon(`${texpr.moduleName}.${texpr.typeName}`);
     case "TyFun":
       return tfun(typeExprToType(texpr.param), typeExprToType(texpr.ret));
     case "TyVar":
@@ -2403,6 +2456,9 @@ const instantiateTypeExpr = (ctx: CheckContext, texpr: ast.TypeExpr): Type => {
         return tapp(convert(t.con), convert(t.arg));
       case "TyCon":
         return tcon(t.name);
+      case "TyQual":
+        // Qualified type reference: Module.Type
+        return tcon(`${t.moduleName}.${t.typeName}`);
       case "TyFun":
         return tfun(convert(t.param), convert(t.ret));
       case "TyVar": {
@@ -3207,6 +3263,26 @@ export const processModule = (
   const fullRegistry: ConstructorRegistry = new Map(baseRegistry);
   for (const [k, v] of registry) fullRegistry.set(k, v);
 
+  // Also register types with qualified names (Module.Type) for qualified type references
+  // AND create qualified constructor schemes that return qualified types
+  for (const [typeName, cons] of registry) {
+    const qualifiedTypeName = `${mod.name}.${typeName}`;
+    fullRegistry.set(qualifiedTypeName, cons);
+
+    // For each constructor, create a qualified version that returns the qualified type
+    // This allows `Foo.Box 42` to have type `Foo.Box number` instead of `Box number`
+    for (const conName of cons) {
+      const conScheme = env.get(conName);
+      if (conScheme) {
+        // Qualify the result type in the scheme
+        const qualifiedType = qualifyResultType(conScheme.type, typeName, qualifiedTypeName);
+        const qualifiedConName = `${mod.name}.${conName}`;
+        env.set(qualifiedConName, scheme(conScheme.vars, qualifiedType));
+        constructorNames.push(qualifiedConName);
+      }
+    }
+  }
+
   // Process use statements inside the module
   if (mod.uses.length > 0 && moduleEnv) {
     const {
@@ -3416,7 +3492,15 @@ export const processUseStatements = (
         }
       }
     }
-    // If imports is null, only qualified access is available (no unqualified imports)
+
+    // Always add qualified constructor names for qualified access (e.g., Foo.Box)
+    // Filter for names that start with the module name prefix
+    const qualifiedPrefix = `${use.moduleName}.`;
+    for (const conName of mod.constructorNames) {
+      if (conName.startsWith(qualifiedPrefix)) {
+        constructorNames.push(conName);
+      }
+    }
   }
 
   return { localEnv, localRegistry, constructorNames, aliases, foreignFunctions, diagnostics };

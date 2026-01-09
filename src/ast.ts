@@ -608,7 +608,7 @@ export interface Match extends Node {
  * Type expressions come from the syntax (user-written), while Types are the
  * internal representation used by the inference algorithm.
  */
-export type TypeExpr = TyVar | TyCon | TyApp | TyFun | TyTuple;
+export type TypeExpr = TyVar | TyCon | TyQual | TyApp | TyFun | TyTuple;
 
 /**
  * Type variable - a placeholder for any type.
@@ -635,6 +635,19 @@ export interface TyVar extends Node {
 export interface TyCon extends Node {
   readonly kind: "TyCon";
   readonly name: string;
+}
+
+/**
+ * Qualified type reference - a type from a specific module.
+ *
+ * Example: `Foo.Result` refers to the Result type from module Foo.
+ *
+ * Used when referencing types defined in other modules.
+ */
+export interface TyQual extends Node {
+  readonly kind: "TyQual";
+  readonly moduleName: string;
+  readonly typeName: string;
 }
 
 /**
@@ -1016,6 +1029,13 @@ export const match = (expr: Expr, cases: readonly Case[], span?: Span): Match =>
 export const tyvar = (name: string, span?: Span): TyVar => ({ kind: "TyVar", name, span });
 
 export const tycon = (name: string, span?: Span): TyCon => ({ kind: "TyCon", name, span });
+
+export const tyqual = (moduleName: string, typeName: string, span?: Span): TyQual => ({
+  kind: "TyQual",
+  moduleName,
+  typeName,
+  span,
+});
 
 export const tyapp = (con: TypeExpr, arg: TypeExpr, span?: Span): TyApp => ({
   kind: "TyApp",

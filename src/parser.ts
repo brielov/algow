@@ -687,7 +687,22 @@ const parseTypeAtom = (state: ParserState): ast.TypeExpr | null => {
   }
 
   if (at(state, TokenKind.Upper)) {
-    let type: ast.TypeExpr = ast.tycon(text(state, advance(state)));
+    const nameToken = advance(state);
+    const name = text(state, nameToken);
+
+    // Check for qualified type: Module.Type
+    let type: ast.TypeExpr;
+    if (at(state, TokenKind.Dot)) {
+      advance(state); // .
+      const typeNameToken = expect(state, TokenKind.Upper, "expected type name after '.'");
+      if (typeNameToken) {
+        type = ast.tyqual(name, text(state, typeNameToken));
+      } else {
+        type = ast.tycon(name);
+      }
+    } else {
+      type = ast.tycon(name);
+    }
 
     while (
       atAny(state, TokenKind.Lower, TokenKind.Upper, TokenKind.LParen) &&
@@ -737,7 +752,19 @@ const parseTypeAtomSimple = (state: ParserState): ast.TypeExpr | null => {
   }
 
   if (at(state, TokenKind.Upper)) {
-    return ast.tycon(text(state, advance(state)));
+    const nameToken = advance(state);
+    const name = text(state, nameToken);
+
+    // Check for qualified type: Module.Type
+    if (at(state, TokenKind.Dot)) {
+      advance(state); // .
+      const typeNameToken = expect(state, TokenKind.Upper, "expected type name after '.'");
+      if (typeNameToken) {
+        return ast.tyqual(name, text(state, typeNameToken));
+      }
+    }
+
+    return ast.tycon(name);
   }
 
   if (at(state, TokenKind.LParen)) {

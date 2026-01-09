@@ -936,8 +936,9 @@ const matchPattern = (pattern: ast.Pattern, value: Value): MatchResult => {
 
     case "QualifiedPCon": {
       // Qualified constructor pattern (Module.Constructor)
-      // Match against the constructor name only (module already resolved by type checker)
-      if (value.kind !== "VCon" || value.name !== pattern.constructor) {
+      // Match against the qualified constructor name
+      const qualifiedName = `${pattern.moduleName}.${pattern.constructor}`;
+      if (value.kind !== "VCon" || value.name !== qualifiedName) {
         return { matched: false };
       }
       if (value.args.length !== pattern.args.length) {
