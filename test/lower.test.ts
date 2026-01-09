@@ -768,6 +768,9 @@ describe("lowerToIR", () => {
             registry: new Map(),
             constructorNames: [],
             foreignNames: new Set(["length"]),
+            exports: new Map([
+              ["length", { vars: [], constraints: [], type: funType(strType, intType) }],
+            ]),
           },
         ],
       ]);
@@ -799,6 +802,9 @@ describe("lowerToIR", () => {
             registry: new Map(),
             constructorNames: [],
             foreignNames: new Set(), // Not foreign
+            exports: new Map([
+              ["length", { vars: [], constraints: [], type: funType(strType, intType) }],
+            ]),
           },
         ],
       ]);

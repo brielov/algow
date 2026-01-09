@@ -421,6 +421,8 @@ export type ModuleTypeInfo = {
   readonly constructorNames: readonly string[];
   /** Names of foreign functions declared in this module */
   readonly foreignNames: ReadonlySet<string>;
+  /** Names actually exported by this module (excludes inherited prelude names) */
+  readonly exports: TypeEnv;
 };
 
 /**
@@ -3335,7 +3337,42 @@ export const processModule = (
     }
   }
 
-  return { typeEnv: env, registry: fullRegistry, constructorNames, foreignNames };
+  // Build exports: only include module-local names, not inherited prelude names
+  const exports: TypeEnv = new Map();
+
+  // Add constructors from type declarations
+  for (const [name, s] of dataEnv) {
+    exports.set(name, s);
+  }
+
+  // Add qualified constructors
+  for (const [_typeName, cons] of registry) {
+    for (const conName of cons) {
+      const qualifiedConName = `${mod.name}.${conName}`;
+      const sch = env.get(qualifiedConName);
+      if (sch) {
+        exports.set(qualifiedConName, sch);
+      }
+    }
+  }
+
+  // Add module bindings
+  for (const binding of mod.bindings) {
+    const sch = env.get(binding.name);
+    if (sch) {
+      exports.set(binding.name, sch);
+    }
+  }
+
+  // Add foreign bindings
+  for (const name of foreignNames) {
+    const sch = env.get(name);
+    if (sch) {
+      exports.set(name, sch);
+    }
+  }
+
+  return { typeEnv: env, registry: fullRegistry, constructorNames, foreignNames, exports };
 };
 
 /**
@@ -3446,8 +3483,8 @@ export const processUseStatements = (
 
     // Process imports
     if (use.imports?.kind === "All") {
-      // Import everything unqualified
-      for (const [name, scheme] of mod.typeEnv) {
+      // Import everything unqualified from module's exports (not inherited prelude names)
+      for (const [name, scheme] of mod.exports) {
         const isForeign = mod.foreignNames.has(name);
         addName(name, scheme, use.moduleName, use.span, isForeign);
       }
