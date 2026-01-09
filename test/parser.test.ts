@@ -1541,10 +1541,9 @@ describe("Parser", () => {
       `);
       const expr = programToExpr(result.program);
       expect(stripSpans(expr)).toEqual(
-        ast.let_(
-          "x",
-          ast.int(1),
-          ast.let_("y", ast.int(2), ast.binOp("+", ast.var_("x"), ast.var_("y"))),
+        ast.letRec(
+          [ast.recBinding("x", ast.int(1)), ast.recBinding("y", ast.int(2))],
+          ast.binOp("+", ast.var_("x"), ast.var_("y")),
         ),
       );
     });
@@ -1570,9 +1569,8 @@ describe("Parser", () => {
       `);
       const expr = programToExpr(result.program);
       expect(stripSpans(expr)).toEqual(
-        ast.let_(
-          "add",
-          ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
+        ast.letRec(
+          [ast.recBinding("add", ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))))],
           ast.app(ast.app(ast.var_("add"), ast.int(1)), ast.int(2)),
         ),
       );

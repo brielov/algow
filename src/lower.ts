@@ -352,10 +352,11 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
             return ir.irAtomExpr(ir.irForeignVar(expr.moduleName, expr.member, type));
           }
         }
-        // Non-foreign function in the module - use the module's type environment
+        // Non-foreign function in the module - use the qualified name
         const scheme = mod.typeEnv.get(expr.member);
         if (scheme) {
-          return ir.irAtomExpr(ir.irVar(expr.member, applySubst(ctx.subst, scheme.type)));
+          const qualifiedName = `${expr.moduleName}.${expr.member}`;
+          return ir.irAtomExpr(ir.irVar(qualifiedName, applySubst(ctx.subst, scheme.type)));
         }
       }
       // Fall back to checking the local type environment (for imported names)
@@ -416,31 +417,51 @@ const lowerLetRec = (ctx: LowerContext, expr: ast.LetRec): ir.IRExpr => {
   }
 
   // Step 2: Lower all values (all names are in scope for mutual recursion)
-  const irBindings: ir.IRRecBinding[] = [];
-  const allPreBindings: Array<{ name: string; binding: ir.IRBinding }> = [];
+  // Separate lambda bindings (go in LetRec) from non-lambda bindings (become Lets)
+  const lambdaBindings: ir.IRRecBinding[] = [];
+  const nonLambdaBindings: Array<{ name: string; binding: ir.IRBinding }> = [];
 
   for (const binding of expr.bindings) {
     const valueIR = lowerExpr(ctx, binding.value);
     const { bindings: preBindings, finalBinding } = extractBindings(valueIR);
 
-    // Collect any pre-bindings
-    for (const b of preBindings) {
-      allPreBindings.push(b);
+    // Check if this is a lambda binding
+    if (finalBinding.kind === "IRLambdaBinding") {
+      // Lambda bindings go in the LetRec
+      lambdaBindings.push(ir.irRecBinding(binding.name, finalBinding));
+      // Pre-bindings from lambda lowering should be minimal (just the lambda itself)
+      // but if there are any, they go before the binding
+      for (const b of preBindings) {
+        lambdaBindings.push(ir.irRecBinding(b.name, b.binding));
+      }
+    } else {
+      // Non-lambda bindings become sequential Lets inside the body
+      // Include any pre-bindings first
+      for (const b of preBindings) {
+        nonLambdaBindings.push(b);
+      }
+      nonLambdaBindings.push({ name: binding.name, binding: finalBinding });
     }
-
-    irBindings.push(ir.irRecBinding(binding.name, finalBinding));
 
     // Update the environment with the actual type
     extendEnv(ctx, binding.name, finalBinding.type);
   }
 
   // Step 3: Lower the body
-  const bodyIR = lowerExpr(ctx, expr.body);
+  let bodyIR = lowerExpr(ctx, expr.body);
 
-  // Step 4: Create the letrec
-  const letRecExpr = ir.irLetRec(irBindings, bodyIR);
+  // Step 4: Wrap body with non-lambda bindings (in reverse order so they're in correct order)
+  for (let i = nonLambdaBindings.length - 1; i >= 0; i--) {
+    const { name, binding } = nonLambdaBindings[i]!;
+    bodyIR = ir.irLet(name, binding, bodyIR);
+  }
 
-  return wrapWithBindings(allPreBindings, letRecExpr);
+  // Step 5: Create the letrec (only if there are lambda bindings)
+  if (lambdaBindings.length === 0) {
+    return bodyIR;
+  }
+
+  return ir.irLetRec(lambdaBindings, bodyIR);
 };
 
 const lowerAbs = (ctx: LowerContext, expr: ast.Abs): ir.IRExpr => {

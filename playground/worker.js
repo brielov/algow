@@ -149,6 +149,12 @@ var match = (expr, cases, span) => ({
 });
 var tyvar = (name, span) => ({ kind: "TyVar", name, span });
 var tycon = (name, span) => ({ kind: "TyCon", name, span });
+var tyqual = (moduleName, typeName, span) => ({
+  kind: "TyQual",
+  moduleName,
+  typeName,
+  span
+});
 var tyapp = (con, arg, span) => ({
   kind: "TyApp",
   con,
@@ -189,10 +195,11 @@ var qualifiedPCon = (moduleName, constructor, args, span, moduleSpan, constructo
   args,
   span
 });
-var moduleDecl = (name, declarations, bindings, foreignBindings = [], span, nameSpan) => ({
+var moduleDecl = (name, uses, declarations, bindings, foreignBindings = [], span, nameSpan) => ({
   kind: "ModuleDecl",
   name,
   nameSpan,
+  uses,
   declarations,
   bindings,
   foreignBindings,
@@ -403,7 +410,9 @@ var bindLetRec = (ctx, expr) => {
     addDefinition(ctx, binding.name, nameSpan, "variable");
   }
   for (const binding of expr.bindings) {
-    bindExpr(ctx, binding.value);
+    if (!binding.name.includes(".")) {
+      bindExpr(ctx, binding.value);
+    }
   }
   bindExpr(ctx, expr.body);
   for (let i = expr.bindings.length - 1;i >= 0; i--) {
@@ -565,15 +574,15 @@ var trecord = (fields, row = null) => ({
   row
 });
 var ttuple = (elements) => ({ kind: "TTuple", elements });
-var tInt = tcon("Int");
-var tFloat = tcon("Float");
+var tInt = tcon("int");
+var tFloat = tcon("float");
 var tStr = tcon("string");
 var tBool = tcon("boolean");
 var tChar = tcon("char");
 var instances = new Map([
-  ["Eq", new Set(["Int", "Float", "string", "boolean", "char"])],
-  ["Ord", new Set(["Int", "Float", "string", "char"])],
-  ["Add", new Set(["Int", "Float", "string"])]
+  ["Eq", new Set(["int", "float", "string", "boolean", "char"])],
+  ["Ord", new Set(["int", "float", "string", "char"])],
+  ["Add", new Set(["int", "float", "string"])]
 ]);
 var scheme = (vars, type, constraints = []) => ({
   vars,
@@ -610,6 +619,28 @@ var applySubstScheme = (subst, scheme_) => {
     }
   }
   return scheme(scheme_.vars, applySubst(filtered, scheme_.type));
+};
+var qualifyResultType = (type, oldName, newName) => {
+  switch (type.kind) {
+    case "TCon":
+      return type.name === oldName ? tcon(newName) : type;
+    case "TVar":
+      return type;
+    case "TFun":
+      return tfun(qualifyResultType(type.param, oldName, newName), qualifyResultType(type.ret, oldName, newName));
+    case "TApp":
+      return tapp(qualifyResultType(type.con, oldName, newName), qualifyResultType(type.arg, oldName, newName));
+    case "TRecord": {
+      const newFields = new Map;
+      for (const [name, fieldType] of type.fields) {
+        newFields.set(name, qualifyResultType(fieldType, oldName, newName));
+      }
+      const newRow = type.row ? qualifyResultType(type.row, oldName, newName) : null;
+      return trecord([...newFields.entries()], newRow);
+    }
+    case "TTuple":
+      return ttuple(type.elements.map((t) => qualifyResultType(t, oldName, newName)));
+  }
 };
 var applySubstEnv = (subst, env) => {
   const result = new Map;
@@ -1028,8 +1059,8 @@ var inferBinOp = (ctx, env, registry, expr) => {
   const [s2, rightType, c2] = inferExpr(ctx, applySubstEnv(s1, env), registry, expr.right);
   const resolvedLeft = applySubst(s2, leftType);
   const resolvedRight = rightType;
-  const isInt = (t) => t.kind === "TCon" && t.name === "Int";
-  const isFloat = (t) => t.kind === "TCon" && t.name === "Float";
+  const isInt = (t) => t.kind === "TCon" && t.name === "int";
+  const isFloat = (t) => t.kind === "TCon" && t.name === "float";
   const isNumeric = (t) => isInt(t) || isFloat(t);
   const widenNumeric = () => {
     if (isNumeric(resolvedLeft) && isNumeric(resolvedRight)) {
@@ -1160,48 +1191,247 @@ var inferLet = (ctx, env, registry, expr) => {
   const constraints = applySubstConstraints(subst, [...c1, ...c2]);
   return [subst, bodyType, constraints];
 };
-var inferLetRec = (ctx, env, registry, expr) => {
-  const placeholders = new Map;
-  const envWithPlaceholders = new Map(env);
-  for (const binding of expr.bindings) {
-    const placeholder = freshTypeVar(ctx);
-    placeholders.set(binding.name, placeholder);
-    envWithPlaceholders.set(binding.name, scheme([], placeholder));
-  }
-  let subst = new Map;
-  const valueTypes = new Map;
-  let constraints = [];
-  for (const binding of expr.bindings) {
-    let [s, valueType, c] = inferExpr(ctx, applySubstEnv(subst, envWithPlaceholders), registry, binding.value);
-    subst = composeSubst(subst, s);
-    if (binding.returnType) {
-      const annotatedType = instantiateTypeExpr(ctx, binding.returnType);
-      let currentType = applySubst(subst, valueType);
-      while (currentType.kind === "TFun") {
-        currentType = currentType.ret;
+var freeVars = (expr, bound = new Set) => {
+  const free = new Set;
+  const collect = (e, b) => {
+    if (!e || !e.kind)
+      return;
+    switch (e.kind) {
+      case "Var":
+        if (!b.has(e.name))
+          free.add(e.name);
+        break;
+      case "QualifiedVar":
+        break;
+      case "Int":
+      case "Float":
+      case "Str":
+      case "Char":
+      case "Bool":
+        break;
+      case "Abs": {
+        const newBound = new Set(b);
+        newBound.add(e.param);
+        collect(e.body, newBound);
+        break;
       }
-      const s3 = unify(ctx, currentType, annotatedType, binding.nameSpan);
-      subst = composeSubst(subst, s3);
-      valueType = applySubst(s3, valueType);
+      case "App":
+        collect(e.func, b);
+        collect(e.param, b);
+        break;
+      case "Let": {
+        collect(e.value, b);
+        const newBound = new Set(b);
+        newBound.add(e.name);
+        collect(e.body, newBound);
+        break;
+      }
+      case "LetRec": {
+        const newBound = new Set(b);
+        for (const binding of e.bindings) {
+          newBound.add(binding.name);
+        }
+        for (const binding of e.bindings) {
+          collect(binding.value, newBound);
+        }
+        collect(e.body, newBound);
+        break;
+      }
+      case "If":
+        collect(e.cond, b);
+        collect(e.then, b);
+        collect(e.else, b);
+        break;
+      case "BinOp":
+        collect(e.left, b);
+        collect(e.right, b);
+        break;
+      case "Match":
+        collect(e.expr, b);
+        for (const c of e.cases) {
+          const caseBound = new Set(b);
+          collectPatternVars(c.pattern, caseBound);
+          if (c.guard)
+            collect(c.guard, caseBound);
+          collect(c.body, caseBound);
+        }
+        break;
+      case "Tuple":
+        for (const el of e.elements)
+          collect(el, b);
+        break;
+      case "Record":
+        for (const f of e.fields)
+          collect(f.value, b);
+        break;
+      case "FieldAccess":
+        collect(e.record, b);
+        break;
+      case "TupleIndex":
+        collect(e.tuple, b);
+        break;
     }
-    valueTypes.set(binding.name, valueType);
-    constraints = [...applySubstConstraints(subst, constraints), ...c];
-    const placeholder = applySubst(subst, placeholders.get(binding.name));
-    const s22 = unify(ctx, placeholder, valueType, binding.value.span);
-    subst = composeSubst(subst, s22);
+  };
+  const collectPatternVars = (p, bound2) => {
+    switch (p.kind) {
+      case "PVar":
+        bound2.add(p.name);
+        break;
+      case "PCon":
+        for (const arg of p.args)
+          collectPatternVars(arg, bound2);
+        break;
+      case "PTuple":
+        for (const el of p.elements)
+          collectPatternVars(el, bound2);
+        break;
+      case "PRecord":
+        for (const f of p.fields)
+          collectPatternVars(f.pattern, bound2);
+        break;
+      case "PAs":
+        bound2.add(p.name);
+        collectPatternVars(p.pattern, bound2);
+        break;
+      case "POr":
+        for (const alt of p.alternatives)
+          collectPatternVars(alt, bound2);
+        break;
+      case "PWildcard":
+      case "PLit":
+        break;
+    }
+  };
+  collect(expr, bound);
+  return free;
+};
+var computeSCCs = (nodes, getKey, getDeps) => {
+  const index = new Map;
+  const lowlink = new Map;
+  const onStack = new Set;
+  const stack = [];
+  const sccs = [];
+  const nodeMap = new Map;
+  let counter = 0;
+  for (const node of nodes) {
+    nodeMap.set(getKey(node), node);
   }
-  const env1 = applySubstEnv(subst, env);
-  const env2 = new Map(env1);
-  for (const binding of expr.bindings) {
-    const valueType = applySubst(subst, valueTypes.get(binding.name));
-    const generalizedScheme = generalize(env1, valueType);
-    env2.set(binding.name, generalizedScheme);
-    const nameSpan = binding.nameSpan ?? expr.span;
-    if (nameSpan) {
-      recordType(ctx, nameSpan, valueType);
+  const strongconnect = (node) => {
+    const key = getKey(node);
+    index.set(key, counter);
+    lowlink.set(key, counter);
+    counter++;
+    stack.push(node);
+    onStack.add(key);
+    for (const depKey of getDeps(node)) {
+      if (!nodeMap.has(depKey))
+        continue;
+      const dep = nodeMap.get(depKey);
+      const depKeyActual = getKey(dep);
+      if (!index.has(depKeyActual)) {
+        strongconnect(dep);
+        lowlink.set(key, Math.min(lowlink.get(key), lowlink.get(depKeyActual)));
+      } else if (onStack.has(depKeyActual)) {
+        lowlink.set(key, Math.min(lowlink.get(key), index.get(depKeyActual)));
+      }
+    }
+    if (lowlink.get(key) === index.get(key)) {
+      const scc = [];
+      let w;
+      do {
+        w = stack.pop();
+        onStack.delete(getKey(w));
+        scc.push(w);
+      } while (getKey(w) !== key);
+      sccs.push(scc);
+    }
+  };
+  for (const node of nodes) {
+    if (!index.has(getKey(node))) {
+      strongconnect(node);
     }
   }
-  const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
+  return sccs;
+};
+var splitBindingsBySCC = (bindings) => {
+  const bindingNames = new Set(bindings.map((b) => b.name));
+  const getDeps = (b) => {
+    const free = freeVars(b.value);
+    return [...free].filter((name) => bindingNames.has(name));
+  };
+  const sccs = computeSCCs([...bindings], (b) => b.name, getDeps);
+  return sccs;
+};
+var inferLetRec = (ctx, env, registry, expr) => {
+  const sccs = splitBindingsBySCC(expr.bindings);
+  let currentEnv = new Map(env);
+  let subst = new Map;
+  let constraints = [];
+  const allValueTypes = new Map;
+  for (const scc of sccs) {
+    const placeholders = new Map;
+    for (const binding of scc) {
+      placeholders.set(binding.name, freshTypeVar(ctx));
+    }
+    const sccEnv = new Map(currentEnv);
+    for (const [name, placeholder] of placeholders) {
+      sccEnv.set(name, scheme([], applySubst(subst, placeholder)));
+    }
+    const valueTypes = new Map;
+    for (const binding of scc) {
+      const dotIndex = binding.name.indexOf(".");
+      if (dotIndex > 0) {
+        const moduleName = binding.name.substring(0, dotIndex);
+        const memberName = binding.name.substring(dotIndex + 1);
+        const moduleInfo = ctx.moduleEnv.get(moduleName);
+        if (moduleInfo) {
+          const memberScheme = moduleInfo.typeEnv.get(memberName);
+          if (memberScheme) {
+            const valueType2 = instantiate(ctx, memberScheme);
+            valueTypes.set(binding.name, valueType2);
+            allValueTypes.set(binding.name, valueType2);
+            const placeholder2 = applySubst(subst, placeholders.get(binding.name));
+            const s23 = unify(ctx, placeholder2, valueType2, binding.value.span);
+            subst = composeSubst(subst, s23);
+            continue;
+          }
+        }
+      }
+      for (const [name, placeholder2] of placeholders) {
+        sccEnv.set(name, scheme([], applySubst(subst, placeholder2)));
+      }
+      let [s, valueType, c] = inferExpr(ctx, sccEnv, registry, binding.value);
+      subst = composeSubst(subst, s);
+      if (binding.returnType) {
+        const annotatedType = instantiateTypeExpr(ctx, binding.returnType);
+        let currentType = applySubst(subst, valueType);
+        while (currentType.kind === "TFun") {
+          currentType = currentType.ret;
+        }
+        const s3 = unify(ctx, currentType, annotatedType, binding.nameSpan);
+        subst = composeSubst(subst, s3);
+        valueType = applySubst(s3, valueType);
+      }
+      valueTypes.set(binding.name, valueType);
+      allValueTypes.set(binding.name, valueType);
+      constraints = [...applySubstConstraints(subst, constraints), ...c];
+      const placeholder = applySubst(subst, placeholders.get(binding.name));
+      const s22 = unify(ctx, placeholder, valueType, binding.value.span);
+      subst = composeSubst(subst, s22);
+    }
+    const envForGeneralize = applySubstEnv(subst, currentEnv);
+    for (const binding of scc) {
+      const valueType = applySubst(subst, valueTypes.get(binding.name));
+      const generalizedScheme = generalize(envForGeneralize, valueType);
+      currentEnv.set(binding.name, generalizedScheme);
+      const nameSpan = binding.nameSpan ?? expr.span;
+      if (nameSpan) {
+        recordType(ctx, nameSpan, valueType);
+      }
+    }
+  }
+  const finalEnv = applySubstEnv(subst, currentEnv);
+  const [s2, bodyType, c2] = inferExpr(ctx, finalEnv, registry, expr.body);
   const finalSubst = composeSubst(subst, s2);
   const finalConstraints = applySubstConstraints(finalSubst, [...constraints, ...c2]);
   return [finalSubst, bodyType, finalConstraints];
@@ -1220,7 +1450,11 @@ var inferQualifiedVar = (ctx, expr) => {
     addError(ctx, `Unknown module: ${expr.moduleName}`, expr.span);
     return [new Map, freshTypeVar(ctx), []];
   }
-  const s = mod.typeEnv.get(expr.member);
+  const qualifiedName = `${realModule}.${expr.member}`;
+  let s = mod.typeEnv.get(qualifiedName);
+  if (!s) {
+    s = mod.typeEnv.get(expr.member);
+  }
   if (!s) {
     addError(ctx, `Module '${expr.moduleName}' does not export '${expr.member}'`, expr.span);
     return [new Map, freshTypeVar(ctx), []];
@@ -1304,7 +1538,11 @@ var inferPattern = (ctx, env, pattern, expectedType, subst) => {
         addError(ctx, `Unknown module: ${pattern.moduleName}`, pattern.span);
         return [subst, new Map];
       }
-      const conScheme = mod.typeEnv.get(pattern.constructor);
+      const qualifiedConName = `${realModule}.${pattern.constructor}`;
+      let conScheme = mod.typeEnv.get(qualifiedConName);
+      if (!conScheme) {
+        conScheme = mod.typeEnv.get(pattern.constructor);
+      }
       if (!conScheme) {
         addError(ctx, `Module '${pattern.moduleName}' does not export '${pattern.constructor}'`, pattern.span);
         return [subst, new Map];
@@ -1513,9 +1751,15 @@ var inferMatch = (ctx, env, registry, expr) => {
   }
   if (!isExhaustive) {
     const patterns = expr.cases.filter((c) => !c.guard).map((c) => c.pattern);
-    const missing = checkExhaustiveness(env, registry, applySubst(subst, scrutineeType), patterns);
-    if (missing.length > 0) {
-      addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+    const typeName = getTypeConName(applySubst(subst, scrutineeType));
+    const isBoolean = typeName === "boolean";
+    const constructorCount = isBoolean ? 2 : typeName ? registry.get(typeName)?.length ?? 0 : 0;
+    const MAX_CONSTRUCTORS_FOR_EXHAUSTIVENESS = 50;
+    if (constructorCount > 0 && constructorCount <= MAX_CONSTRUCTORS_FOR_EXHAUSTIVENESS) {
+      const missing = checkExhaustiveness(env, registry, applySubst(subst, scrutineeType), patterns);
+      if (missing.length > 0) {
+        addError(ctx, `Non-exhaustive patterns. Missing: ${missing.join(", ")}`);
+      }
     }
   }
   return [subst, applySubst(subst, resultType), constraints];
@@ -1526,6 +1770,8 @@ var typeExprToType = (texpr) => {
       return tapp(typeExprToType(texpr.con), typeExprToType(texpr.arg));
     case "TyCon":
       return tcon(texpr.name);
+    case "TyQual":
+      return tcon(`${texpr.moduleName}.${texpr.typeName}`);
     case "TyFun":
       return tfun(typeExprToType(texpr.param), typeExprToType(texpr.ret));
     case "TyVar":
@@ -1534,7 +1780,7 @@ var typeExprToType = (texpr) => {
       return ttuple(texpr.elements.map(typeExprToType));
   }
 };
-var PRIMITIVE_TYPES = new Set(["Int", "Float", "string", "boolean"]);
+var PRIMITIVE_TYPES = new Set(["int", "float", "string", "boolean"]);
 var instantiateTypeExpr = (ctx, texpr) => {
   const varMapping = new Map;
   const convert = (t) => {
@@ -1543,6 +1789,8 @@ var instantiateTypeExpr = (ctx, texpr) => {
         return tapp(convert(t.con), convert(t.arg));
       case "TyCon":
         return tcon(t.name);
+      case "TyQual":
+        return tcon(`${t.moduleName}.${t.typeName}`);
       case "TyFun":
         return tfun(convert(t.param), convert(t.ret));
       case "TyVar": {
@@ -1793,7 +2041,7 @@ var defaultMatrix = (matrix) => {
   return result;
 };
 var findWitness = (env, registry, matrix, types, depth = 0) => {
-  const MAX_DEPTH = 10;
+  const MAX_DEPTH = 3;
   if (depth > MAX_DEPTH) {
     if (matrix.length === 0 && types.length > 0) {
       return types.map(() => ({ kind: "Wild" }));
@@ -1904,14 +2152,44 @@ var processDeclarations = (declarations, initial = {
   }
   return { typeEnv, registry, constructorNames };
 };
-var processModule = (mod, baseEnv, baseRegistry) => {
-  const { typeEnv: dataEnv, registry, constructorNames } = processDeclarations(mod.declarations);
+var processModule = (mod, baseEnv, baseRegistry, moduleEnv) => {
+  const {
+    typeEnv: dataEnv,
+    registry,
+    constructorNames: declConstructors
+  } = processDeclarations(mod.declarations);
+  const constructorNames = [...declConstructors];
   const env = new Map(baseEnv);
   for (const [k, v] of dataEnv)
     env.set(k, v);
   const fullRegistry = new Map(baseRegistry);
   for (const [k, v] of registry)
     fullRegistry.set(k, v);
+  for (const [typeName, cons] of registry) {
+    const qualifiedTypeName = `${mod.name}.${typeName}`;
+    fullRegistry.set(qualifiedTypeName, cons);
+    for (const conName of cons) {
+      const conScheme = env.get(conName);
+      if (conScheme) {
+        const qualifiedType = qualifyResultType(conScheme.type, typeName, qualifiedTypeName);
+        const qualifiedConName = `${mod.name}.${conName}`;
+        env.set(qualifiedConName, scheme(conScheme.vars, qualifiedType));
+        constructorNames.push(qualifiedConName);
+      }
+    }
+  }
+  if (mod.uses.length > 0 && moduleEnv) {
+    const {
+      localEnv,
+      localRegistry,
+      constructorNames: usedCons
+    } = processUseStatements(mod.uses, moduleEnv, env);
+    for (const [k, v] of localEnv)
+      env.set(k, v);
+    for (const [k, v] of localRegistry)
+      fullRegistry.set(k, v);
+    constructorNames.push(...usedCons);
+  }
   const foreignNames = new Set;
   for (const foreign of mod.foreignBindings) {
     const type = typeExprToType(foreign.type);
@@ -1922,38 +2200,52 @@ var processModule = (mod, baseEnv, baseRegistry) => {
   if (mod.bindings.length > 0) {
     const emptySymbols = { definitions: [], references: [] };
     const ctx = createContext2(emptySymbols);
-    const placeholders = new Map;
-    const envWithPlaceholders = new Map(env);
     for (const binding of mod.bindings) {
       const placeholder = freshTypeVar(ctx);
-      placeholders.set(binding.name, placeholder);
-      envWithPlaceholders.set(binding.name, scheme([], placeholder));
-    }
-    let subst = new Map;
-    const valueTypes = new Map;
-    for (const binding of mod.bindings) {
-      const [s, valueType] = inferExpr(ctx, applySubstEnv(subst, envWithPlaceholders), fullRegistry, binding.value);
-      subst = composeSubst(subst, s);
-      valueTypes.set(binding.name, valueType);
-      const placeholder = applySubst(subst, placeholders.get(binding.name));
-      const s2 = unify(ctx, placeholder, valueType);
-      subst = composeSubst(subst, s2);
-    }
-    const env1 = applySubstEnv(subst, env);
-    for (const binding of mod.bindings) {
-      const valueType = applySubst(subst, valueTypes.get(binding.name));
-      const generalizedScheme = generalize(env1, valueType);
+      const envWithPlaceholder = new Map(env);
+      envWithPlaceholder.set(binding.name, scheme([], placeholder));
+      const [s, valueType] = inferExpr(ctx, envWithPlaceholder, fullRegistry, binding.value);
+      const resolvedPlaceholder = applySubst(s, placeholder);
+      const s2 = unify(ctx, resolvedPlaceholder, valueType);
+      const finalSubst = composeSubst(s, s2);
+      const finalType = applySubst(finalSubst, valueType);
+      const generalizedScheme = generalize(env, finalType);
       env.set(binding.name, generalizedScheme);
     }
   }
-  return { typeEnv: env, registry: fullRegistry, constructorNames, foreignNames };
+  const exports = new Map;
+  for (const [name, s] of dataEnv) {
+    exports.set(name, s);
+  }
+  for (const [_typeName, cons] of registry) {
+    for (const conName of cons) {
+      const qualifiedConName = `${mod.name}.${conName}`;
+      const sch = env.get(qualifiedConName);
+      if (sch) {
+        exports.set(qualifiedConName, sch);
+      }
+    }
+  }
+  for (const binding of mod.bindings) {
+    const sch = env.get(binding.name);
+    if (sch) {
+      exports.set(binding.name, sch);
+    }
+  }
+  for (const name of foreignNames) {
+    const sch = env.get(name);
+    if (sch) {
+      exports.set(name, sch);
+    }
+  }
+  return { typeEnv: env, registry: fullRegistry, constructorNames, foreignNames, exports };
 };
 var processModules = (modules) => {
   const result = new Map;
   let accEnv = new Map;
   let accRegistry = new Map;
   for (const mod of modules) {
-    const info = processModule(mod, accEnv, accRegistry);
+    const info = processModule(mod, accEnv, accRegistry, result);
     result.set(mod.name, info);
     for (const [k, v] of info.typeEnv)
       accEnv.set(k, v);
@@ -1999,7 +2291,7 @@ var processUseStatements = (uses, moduleEnv, existingEnv) => {
       continue;
     }
     if (use.imports?.kind === "All") {
-      for (const [name, scheme2] of mod.typeEnv) {
+      for (const [name, scheme2] of mod.exports) {
         const isForeign = mod.foreignNames.has(name);
         addName(name, scheme2, use.moduleName, use.span, isForeign);
       }
@@ -2037,6 +2329,12 @@ var processUseStatements = (uses, moduleEnv, existingEnv) => {
             }
           }
         }
+      }
+    }
+    const qualifiedPrefix = `${use.moduleName}.`;
+    for (const conName of mod.constructorNames) {
+      if (conName.startsWith(qualifiedPrefix)) {
+        constructorNames.push(conName);
       }
     }
   }
@@ -2727,7 +3025,8 @@ var matchPattern = (pattern, value) => {
       return { matched: true, bindings };
     }
     case "QualifiedPCon": {
-      if (value.kind !== "VCon" || value.name !== pattern.constructor) {
+      const qualifiedName = `${pattern.moduleName}.${pattern.constructor}`;
+      if (value.kind !== "VCon" || value.name !== qualifiedName) {
         return { matched: false };
       }
       if (value.args.length !== pattern.args.length) {
@@ -3367,12 +3666,20 @@ var parseLetBindingOrExpr = (state) => {
     const end = body2.span?.end ?? state.current[1];
     return { kind: "expr", expr: match(value, [case_(pattern, body2)], span(start, end)) };
   }
-  const nameToken = expect(state, 5 /* Lower */, "expected binding name");
-  if (!nameToken) {
-    synchronize(state);
-    return { kind: "expr", expr: int(0) };
+  let nameToken = null;
+  let name;
+  if (at(state, 40 /* Underscore */)) {
+    nameToken = state.current;
+    advance2(state);
+    name = "_";
+  } else {
+    nameToken = expect(state, 5 /* Lower */, "expected binding name");
+    if (!nameToken) {
+      synchronize(state);
+      return { kind: "expr", expr: int(0) };
+    }
+    name = text(state, nameToken);
   }
-  const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
   const params = parseParams(state);
   let returnType;
@@ -3459,11 +3766,16 @@ var parseModuleDecl = (state) => {
   }
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
+  const uses = [];
   const declarations = [];
   const bindings = [];
   const foreignBindings = [];
   while (!at(state, 14 /* End */) && !at(state, 0 /* Eof */)) {
-    if (at(state, 15 /* Type */)) {
+    if (at(state, 22 /* Use */)) {
+      const use = parseUseDecl(state);
+      if (use)
+        uses.push(use);
+    } else if (at(state, 15 /* Type */)) {
       const decl = parseDataDecl(state);
       if (decl)
         declarations.push(decl);
@@ -3471,18 +3783,24 @@ var parseModuleDecl = (state) => {
       const binding = parseModuleBinding(state);
       if (binding)
         bindings.push(binding);
+      while (at(state, 20 /* AndKw */)) {
+        advance2(state);
+        const andBinding = parseModuleBindingAfterAnd(state);
+        if (andBinding)
+          bindings.push(andBinding);
+      }
     } else if (at(state, 23 /* Foreign */)) {
       const foreign = parseForeignBinding(state);
       if (foreign)
         foreignBindings.push(foreign);
     } else {
-      error2(state, "expected 'type', 'let', or 'foreign' declaration in module");
+      error2(state, "expected 'use', 'type', 'let', or 'foreign' declaration in module");
       advance2(state);
     }
   }
   const endToken = expect(state, 14 /* End */, "expected 'end' after module body");
   const end = endToken ? endToken[2] : state.current[1];
-  return moduleDecl(name, declarations, bindings, foreignBindings, span(start, end), nameSpan);
+  return moduleDecl(name, uses, declarations, bindings, foreignBindings, span(start, end), nameSpan);
 };
 var parseForeignBinding = (state) => {
   const start = state.current[1];
@@ -3511,6 +3829,12 @@ var parseModuleBinding = (state) => {
   const recursive = at(state, 8 /* Rec */);
   if (recursive)
     advance2(state);
+  return parseModuleBindingCore(state);
+};
+var parseModuleBindingAfterAnd = (state) => {
+  return parseModuleBindingCore(state);
+};
+var parseModuleBindingCore = (state) => {
   const nameToken = expect(state, 5 /* Lower */, "expected binding name");
   if (!nameToken) {
     synchronize(state);
@@ -3630,7 +3954,20 @@ var parseTypeAtom = (state) => {
     return tyvar(text(state, advance2(state)));
   }
   if (at(state, 6 /* Upper */)) {
-    let type = tycon(text(state, advance2(state)));
+    const nameToken = advance2(state);
+    const name = text(state, nameToken);
+    let type;
+    if (at(state, 39 /* Dot */)) {
+      advance2(state);
+      const typeNameToken = expect(state, 6 /* Upper */, "expected type name after '.'");
+      if (typeNameToken) {
+        type = tyqual(name, text(state, typeNameToken));
+      } else {
+        type = tycon(name);
+      }
+    } else {
+      type = tycon(name);
+    }
     while (atAny(state, 5 /* Lower */, 6 /* Upper */, 45 /* LParen */) && !atNewStatement(state)) {
       const arg = parseTypeAtomSimple(state);
       if (arg) {
@@ -3669,7 +4006,16 @@ var parseTypeAtomSimple = (state) => {
     return tyvar(text(state, advance2(state)));
   }
   if (at(state, 6 /* Upper */)) {
-    return tycon(text(state, advance2(state)));
+    const nameToken = advance2(state);
+    const name = text(state, nameToken);
+    if (at(state, 39 /* Dot */)) {
+      advance2(state);
+      const typeNameToken = expect(state, 6 /* Upper */, "expected type name after '.'");
+      if (typeNameToken) {
+        return tyqual(name, text(state, typeNameToken));
+      }
+    }
+    return tycon(name);
   }
   if (at(state, 45 /* LParen */)) {
     advance2(state);
@@ -3860,7 +4206,7 @@ var parseInfix = (state, left, bp) => {
       return fieldAccess(left, field2, span(start, end));
     }
     default: {
-      const right = parsePrefixNoLambda(state);
+      const right = parsePrecedence(state, bp, false);
       const end = right.span?.end ?? state.current[1];
       return app(left, right, span(start, end));
     }
@@ -4048,11 +4394,19 @@ var parseMatch = (state) => {
   return match(scrutinee, cases, span(start, end));
 };
 var parseRecBinding = (state) => {
-  const nameToken = expect(state, 5 /* Lower */, "expected binding name");
-  if (!nameToken) {
-    return recBinding("_error_", int(0));
+  let nameToken = null;
+  let name;
+  if (at(state, 40 /* Underscore */)) {
+    nameToken = state.current;
+    advance2(state);
+    name = "_";
+  } else {
+    nameToken = expect(state, 5 /* Lower */, "expected binding name");
+    if (!nameToken) {
+      return recBinding("_error_", int(0));
+    }
+    name = text(state, nameToken);
   }
-  const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
   const params = parseParams(state);
   let returnType;
@@ -4372,21 +4726,37 @@ var programToExpr = (program, modules = [], uses = []) => {
     }
   }
   const seenModules = new Set;
-  for (const use of uses) {
+  for (let i = uses.length - 1;i >= 0; i--) {
+    const use = uses[i];
     if (seenModules.has(use.moduleName))
       continue;
     seenModules.add(use.moduleName);
     const mod = modules.find((m) => m.name === use.moduleName);
     if (!mod || mod.bindings.length === 0)
       continue;
-    const qualifiedBindings = [];
-    for (const binding of mod.bindings) {
-      qualifiedBindings.push(recBinding(`${mod.name}.${binding.name}`, var_(binding.name), binding.nameSpan, binding.returnType));
+    let namesToImport = [];
+    if (use.imports?.kind === "All") {
+      namesToImport = mod.bindings.map((b) => b.name);
+    } else if (use.imports?.kind === "Specific") {
+      namesToImport = use.imports.items.filter((item) => mod.bindings.some((b) => b.name === item.name)).map((item) => item.name);
     }
-    if (qualifiedBindings.length > 0) {
-      expr = letRec(qualifiedBindings, expr);
+    if (namesToImport.length > 0) {
+      const unqualifiedBindings = namesToImport.map((name) => recBinding(name, qualifiedVar(mod.name, name)));
+      expr = letRec(unqualifiedBindings, expr);
     }
-    expr = letRec(mod.bindings, expr);
+  }
+  for (let i = modules.length - 1;i >= 0; i--) {
+    const mod = modules[i];
+    if (mod.bindings.length === 0)
+      continue;
+    const bindings = [];
+    for (const b of mod.bindings) {
+      bindings.push(recBinding(`${mod.name}.${b.name}`, b.value, b.nameSpan, b.returnType));
+    }
+    for (const b of mod.bindings) {
+      bindings.push(recBinding(b.name, var_(`${mod.name}.${b.name}`)));
+    }
+    expr = letRec(bindings, expr);
   }
   return expr;
 };
@@ -4529,7 +4899,7 @@ var eitherFromMaybeExpr = abs("err", abs("m", match(var_("m"), [
   case_(pcon("Nothing", []), app(var_("Left"), var_("err"))),
   case_(pcon("Just", [pvar("x")]), app(var_("Right"), var_("x")))
 ])));
-var maybeModule = moduleDecl("Maybe", [maybe], [
+var maybeModule = moduleDecl("Maybe", [], [maybe], [
   recBinding("isJust", isJustExpr),
   recBinding("isNothing", isNothingExpr),
   recBinding("map", maybeMapExpr),
@@ -4537,7 +4907,7 @@ var maybeModule = moduleDecl("Maybe", [maybe], [
   recBinding("withDefault", maybeWithDefaultExpr),
   recBinding("toList", maybeToListExpr)
 ]);
-var eitherModule = moduleDecl("Either", [either], [
+var eitherModule = moduleDecl("Either", [], [either], [
   recBinding("isLeft", isLeftExpr),
   recBinding("isRight", isRightExpr),
   recBinding("map", eitherMapExpr),
@@ -4546,8 +4916,8 @@ var eitherModule = moduleDecl("Either", [either], [
   recBinding("withDefault", eitherWithDefaultExpr),
   recBinding("fromMaybe", eitherFromMaybeExpr)
 ]);
-var unitModule = moduleDecl("Unit", [unit], []);
-var listModule = moduleDecl("List", [list], [
+var unitModule = moduleDecl("Unit", [], [unit], []);
+var listModule = moduleDecl("List", [], [list], [
   recBinding("map", mapExpr),
   recBinding("filter", filterExpr),
   recBinding("head", headExpr),
@@ -4566,15 +4936,15 @@ var listModule = moduleDecl("List", [list], [
   recBinding("all", allExpr),
   recBinding("find", findExpr)
 ]);
-var coreModule = moduleDecl("Core", [], [
+var coreModule = moduleDecl("Core", [], [], [
   recBinding("id", idExpr),
   recBinding("const", constExpr),
   recBinding("compose", composeExpr),
   recBinding("flip", flipExpr)
 ]);
 var tString = tycon("string");
-var tInt2 = tycon("Int");
-var tFloat2 = tycon("Float");
+var tInt2 = tycon("int");
+var tFloat2 = tycon("float");
 var tBool2 = tycon("boolean");
 var tChar2 = tycon("char");
 var tUnit = tycon("Unit");
@@ -4584,7 +4954,7 @@ var tList = (t) => tyapp(tycon("List"), t);
 var tEither = (a, b) => tyapp(tyapp(tycon("Either"), a), b);
 var fn = (a, b) => tyfun(a, b);
 var tvar2 = (name) => tyvar(name);
-var stringModule = moduleDecl("String", [], [], [
+var stringModule = moduleDecl("String", [], [], [], [
   foreignBinding("length", fn(tString, tInt2)),
   foreignBinding("concat", fn(tString, fn(tString, tString))),
   foreignBinding("substring", fn(tInt2, fn(tInt2, fn(tString, tString)))),
@@ -4606,7 +4976,7 @@ var stringModule = moduleDecl("String", [], [], [
   foreignBinding("endsWith", fn(tString, fn(tString, tBool2))),
   foreignBinding("replace", fn(tString, fn(tString, fn(tString, tString))))
 ]);
-var charModule = moduleDecl("Char", [], [], [
+var charModule = moduleDecl("Char", [], [], [], [
   foreignBinding("toInt", fn(tChar2, tInt2)),
   foreignBinding("fromInt", fn(tInt2, tMaybe(tChar2))),
   foreignBinding("toString", fn(tChar2, tString)),
@@ -4623,7 +4993,7 @@ var charModule = moduleDecl("Char", [], [], [
   foreignBinding("isIdentStart", fn(tChar2, tBool2)),
   foreignBinding("isIdentChar", fn(tChar2, tBool2))
 ]);
-var intModule = moduleDecl("Int", [], [], [
+var intModule = moduleDecl("Int", [], [], [], [
   foreignBinding("add", fn(tInt2, fn(tInt2, tInt2))),
   foreignBinding("sub", fn(tInt2, fn(tInt2, tInt2))),
   foreignBinding("mul", fn(tInt2, fn(tInt2, tInt2))),
@@ -4640,7 +5010,7 @@ var intModule = moduleDecl("Int", [], [], [
   foreignBinding("toString", fn(tInt2, tString)),
   foreignBinding("fromString", fn(tString, tMaybe(tInt2)))
 ]);
-var floatModule = moduleDecl("Float", [], [], [
+var floatModule = moduleDecl("Float", [], [], [], [
   foreignBinding("add", fn(tFloat2, fn(tFloat2, tFloat2))),
   foreignBinding("sub", fn(tFloat2, fn(tFloat2, tFloat2))),
   foreignBinding("mul", fn(tFloat2, fn(tFloat2, tFloat2))),
@@ -4665,8 +5035,8 @@ var floatModule = moduleDecl("Float", [], [], [
   foreignBinding("toString", fn(tFloat2, tString)),
   foreignBinding("fromString", fn(tString, tMaybe(tFloat2)))
 ]);
-var boolModule = moduleDecl("Bool", [], [recBinding("not", notExpr), recBinding("eq", boolEqExpr)]);
-var ioModule = moduleDecl("IO", [ioError], [], [
+var boolModule = moduleDecl("Bool", [], [], [recBinding("not", notExpr), recBinding("eq", boolEqExpr)]);
+var ioModule = moduleDecl("IO", [], [ioError], [], [
   foreignBinding("print", fn(tString, tUnit)),
   foreignBinding("printLine", fn(tString, tUnit)),
   foreignBinding("readLine", fn(tUnit, tEither(tIOError, tString))),
@@ -4679,13 +5049,13 @@ var ioModule = moduleDecl("IO", [ioError], [], [
   foreignBinding("exit", fn(tInt2, tUnit)),
   foreignBinding("getEnv", fn(tString, tMaybe(tString)))
 ]);
-var debugModule = moduleDecl("Debug", [], [], [
+var debugModule = moduleDecl("Debug", [], [], [], [
   foreignBinding("log", fn(tvar2("a"), tvar2("a"))),
   foreignBinding("trace", fn(tString, fn(tvar2("a"), tvar2("a")))),
   foreignBinding("panic", fn(tString, tvar2("a")))
 ]);
 var tMap = (v) => tyapp(tycon("Map"), v);
-var mapModule = moduleDecl("Map", [], [], [
+var mapModule = moduleDecl("Map", [], [], [], [
   foreignBinding("empty", tMap(tvar2("v"))),
   foreignBinding("singleton", fn(tString, fn(tvar2("v"), tMap(tvar2("v"))))),
   foreignBinding("insert", fn(tString, fn(tvar2("v"), fn(tMap(tvar2("v")), tMap(tvar2("v")))))),
@@ -4699,7 +5069,7 @@ var mapModule = moduleDecl("Map", [], [], [
   foreignBinding("fromList", fn(tList(tytuple([tString, tvar2("v")])), tMap(tvar2("v"))))
 ]);
 var tSet = tycon("Set");
-var setModule = moduleDecl("Set", [], [], [
+var setModule = moduleDecl("Set", [], [], [], [
   foreignBinding("empty", tSet),
   foreignBinding("singleton", fn(tString, tSet)),
   foreignBinding("insert", fn(tString, fn(tSet, tSet))),
@@ -5025,8 +5395,8 @@ var getFieldType = (type, field2) => {
   }
   throw new Error(`Expected record type with field ${field2}, got ${type.kind}`);
 };
-var tInt3 = { kind: "TCon", name: "Int" };
-var tFloat3 = { kind: "TCon", name: "Float" };
+var tInt3 = { kind: "TCon", name: "int" };
+var tFloat3 = { kind: "TCon", name: "float" };
 var tStr2 = { kind: "TCon", name: "string" };
 var tChar3 = { kind: "TCon", name: "char" };
 var tBool3 = { kind: "TCon", name: "boolean" };
@@ -6173,7 +6543,7 @@ var genBinOp = (ctx, binding) => {
 var isComplexType = (type) => {
   switch (type.kind) {
     case "TCon":
-      return !["Int", "Float", "string", "char", "boolean"].includes(type.name);
+      return !["int", "float", "string", "char", "boolean"].includes(type.name);
     case "TVar":
       return true;
     case "TFun":
@@ -6883,9 +7253,9 @@ var typeToGo = (type) => {
   switch (type.kind) {
     case "TCon":
       switch (type.name) {
-        case "Int":
+        case "int":
           return "int64";
-        case "Float":
+        case "float":
           return "float64";
         case "string":
           return "string";
@@ -7175,7 +7545,7 @@ var isStringType = (type) => {
 var isComplexType2 = (type) => {
   switch (type.kind) {
     case "TCon":
-      return !["Int", "Float", "string", "boolean"].includes(type.name);
+      return !["int", "float", "string", "boolean"].includes(type.name);
     case "TVar":
       return true;
     case "TFun":
@@ -8449,7 +8819,11 @@ var processProgram = (program) => {
     return {
       typeEnv: typeEnv2,
       registry: registry2,
-      constructorNames: [...preludeCache.constructorNames, ...userConstructors, ...declConstructors2],
+      constructorNames: [
+        ...preludeCache.constructorNames,
+        ...userConstructors,
+        ...declConstructors2
+      ],
       allModules,
       allUses,
       moduleEnv: preludeCache.moduleEnv,

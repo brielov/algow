@@ -14,7 +14,8 @@ export type DiagnosticKind =
   | "infinite-type"
   | "missing-field"
   | "non-exhaustive"
-  | "syntax-error";
+  | "syntax-error"
+  | "duplicate-definition";
 
 export type Diagnostic = {
   readonly start: number;
@@ -22,6 +23,7 @@ export type Diagnostic = {
   readonly message: string;
   readonly severity: DiagnosticSeverity;
   readonly kind?: DiagnosticKind;
+  readonly file?: string;
   readonly expected?: string;
   readonly actual?: string;
   readonly suggestions?: readonly string[];

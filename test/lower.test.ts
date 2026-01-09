@@ -788,8 +788,9 @@ describe("lowerToIR", () => {
       }
     });
 
-    it("qualified access to non-foreign function uses IRVar", () => {
-      // When the qualified access is to a non-foreign function, use IRVar
+    it("qualified access to non-foreign function uses IRVar with qualified name", () => {
+      // When the qualified access is to a non-foreign function, use IRVar with qualified name
+      // This ensures module imports resolve correctly to the qualified binding
       const expr = ast.qualifiedVar("List", "length");
 
       const moduleEnv: ModuleTypeEnv = new Map([
@@ -815,7 +816,7 @@ describe("lowerToIR", () => {
       if (ir.kind === "IRAtomExpr") {
         expect(ir.atom.kind).toBe("IRVar");
         if (ir.atom.kind === "IRVar") {
-          expect(ir.atom.name).toBe("length");
+          expect(ir.atom.name).toBe("List.length");
         }
       }
     });

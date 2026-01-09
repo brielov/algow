@@ -1720,24 +1720,20 @@ export const programToExpr = (
 
   let expr = program.expr ?? ast.int(0);
 
-  // Wrap with user's top-level bindings
-  for (let i = program.bindings.length - 1; i >= 0; i--) {
-    const binding = program.bindings[i]!;
-
-    let value = binding.body;
-    for (let j = binding.params.length - 1; j >= 0; j--) {
-      const p = binding.params[j]!;
-      value = ast.abs(p.name, value, undefined, p.span, p.type);
+  // Wrap with user's top-level bindings as a single letRec
+  // This allows all bindings to reference each other regardless of order
+  // (important for multi-file programs where file order shouldn't matter)
+  if (program.bindings.length > 0) {
+    const recBindings: ast.RecBinding[] = [];
+    for (const binding of program.bindings) {
+      let value = binding.body;
+      for (let j = binding.params.length - 1; j >= 0; j--) {
+        const p = binding.params[j]!;
+        value = ast.abs(p.name, value, undefined, p.span, p.type);
+      }
+      recBindings.push(ast.recBinding(binding.name, value, binding.nameSpan, binding.returnType));
     }
-
-    if (binding.recursive) {
-      expr = ast.letRec(
-        [ast.recBinding(binding.name, value, binding.nameSpan, binding.returnType)],
-        expr,
-      );
-    } else {
-      expr = ast.let_(binding.name, value, expr, undefined, binding.nameSpan, binding.returnType);
-    }
+    expr = ast.letRec(recBindings, expr);
   }
 
   // STEP 1: Process use statements for unqualified aliases (wrapped first = innermost)
