@@ -174,7 +174,9 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
   for (const [k, v] of declRegistry) registry.set(k, v);
 
   // Combine all constructor names: imported + all modules + top-level declarations
-  const allConstructorNames = [...new Set([...importedConstructors, ...allModuleConstructors, ...declConstructors])];
+  const allConstructorNames = [
+    ...new Set([...importedConstructors, ...allModuleConstructors, ...declConstructors]),
+  ];
 
   return {
     typeEnv,

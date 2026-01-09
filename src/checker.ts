@@ -1714,16 +1714,222 @@ const inferLet = (
   return [subst, bodyType, constraints];
 };
 
+// =============================================================================
+// SCC ANALYSIS FOR LET REC OPTIMIZATION
+// =============================================================================
+
+/**
+ * Extract free variables from an expression.
+ * Returns the set of variable names that are referenced but not bound within the expression.
+ */
+const freeVars = (expr: ast.Expr, bound: Set<string> = new Set()): Set<string> => {
+  const free = new Set<string>();
+
+  const collect = (e: ast.Expr, b: Set<string>): void => {
+    if (!e || !e.kind) return; // Guard against undefined/null
+    switch (e.kind) {
+      case "Var":
+        if (!b.has(e.name)) free.add(e.name);
+        break;
+      case "QualifiedVar":
+        // Qualified vars don't contribute to local dependencies
+        break;
+      case "Int":
+      case "Float":
+      case "Str":
+      case "Char":
+      case "Bool":
+        break;
+      case "Abs": {
+        const newBound = new Set(b);
+        newBound.add(e.param);
+        collect(e.body, newBound);
+        break;
+      }
+      case "App":
+        collect(e.func, b);
+        collect(e.param, b);
+        break;
+      case "Let": {
+        collect(e.value, b);
+        const newBound = new Set(b);
+        newBound.add(e.name);
+        collect(e.body, newBound);
+        break;
+      }
+      case "LetRec": {
+        const newBound = new Set(b);
+        for (const binding of e.bindings) {
+          newBound.add(binding.name);
+        }
+        for (const binding of e.bindings) {
+          collect(binding.value, newBound);
+        }
+        collect(e.body, newBound);
+        break;
+      }
+      case "If":
+        collect(e.cond, b);
+        collect(e.then, b);
+        collect(e.else, b);
+        break;
+      case "BinOp":
+        collect(e.left, b);
+        collect(e.right, b);
+        break;
+      case "Match":
+        collect(e.expr, b);
+        for (const c of e.cases) {
+          const caseBound = new Set(b);
+          collectPatternVars(c.pattern, caseBound);
+          if (c.guard) collect(c.guard, caseBound);
+          collect(c.body, caseBound);
+        }
+        break;
+      case "Tuple":
+        for (const el of e.elements) collect(el, b);
+        break;
+      case "Record":
+        for (const f of e.fields) collect(f.value, b);
+        break;
+      case "FieldAccess":
+        collect(e.record, b);
+        break;
+      case "TupleIndex":
+        collect(e.tuple, b);
+        break;
+    }
+  };
+
+  const collectPatternVars = (p: ast.Pattern, bound: Set<string>): void => {
+    switch (p.kind) {
+      case "PVar":
+        bound.add(p.name);
+        break;
+      case "PCon":
+        for (const arg of p.args) collectPatternVars(arg, bound);
+        break;
+      case "PTuple":
+        for (const el of p.elements) collectPatternVars(el, bound);
+        break;
+      case "PRecord":
+        for (const f of p.fields) collectPatternVars(f.pattern, bound);
+        break;
+      case "PAs":
+        bound.add(p.name);
+        collectPatternVars(p.pattern, bound);
+        break;
+      case "POr":
+        for (const alt of p.alternatives) collectPatternVars(alt, bound);
+        break;
+      case "PWildcard":
+      case "PLit":
+        break;
+    }
+  };
+
+  collect(expr, bound);
+  return free;
+};
+
+/**
+ * Compute strongly connected components using Tarjan's algorithm.
+ * Returns SCCs in reverse topological order (dependencies come first).
+ */
+const computeSCCs = <T>(
+  nodes: T[],
+  getKey: (n: T) => string,
+  getDeps: (n: T) => string[],
+): T[][] => {
+  const index = new Map<string, number>();
+  const lowlink = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: T[] = [];
+  const sccs: T[][] = [];
+  const nodeMap = new Map<string, T>();
+  let counter = 0;
+
+  for (const node of nodes) {
+    nodeMap.set(getKey(node), node);
+  }
+
+  const strongconnect = (node: T): void => {
+    const key = getKey(node);
+    index.set(key, counter);
+    lowlink.set(key, counter);
+    counter++;
+    stack.push(node);
+    onStack.add(key);
+
+    for (const depKey of getDeps(node)) {
+      if (!nodeMap.has(depKey)) continue; // External dependency
+      const dep = nodeMap.get(depKey)!;
+      const depKeyActual = getKey(dep);
+
+      if (!index.has(depKeyActual)) {
+        strongconnect(dep);
+        lowlink.set(key, Math.min(lowlink.get(key)!, lowlink.get(depKeyActual)!));
+      } else if (onStack.has(depKeyActual)) {
+        lowlink.set(key, Math.min(lowlink.get(key)!, index.get(depKeyActual)!));
+      }
+    }
+
+    if (lowlink.get(key) === index.get(key)) {
+      const scc: T[] = [];
+      let w: T;
+      do {
+        w = stack.pop()!;
+        onStack.delete(getKey(w));
+        scc.push(w);
+      } while (getKey(w) !== key);
+      sccs.push(scc);
+    }
+  };
+
+  for (const node of nodes) {
+    if (!index.has(getKey(node))) {
+      strongconnect(node);
+    }
+  }
+
+  return sccs; // Already in reverse topological order
+};
+
+/**
+ * Split bindings into SCCs based on call dependencies.
+ * Returns groups of bindings where each group is a minimal mutually recursive set.
+ */
+const splitBindingsBySCC = (bindings: readonly ast.RecBinding[]): ast.RecBinding[][] => {
+  // Build set of binding names for this block
+  const bindingNames = new Set(bindings.map((b) => b.name));
+
+  // For each binding, find which other bindings it references
+  const getDeps = (b: ast.RecBinding): string[] => {
+    const free = freeVars(b.value);
+    return [...free].filter((name) => bindingNames.has(name));
+  };
+
+  // Compute SCCs
+  const sccs = computeSCCs([...bindings], (b) => b.name, getDeps);
+
+  return sccs;
+};
+
 /**
  * Infer the type of a recursive let binding (let rec f = ... and g = ... in body).
  *
  * Supports mutual recursion: all binding names are in scope within all values.
  *
  * Algorithm:
- * 1. Create fresh type variables as placeholders for ALL bindings
- * 2. Add ALL placeholders to the environment (monomorphic - no generalization yet)
- * 3. Infer each value's type with all placeholders in scope
- * 4. Generalize ALL results together and add to environment for body
+ * 1. Split bindings into SCCs (strongly connected components) by call dependencies
+ * 2. For each SCC (in dependency order):
+ *    a. Create fresh type variables as placeholders
+ *    b. Infer types with placeholders in scope
+ *    c. Generalize and add to environment
+ * 3. Infer body with all bindings in scope
+ *
+ * This optimization reduces O(n²) behavior for large let rec blocks where
+ * most bindings aren't actually mutually recursive.
  */
 const inferLetRec = (
   ctx: CheckContext,
@@ -1731,100 +1937,107 @@ const inferLetRec = (
   registry: ConstructorRegistry,
   expr: ast.LetRec,
 ): InferResult => {
-  // Step 1: Create placeholder type variables for ALL bindings
-  const placeholders = new Map<string, Type>();
+  // Step 1: Split bindings into SCCs by call dependencies
+  // This reduces O(n²) behavior for large let rec blocks where
+  // most bindings aren't actually mutually recursive.
+  const sccs = splitBindingsBySCC(expr.bindings);
 
-  for (const binding of expr.bindings) {
-    const placeholder = freshTypeVar(ctx);
-    placeholders.set(binding.name, placeholder);
-  }
-
-  // Step 2: Infer types for all values with placeholders in scope
-  // OPTIMIZATION: Instead of calling applySubstEnv on the entire environment
-  // for each binding (O(n² * m)), we only apply substitutions to placeholders.
-  // The outer environment (env) is copied once and not modified during the loop.
+  let currentEnv = new Map(env);
   let subst: Subst = new Map();
-  const valueTypes = new Map<string, Type>();
   let constraints: Constraint[] = [];
+  const allValueTypes = new Map<string, Type>();
 
-  // Copy outer env once - these entries don't need substitution applied
-  // because they're already generalized schemes from outer scopes
-  const baseEnv = new Map(env);
+  // Step 2: Process each SCC in dependency order (reverse topological)
+  for (const scc of sccs) {
+    // Create placeholders only for this SCC's bindings
+    const placeholders = new Map<string, Type>();
+    for (const binding of scc) {
+      placeholders.set(binding.name, freshTypeVar(ctx));
+    }
 
-  for (const binding of expr.bindings) {
-    // Check if this is a qualified binding (Module.name)
-    // If so, look up the type from moduleEnv instead of re-inferring
-    const dotIndex = binding.name.indexOf(".");
-    if (dotIndex > 0) {
-      const moduleName = binding.name.substring(0, dotIndex);
-      const memberName = binding.name.substring(dotIndex + 1);
-      const moduleInfo = ctx.moduleEnv.get(moduleName);
+    // Build environment with:
+    // - All previously processed bindings (generalized)
+    // - This SCC's placeholders (monomorphic)
+    const sccEnv = new Map(currentEnv);
+    for (const [name, placeholder] of placeholders) {
+      sccEnv.set(name, scheme([], applySubst(subst, placeholder)));
+    }
 
-      if (moduleInfo) {
-        const memberScheme = moduleInfo.typeEnv.get(memberName);
-        if (memberScheme) {
-          // Instantiate the scheme and use it as the type
-          const valueType = instantiate(ctx, memberScheme);
-          valueTypes.set(binding.name, valueType);
+    const valueTypes = new Map<string, Type>();
 
-          // Unify with placeholder to maintain consistency
-          const placeholder = applySubst(subst, placeholders.get(binding.name)!);
-          const s2 = unify(ctx, placeholder, valueType, binding.value.span);
-          subst = composeSubst(subst, s2);
-          continue; // Skip normal inference
+    // Infer types for this SCC's bindings
+    for (const binding of scc) {
+      // Check if this is a qualified binding (Module.name)
+      // If so, look up the type from moduleEnv instead of re-inferring
+      const dotIndex = binding.name.indexOf(".");
+      if (dotIndex > 0) {
+        const moduleName = binding.name.substring(0, dotIndex);
+        const memberName = binding.name.substring(dotIndex + 1);
+        const moduleInfo = ctx.moduleEnv.get(moduleName);
+
+        if (moduleInfo) {
+          const memberScheme = moduleInfo.typeEnv.get(memberName);
+          if (memberScheme) {
+            const valueType = instantiate(ctx, memberScheme);
+            valueTypes.set(binding.name, valueType);
+            allValueTypes.set(binding.name, valueType);
+
+            const placeholder = applySubst(subst, placeholders.get(binding.name)!);
+            const s2 = unify(ctx, placeholder, valueType, binding.value.span);
+            subst = composeSubst(subst, s2);
+            continue;
+          }
         }
       }
-    }
 
-    // Build environment with current substitution applied only to placeholders
-    const currentEnv = new Map(baseEnv);
-    for (const [name, placeholder] of placeholders) {
-      currentEnv.set(name, scheme([], applySubst(subst, placeholder)));
-    }
-
-    let [s, valueType, c] = inferExpr(ctx, currentEnv, registry, binding.value);
-    subst = composeSubst(subst, s);
-
-    // If there's a return type annotation, unify with the innermost return type
-    if (binding.returnType) {
-      const annotatedType = instantiateTypeExpr(ctx, binding.returnType);
-      // Peel off function types to get to the return type
-      let currentType = applySubst(subst, valueType);
-      while (currentType.kind === "TFun") {
-        currentType = currentType.ret;
+      // Update sccEnv with current substitution for placeholders
+      for (const [name, placeholder] of placeholders) {
+        sccEnv.set(name, scheme([], applySubst(subst, placeholder)));
       }
-      const s3 = unify(ctx, currentType, annotatedType, binding.nameSpan);
-      subst = composeSubst(subst, s3);
-      valueType = applySubst(s3, valueType);
+
+      let [s, valueType, c] = inferExpr(ctx, sccEnv, registry, binding.value);
+      subst = composeSubst(subst, s);
+
+      // Handle return type annotation
+      if (binding.returnType) {
+        const annotatedType = instantiateTypeExpr(ctx, binding.returnType);
+        let currentType = applySubst(subst, valueType);
+        while (currentType.kind === "TFun") {
+          currentType = currentType.ret;
+        }
+        const s3 = unify(ctx, currentType, annotatedType, binding.nameSpan);
+        subst = composeSubst(subst, s3);
+        valueType = applySubst(s3, valueType);
+      }
+
+      valueTypes.set(binding.name, valueType);
+      allValueTypes.set(binding.name, valueType);
+      constraints = [...applySubstConstraints(subst, constraints), ...c];
+
+      // Unify with placeholder
+      const placeholder = applySubst(subst, placeholders.get(binding.name)!);
+      const s2 = unify(ctx, placeholder, valueType, binding.value.span);
+      subst = composeSubst(subst, s2);
     }
 
-    valueTypes.set(binding.name, valueType);
-    constraints = [...applySubstConstraints(subst, constraints), ...c];
+    // Generalize this SCC's bindings and add to environment for next SCC
+    const envForGeneralize = applySubstEnv(subst, currentEnv);
+    for (const binding of scc) {
+      const valueType = applySubst(subst, valueTypes.get(binding.name)!);
+      const generalizedScheme = generalize(envForGeneralize, valueType);
+      currentEnv.set(binding.name, generalizedScheme);
 
-    // Unify with placeholder to propagate constraints
-    const placeholder = applySubst(subst, placeholders.get(binding.name)!);
-    const s2 = unify(ctx, placeholder, valueType, binding.value.span);
-    subst = composeSubst(subst, s2);
-  }
-
-  // Step 3: Generalize all bindings together
-  const env1 = applySubstEnv(subst, env);
-  const env2 = new Map(env1);
-
-  for (const binding of expr.bindings) {
-    const valueType = applySubst(subst, valueTypes.get(binding.name)!);
-    const generalizedScheme = generalize(env1, valueType);
-    env2.set(binding.name, generalizedScheme);
-
-    // Record type for LSP
-    const nameSpan = binding.nameSpan ?? expr.span;
-    if (nameSpan) {
-      recordType(ctx, nameSpan, valueType);
+      // Record type for LSP
+      const nameSpan = binding.nameSpan ?? expr.span;
+      if (nameSpan) {
+        recordType(ctx, nameSpan, valueType);
+      }
     }
   }
 
-  // Step 4: Infer body with generalized bindings
-  const [s2, bodyType, c2] = inferExpr(ctx, env2, registry, expr.body);
+  // Step 3: Infer body with all generalized bindings
+  const finalEnv = applySubstEnv(subst, currentEnv);
+  const [s2, bodyType, c2] = inferExpr(ctx, finalEnv, registry, expr.body);
 
   const finalSubst = composeSubst(subst, s2);
   const finalConstraints = applySubstConstraints(finalSubst, [...constraints, ...c2]);
@@ -3054,8 +3267,10 @@ const findWitness = (
   types: readonly Type[],
   depth: number = 0,
 ): SimplePattern[] | null => {
-  // Depth limit to prevent infinite recursion on recursive types
-  const MAX_DEPTH = 10;
+  // Depth limit to prevent exponential explosion on recursive types
+  // With n constructors and depth d, worst case is n^d calls
+  // List has 2 constructors: 2^3 = 8 calls is fine, 2^10 = 1024 is slow
+  const MAX_DEPTH = 3;
   if (depth > MAX_DEPTH) {
     // At max depth, if matrix is empty, there's a missing case
     // Use wildcard as the witness
