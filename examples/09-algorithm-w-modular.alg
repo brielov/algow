@@ -477,20 +477,14 @@ end
 -- Main: Test runner
 -- =============================================================================
 
-use Types (..)
-use Lexer (..)
-use Parser (..)
-use Infer (..)
-use Pretty (..)
-
 let runInfer input =
-  let tokens = tokenize input in
-  match parse tokens
+  let tokens = Lexer.tokenize input in
+  match Parser.parse tokens
     when Left e -> "Parse error: " + e
     when Right expr ->
-      match inferType expr
+      match Infer.inferType expr
         when Left e -> "Type error: " + e
-        when Right t -> showType t
+        when Right t -> Pretty.showType t
       end
   end
 
