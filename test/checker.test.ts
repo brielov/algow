@@ -2366,6 +2366,7 @@ describe("Type Inference", () => {
         "String",
         [],
         [],
+        [],
         [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("Int")))],
       );
       const info = processModule(mod);
@@ -2378,6 +2379,7 @@ describe("Type Inference", () => {
       // foreign map : (a -> b) -> List a -> List b
       const mod = ast.moduleDecl(
         "List",
+        [],
         [],
         [],
         [
@@ -2408,6 +2410,7 @@ describe("Type Inference", () => {
       const mod = ast.moduleDecl(
         "String",
         [],
+        [],
         [
           ast.recBinding(
             "isEmpty",
@@ -2425,6 +2428,7 @@ describe("Type Inference", () => {
     it("processes multiple foreign bindings", () => {
       const mod = ast.moduleDecl(
         "String",
+        [],
         [],
         [],
         [
@@ -2451,10 +2455,12 @@ describe("Type Inference", () => {
       const modA = ast.moduleDecl(
         "A",
         [],
+        [],
         [ast.recBinding("process", ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))))],
       );
       const modB = ast.moduleDecl(
         "B",
+        [],
         [],
         [ast.recBinding("process", ast.abs("s", ast.var_("s")))],
       );
@@ -2476,11 +2482,13 @@ describe("processUseStatements", () => {
   const createTestModuleEnv = (): ModuleTypeEnv => {
     const modA = ast.moduleDecl(
       "ModA",
+      [], // uses
       [], // declarations
       [ast.recBinding("foo", ast.int(1)), ast.recBinding("bar", ast.int(2))],
     );
     const modB = ast.moduleDecl(
       "ModB",
+      [], // uses
       [], // declarations
       [ast.recBinding("foo", ast.str("hello")), ast.recBinding("baz", ast.str("world"))],
     );

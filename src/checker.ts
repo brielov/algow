@@ -3188,9 +3188,17 @@ export const processModule = (
   mod: ast.ModuleDecl,
   baseEnv?: TypeEnv,
   baseRegistry?: ConstructorRegistry,
+  moduleEnv?: ModuleTypeEnv,
 ): ModuleTypeInfo => {
   // Process data declarations
-  const { typeEnv: dataEnv, registry, constructorNames } = processDeclarations(mod.declarations);
+  const {
+    typeEnv: dataEnv,
+    registry,
+    constructorNames: declConstructors,
+  } = processDeclarations(mod.declarations);
+
+  // Mutable constructor names list
+  const constructorNames: string[] = [...declConstructors];
 
   // Merge with base environment (for prelude dependencies)
   const env: TypeEnv = new Map(baseEnv);
@@ -3198,6 +3206,18 @@ export const processModule = (
 
   const fullRegistry: ConstructorRegistry = new Map(baseRegistry);
   for (const [k, v] of registry) fullRegistry.set(k, v);
+
+  // Process use statements inside the module
+  if (mod.uses.length > 0 && moduleEnv) {
+    const {
+      localEnv,
+      localRegistry,
+      constructorNames: usedCons,
+    } = processUseStatements(mod.uses, moduleEnv, env);
+    for (const [k, v] of localEnv) env.set(k, v);
+    for (const [k, v] of localRegistry) fullRegistry.set(k, v);
+    constructorNames.push(...usedCons);
+  }
 
   // Process foreign bindings - these have declared types but no implementation
   const foreignNames = new Set<string>();
@@ -3254,7 +3274,8 @@ export const processModules = (modules: readonly ast.ModuleDecl[]): ModuleTypeEn
   let accRegistry: ConstructorRegistry = new Map();
 
   for (const mod of modules) {
-    const info = processModule(mod, accEnv, accRegistry);
+    // Pass result as moduleEnv so modules can use imports from earlier modules
+    const info = processModule(mod, accEnv, accRegistry, result);
     result.set(mod.name, info);
 
     // Accumulate for next module

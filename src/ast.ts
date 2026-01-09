@@ -741,6 +741,7 @@ export interface ModuleDecl extends Node {
   readonly kind: "ModuleDecl";
   readonly name: string;
   readonly nameSpan?: Span;
+  readonly uses: readonly UseDecl[];
   readonly declarations: readonly DataDecl[];
   readonly bindings: readonly RecBinding[];
   readonly foreignBindings: readonly ForeignBinding[];
@@ -1089,6 +1090,7 @@ export const qualifiedPCon = (
 
 export const moduleDecl = (
   name: string,
+  uses: readonly UseDecl[],
   declarations: readonly DataDecl[],
   bindings: readonly RecBinding[],
   foreignBindings: readonly ForeignBinding[] = [],
@@ -1098,6 +1100,7 @@ export const moduleDecl = (
   kind: "ModuleDecl",
   name,
   nameSpan,
+  uses,
   declarations,
   bindings,
   foreignBindings,

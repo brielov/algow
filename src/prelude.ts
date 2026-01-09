@@ -545,6 +545,7 @@ const eitherFromMaybeExpr = ast.abs(
 
 export const maybeModule = ast.moduleDecl(
   "Maybe",
+  [],
   [maybe],
   [
     ast.recBinding("isJust", isJustExpr),
@@ -558,6 +559,7 @@ export const maybeModule = ast.moduleDecl(
 
 export const eitherModule = ast.moduleDecl(
   "Either",
+  [],
   [either],
   [
     ast.recBinding("isLeft", isLeftExpr),
@@ -570,10 +572,11 @@ export const eitherModule = ast.moduleDecl(
   ],
 );
 
-export const unitModule = ast.moduleDecl("Unit", [unit], []);
+export const unitModule = ast.moduleDecl("Unit", [], [unit], []);
 
 export const listModule = ast.moduleDecl(
   "List",
+  [],
   [list],
   [
     ast.recBinding("map", mapExpr),
@@ -598,6 +601,7 @@ export const listModule = ast.moduleDecl(
 
 export const coreModule = ast.moduleDecl(
   "Core",
+  [],
   [],
   [
     ast.recBinding("id", idExpr),
@@ -628,6 +632,7 @@ const tvar = (name: string) => ast.tyvar(name);
 
 export const stringModule = ast.moduleDecl(
   "String",
+  [],
   [],
   [],
   [
@@ -682,6 +687,7 @@ export const charModule = ast.moduleDecl(
   "Char",
   [],
   [],
+  [],
   [
     // toInt : Char -> Int
     ast.foreignBinding("toInt", fn(tChar, tInt)),
@@ -724,6 +730,7 @@ export const intModule = ast.moduleDecl(
   "Int",
   [],
   [],
+  [],
   [
     // add : Int -> Int -> Int
     ast.foreignBinding("add", fn(tInt, fn(tInt, tInt))),
@@ -764,6 +771,7 @@ export const intModule = ast.moduleDecl(
 
 export const floatModule = ast.moduleDecl(
   "Float",
+  [],
   [],
   [],
   [
@@ -823,6 +831,7 @@ export const floatModule = ast.moduleDecl(
 export const boolModule = ast.moduleDecl(
   "Bool",
   [],
+  [],
   [ast.recBinding("not", notExpr), ast.recBinding("eq", boolEqExpr)],
 );
 
@@ -832,6 +841,7 @@ export const boolModule = ast.moduleDecl(
 
 export const ioModule = ast.moduleDecl(
   "IO",
+  [],
   [ioError],
   [],
   [
@@ -868,6 +878,7 @@ export const debugModule = ast.moduleDecl(
   "Debug",
   [],
   [],
+  [],
   [
     // log : a -> a (prints value, returns it)
     ast.foreignBinding("log", fn(tvar("a"), tvar("a"))),
@@ -887,6 +898,7 @@ const tMap = (v: ast.TypeExpr) => ast.tyapp(ast.tycon("Map"), v);
 
 export const mapModule = ast.moduleDecl(
   "Map",
+  [],
   [],
   [],
   [
@@ -924,6 +936,7 @@ const tSet = ast.tycon("Set");
 
 export const setModule = ast.moduleDecl(
   "Set",
+  [],
   [],
   [],
   [

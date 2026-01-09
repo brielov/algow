@@ -454,12 +454,16 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
   const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
 
+  const uses: ast.UseDecl[] = [];
   const declarations: ast.DataDecl[] = [];
   const bindings: ast.RecBinding[] = [];
   const foreignBindings: ast.ForeignBinding[] = [];
 
   while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
-    if (at(state, TokenKind.Type)) {
+    if (at(state, TokenKind.Use)) {
+      const use = parseUseDecl(state);
+      if (use) uses.push(use);
+    } else if (at(state, TokenKind.Type)) {
       const decl = parseDataDecl(state);
       if (decl) declarations.push(decl);
     } else if (at(state, TokenKind.Let)) {
@@ -469,7 +473,7 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
       const foreign = parseForeignBinding(state);
       if (foreign) foreignBindings.push(foreign);
     } else {
-      error(state, "expected 'type', 'let', or 'foreign' declaration in module");
+      error(state, "expected 'use', 'type', 'let', or 'foreign' declaration in module");
       advance(state);
     }
   }
@@ -477,7 +481,15 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
   const endToken = expect(state, TokenKind.End, "expected 'end' after module body");
   const end = endToken ? endToken[2] : state.current[1];
 
-  return ast.moduleDecl(name, declarations, bindings, foreignBindings, span(start, end), nameSpan);
+  return ast.moduleDecl(
+    name,
+    uses,
+    declarations,
+    bindings,
+    foreignBindings,
+    span(start, end),
+    nameSpan,
+  );
 };
 
 /**
@@ -1687,9 +1699,22 @@ export const programToExpr = (
   // IMPORTANT: Each module's bindings must be in a separate letRec block to avoid
   // incorrectly unifying functions with the same name across modules (e.g., Maybe.map vs Either.map)
   // We also add qualified aliases (Module.name) for external access.
+  //
+  // IMPORTANT: We process uses in REVERSE order because letRec wrapping is inside-out.
+  // This ensures prelude modules (processed last) become the outermost scope, making
+  // qualified names like List.length available to user modules' internal use statements.
   const seenModules = new Set<string>();
 
-  for (const use of uses) {
+  // Helper to get all bindings from a module for use imports
+  const getModuleBindingNames = (moduleName: string): string[] => {
+    const mod = modules.find((m) => m.name === moduleName);
+    if (!mod) return [];
+    return mod.bindings.map((b) => b.name);
+  };
+
+  // Process in reverse order so prelude modules end up outermost
+  for (let i = uses.length - 1; i >= 0; i--) {
+    const use = uses[i]!;
     // Skip if we've already processed this module
     if (seenModules.has(use.moduleName)) continue;
     seenModules.add(use.moduleName);
@@ -1711,12 +1736,37 @@ export const programToExpr = (
       );
     }
 
-    // Wrap: first qualified aliases (inner, can see original from outer),
-    // then original bindings (outer)
+    // Handle module's internal use statements
+    // For each internal use like "use List (..)", we add bindings that alias
+    // the imported names to their qualified versions (e.g., length = List.length)
+    const moduleImportBindings: ast.RecBinding[] = [];
+    for (const internalUse of mod.uses) {
+      if (internalUse.imports?.kind === "All") {
+        // Import all bindings from the target module
+        const names = getModuleBindingNames(internalUse.moduleName);
+        for (const name of names) {
+          moduleImportBindings.push(
+            ast.recBinding(name, ast.qualifiedVar(internalUse.moduleName, name)),
+          );
+        }
+      } else if (internalUse.imports?.kind === "Specific") {
+        // Import specific items
+        for (const item of internalUse.imports.items) {
+          moduleImportBindings.push(
+            ast.recBinding(item.name, ast.qualifiedVar(internalUse.moduleName, item.name)),
+          );
+        }
+      }
+    }
+
+    // Wrap: qualified aliases (innermost), then module bindings, then import aliases (outermost)
     if (qualifiedBindings.length > 0) {
       expr = ast.letRec(qualifiedBindings, expr);
     }
     expr = ast.letRec(mod.bindings, expr);
+    if (moduleImportBindings.length > 0) {
+      expr = ast.letRec(moduleImportBindings, expr);
+    }
   }
 
   return expr;
