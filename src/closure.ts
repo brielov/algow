@@ -103,6 +103,14 @@ const freeVarsBinding = (binding: ir.IRBinding, bound: Set<string>): Set<string>
       return free;
     }
 
+    case "IRRecordUpdateBinding": {
+      let free = freeVarsAtom(binding.base, bound);
+      for (const field of binding.fields) {
+        free = union(free, freeVarsAtom(field.value, bound));
+      }
+      return free;
+    }
+
     case "IRFieldAccessBinding":
       return freeVarsAtom(binding.record, bound);
 
@@ -251,6 +259,7 @@ const convertBinding = (ctx: ConvertContext, binding: ir.IRBinding): ir.IRBindin
 
     case "IRTupleBinding":
     case "IRRecordBinding":
+    case "IRRecordUpdateBinding":
     case "IRFieldAccessBinding":
     case "IRTupleIndexBinding":
       return binding;
@@ -382,6 +391,13 @@ const convertExprWithEnv = (
 
       case "IRRecordBinding":
         return ir.irRecordBinding(
+          b.fields.map((f) => ir.irRecordField(f.name, substituteAtom(f.value))),
+          b.type,
+        );
+
+      case "IRRecordUpdateBinding":
+        return ir.irRecordUpdateBinding(
+          substituteAtom(b.base),
           b.fields.map((f) => ir.irRecordField(f.name, substituteAtom(f.value))),
           b.type,
         );

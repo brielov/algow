@@ -1570,7 +1570,12 @@ describe("Parser", () => {
       const expr = programToExpr(result.program);
       expect(stripSpans(expr)).toEqual(
         ast.letRec(
-          [ast.recBinding("add", ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))))],
+          [
+            ast.recBinding(
+              "add",
+              ast.abs("x", ast.abs("y", ast.binOp("+", ast.var_("x"), ast.var_("y")))),
+            ),
+          ],
           ast.app(ast.app(ast.var_("add"), ast.int(1)), ast.int(2)),
         ),
       );

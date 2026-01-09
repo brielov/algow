@@ -730,6 +730,15 @@ export const evaluate = (env: Env, expr: ast.Expr): Value => {
     case "Match":
       return evalMatch(env, expr);
 
+    case "RecordUpdate": {
+      const base = evaluate(env, expr.base) as VRecord;
+      const newFields = new Map(base.fields);
+      for (const field of expr.fields) {
+        newFields.set(field.name, evaluate(env, field.value));
+      }
+      return vrecord(newFields);
+    }
+
     default:
       return assertNever(expr);
   }

@@ -126,6 +126,7 @@ export type IRBinding =
   | IRIfBinding
   | IRTupleBinding
   | IRRecordBinding
+  | IRRecordUpdateBinding
   | IRFieldAccessBinding
   | IRTupleIndexBinding
   | IRMatchBinding
@@ -201,6 +202,17 @@ export type IRRecordBinding = {
 export type IRRecordField = {
   readonly name: string;
   readonly value: IRAtom;
+};
+
+/**
+ * Record update expression.
+ * Base record and all field values must be atomic.
+ */
+export type IRRecordUpdateBinding = {
+  readonly kind: "IRRecordUpdateBinding";
+  readonly base: IRAtom;
+  readonly fields: readonly IRRecordField[];
+  readonly type: Type;
 };
 
 /**
@@ -485,6 +497,17 @@ export const irRecordField = (name: string, value: IRAtom): IRRecordField => ({
   value,
 });
 
+export const irRecordUpdateBinding = (
+  base: IRAtom,
+  fields: readonly IRRecordField[],
+  type: Type,
+): IRRecordUpdateBinding => ({
+  kind: "IRRecordUpdateBinding",
+  base,
+  fields,
+  type,
+});
+
 export const irFieldAccessBinding = (
   record: IRAtom,
   field: string,
@@ -700,6 +723,9 @@ const printBinding = (binding: IRBinding, indent: number): string => {
 
     case "IRRecordBinding":
       return `{ ${binding.fields.map((f) => `${f.name} = ${printAtom(f.value)}`).join(", ")} }`;
+
+    case "IRRecordUpdateBinding":
+      return `{ ${printAtom(binding.base)} | ${binding.fields.map((f) => `${f.name} = ${printAtom(f.value)}`).join(", ")} }`;
 
     case "IRFieldAccessBinding":
       return `${printAtom(binding.record)}.${binding.field}`;

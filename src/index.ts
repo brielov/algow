@@ -39,7 +39,7 @@ type FileProgram = {
 type MergedProgram = {
   readonly modules: ast.ModuleDecl[];
   readonly uses: ast.UseDecl[];
-  readonly declarations: ast.DataDecl[];
+  readonly declarations: ast.TypeDecl[];
   readonly bindings: TopLevelBinding[];
   readonly expr: ast.Expr | null;
 };
@@ -201,7 +201,7 @@ const mergePrograms = (
 ): MergedProgram => {
   const modules: ast.ModuleDecl[] = [];
   const uses: ast.UseDecl[] = [];
-  const declarations: ast.DataDecl[] = [];
+  const declarations: ast.TypeDecl[] = [];
   const bindings: TopLevelBinding[] = [];
 
   // Add non-main file bindings first, then main file bindings last.
@@ -432,6 +432,7 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
   const {
     typeEnv: declEnv,
     registry: declRegistry,
+    aliasRegistry: declAliases,
     constructorNames: declConstructors,
   } = processDeclarations(parseResult.program.declarations);
 
@@ -450,6 +451,7 @@ const processProgram = (parseResult: ReturnType<typeof parse>) => {
   return {
     typeEnv,
     registry,
+    aliasRegistry: declAliases,
     constructorNames: allConstructorNames,
     allModules,
     allUses,
@@ -468,6 +470,7 @@ const run = (source: string, filename: string): void => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -486,7 +489,15 @@ const run = (source: string, filename: string): void => {
   // Bind and type check
   const bindResult = bindWithConstructors(constructorNames, expr);
   diagnostics.push(...bindResult.diagnostics);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
   diagnostics.push(...checkResult.diagnostics);
 
   if (diagnostics.length > 0) {
@@ -511,6 +522,7 @@ const typeCheck = (source: string, filename: string): void => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -532,7 +544,15 @@ const typeCheck = (source: string, filename: string): void => {
 
   // Bind and type check
   const bindResult = bindWithConstructors(constructorNames, expr);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -554,6 +574,7 @@ const emitIR = (source: string, filename: string): void => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -576,7 +597,15 @@ const emitIR = (source: string, filename: string): void => {
 
   // Bind and type check
   const bindResult = bindWithConstructors(constructorNames, expr);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -600,6 +629,7 @@ const compile = (source: string, filename: string): void => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -622,7 +652,15 @@ const compile = (source: string, filename: string): void => {
 
   // Bind and type check
   const bindResult = bindWithConstructors(constructorNames, expr);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -654,6 +692,7 @@ const compileToGo = (source: string, filename: string): void => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -676,7 +715,15 @@ const compileToGo = (source: string, filename: string): void => {
 
   // Bind and type check
   const bindResult = bindWithConstructors(constructorNames, expr);
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
 
   const allDiagnostics = [...bindResult.diagnostics, ...checkResult.diagnostics];
   if (allDiagnostics.length > 0) {
@@ -759,6 +806,7 @@ const processMergedProgram = (merged: MergedProgram) => {
   const {
     typeEnv: declEnv,
     registry: declRegistry,
+    aliasRegistry: declAliases,
     constructorNames: declConstructors,
   } = processDeclarations(merged.declarations);
 
@@ -777,6 +825,7 @@ const processMergedProgram = (merged: MergedProgram) => {
   return {
     typeEnv,
     registry,
+    aliasRegistry: declAliases,
     constructorNames: allConstructorNames,
     allModules,
     allUses,
@@ -867,6 +916,7 @@ const runDirectory = async (dir: string): Promise<void> => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -898,7 +948,15 @@ const runDirectory = async (dir: string): Promise<void> => {
   for (const d of bindResult.diagnostics) {
     diagnostics.push(d);
   }
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
   for (const d of checkResult.diagnostics) {
     diagnostics.push(d);
   }
@@ -961,6 +1019,7 @@ const typeCheckDirectory = async (dir: string): Promise<void> => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -992,7 +1051,15 @@ const typeCheckDirectory = async (dir: string): Promise<void> => {
   for (const d of bindResult.diagnostics) {
     diagnostics.push(d);
   }
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
   for (const d of checkResult.diagnostics) {
     diagnostics.push(d);
   }
@@ -1054,6 +1121,7 @@ const compileDirectory = async (dir: string): Promise<void> => {
   const {
     typeEnv,
     registry,
+    aliasRegistry,
     constructorNames,
     allModules,
     allUses,
@@ -1086,7 +1154,15 @@ const compileDirectory = async (dir: string): Promise<void> => {
   for (const d of bindResult.diagnostics) {
     diagnostics.push(d);
   }
-  const checkResult = check(typeEnv, registry, expr, bindResult.symbols, moduleEnv, aliases);
+  const checkResult = check(
+    typeEnv,
+    registry,
+    expr,
+    bindResult.symbols,
+    moduleEnv,
+    aliases,
+    aliasRegistry,
+  );
   for (const d of checkResult.diagnostics) {
     diagnostics.push(d);
   }

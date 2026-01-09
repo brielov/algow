@@ -29,7 +29,7 @@ export type ParseResult = {
 export type Program = {
   readonly modules: readonly ast.ModuleDecl[];
   readonly uses: readonly ast.UseDecl[];
-  readonly declarations: readonly ast.DataDecl[];
+  readonly declarations: readonly ast.TypeDecl[];
   readonly bindings: readonly TopLevelBinding[];
   readonly expr: ast.Expr | null;
 };
@@ -250,7 +250,7 @@ export const parse = (source: string): ParseResult => {
   const state = createParser(source);
   const modules: ast.ModuleDecl[] = [];
   const uses: ast.UseDecl[] = [];
-  const declarations: ast.DataDecl[] = [];
+  const declarations: ast.TypeDecl[] = [];
   const bindings: TopLevelBinding[] = [];
   let expr: ast.Expr | null = null;
 
@@ -269,7 +269,7 @@ export const parse = (source: string): ParseResult => {
   // Parse data declarations, bindings, and expression
   while (!at(state, TokenKind.Eof)) {
     if (at(state, TokenKind.Type)) {
-      const decl = parseDataDecl(state);
+      const decl = parseTypeDecl(state);
       if (decl) declarations.push(decl);
     } else if (at(state, TokenKind.Let)) {
       const result = parseLetBindingOrExpr(state);
@@ -385,7 +385,19 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
 // TYPE DECLARATIONS
 // =============================================================================
 
-const parseDataDecl = (state: ParserState): ast.DataDecl | null => {
+/**
+ * Parse a type declaration - either an ADT (data declaration) or a type alias.
+ *
+ * ADT syntax: type Name params = Constructor1 fields | Constructor2 fields
+ * Alias syntax: type Name params = TypeExpr
+ *
+ * Disambiguation:
+ * - If RHS contains `->` (function type), it's a type alias
+ * - If RHS starts with uppercase and has `|`, it's an ADT
+ * - If RHS starts with uppercase followed by type arguments, it's an ADT
+ * - Otherwise (single type name), it's a type alias
+ */
+const parseTypeDecl = (state: ParserState): ast.DataDecl | ast.AliasDecl | null => {
   advance(state); // 'type'
 
   const nameToken = expect(state, TokenKind.Upper, "expected type name");
@@ -405,6 +417,47 @@ const parseDataDecl = (state: ParserState): ast.DataDecl | null => {
     return null;
   }
 
+  // Determine if this is an ADT or type alias
+  // Key heuristics:
+  // - Function types (`->`) indicate alias
+  // - Tuple types (starting with `(` followed by comma) indicate alias
+  // - Lowercase identifiers indicate alias (type variables in type expressions)
+  // - Otherwise, try parsing as ADT constructors
+
+  // If RHS starts with `(` or lowercase, it's definitely a type alias
+  if (at(state, TokenKind.LParen) || at(state, TokenKind.Lower)) {
+    const aliasType = parseType(state);
+    if (!aliasType) {
+      error(state, "expected type expression in type alias");
+      return null;
+    }
+    return ast.aliasDecl(name, typeParams, aliasType);
+  }
+
+  // Save position for potential backtrack
+  const savedPos = state.lexer.pos;
+  const savedCurrent = state.current;
+
+  // Parse as type expression to check for function types
+  const type = parseType(state);
+  const hasArrow = type && containsArrow(type);
+
+  // Backtrack to re-parse
+  state.lexer.pos = savedPos;
+  state.current = savedCurrent;
+
+  if (hasArrow) {
+    // Contains `->`, definitely a type alias
+    const aliasType = parseType(state);
+    if (!aliasType) {
+      error(state, "expected type expression in type alias");
+      return null;
+    }
+    return ast.aliasDecl(name, typeParams, aliasType);
+  }
+
+  // No arrow - check if it looks like constructor(s)
+  // Parse as ADT: Constructor Fields | Constructor Fields | ...
   const constructors: ast.ConDecl[] = [];
   const first = parseConstructor(state);
   if (first) constructors.push(first);
@@ -415,7 +468,51 @@ const parseDataDecl = (state: ParserState): ast.DataDecl | null => {
     if (con) constructors.push(con);
   }
 
+  // Check if we only got a single constructor with no fields - could be alias to existing type
+  if (
+    constructors.length === 1 &&
+    constructors[0]!.fields.length === 0 &&
+    isKnownTypeName(constructors[0]!.name)
+  ) {
+    // Single uppercase name that's a known type - treat as alias
+    return ast.aliasDecl(name, typeParams, ast.tycon(constructors[0]!.name));
+  }
+
   return ast.dataDecl(name, typeParams, constructors);
+};
+
+/** Check if a type expression contains an arrow (function type) */
+const containsArrow = (type: ast.TypeExpr): boolean => {
+  switch (type.kind) {
+    case "TyCon":
+    case "TyVar":
+    case "TyQual":
+      return false;
+    case "TyFun":
+      return true;
+    case "TyApp":
+      return containsArrow(type.con) || containsArrow(type.arg);
+    case "TyTuple":
+      return type.elements.some(containsArrow);
+  }
+};
+
+/** Known type names that are likely aliases, not constructors */
+const isKnownTypeName = (name: string): boolean => {
+  const knownTypes = new Set([
+    "Int",
+    "Bool",
+    "String",
+    "Float",
+    "Char",
+    "Unit",
+    "Maybe",
+    "Either",
+    "List",
+    "Option",
+    "Result",
+  ]);
+  return knownTypes.has(name);
 };
 
 const parseConstructor = (state: ParserState): ast.ConDecl | null => {
@@ -455,7 +552,7 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
   const nameSpan = tokenSpan(nameToken);
 
   const uses: ast.UseDecl[] = [];
-  const declarations: ast.DataDecl[] = [];
+  const declarations: ast.TypeDecl[] = [];
   const bindings: ast.RecBinding[] = [];
   const foreignBindings: ast.ForeignBinding[] = [];
 
@@ -464,7 +561,7 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
       const use = parseUseDecl(state);
       if (use) uses.push(use);
     } else if (at(state, TokenKind.Type)) {
-      const decl = parseDataDecl(state);
+      const decl = parseTypeDecl(state);
       if (decl) declarations.push(decl);
     } else if (at(state, TokenKind.Let)) {
       const binding = parseModuleBinding(state);
@@ -1178,39 +1275,131 @@ const parseParenOrTuple = (state: ParserState): ast.Expr => {
   return first;
 };
 
+/**
+ * Parse a record literal or record update expression.
+ *
+ * Record literal: { field1 = value1, field2 = value2 }
+ * Record update: { base | field1 = value1, field2 = value2 }
+ *
+ * Disambiguation: If the content after { is a field assignment (lowercase = ...)
+ * or field punning (lowercase followed by , or }), it's a record literal.
+ * Otherwise, parse as expression and expect | for record update.
+ */
 const parseRecord = (state: ParserState): ast.Expr => {
   const start = state.current[1];
   advance(state); // {
 
+  // Empty record
+  if (at(state, TokenKind.RBrace)) {
+    const endToken = advance(state);
+    return ast.record([], span(start, endToken[2]));
+  }
+
+  // Check if this is a record literal or record update
+  // Record literal starts with: lowercase followed by =, ,, or }
+  // Record update starts with: an expression followed by |
+  const isRecordLiteralStart =
+    at(state, TokenKind.Lower) && peekIsAny(state, TokenKind.Eq, TokenKind.Comma, TokenKind.RBrace);
+
+  if (isRecordLiteralStart) {
+    // Parse as record literal
+    return parseRecordLiteralFields(state, start);
+  }
+
+  // Try parsing as record update: { expr | fields }
+  const baseExpr = parseExpr(state);
+
+  if (at(state, TokenKind.Bar)) {
+    advance(state); // |
+    const fields = parseRecordUpdateFields(state);
+    const endToken = expect(state, TokenKind.RBrace, "expected '}' after record update");
+    const end = endToken ? endToken[2] : state.current[1];
+    return ast.recordUpdate(baseExpr, fields, span(start, end));
+  }
+
+  // Not followed by |, this is an error - expected record literal or update
+  error(state, "expected '|' for record update or field assignment in record literal");
+  const endToken = expect(state, TokenKind.RBrace, "expected '}' after record");
+  const end = endToken ? endToken[2] : state.current[1];
+  return ast.record([], span(start, end));
+};
+
+/**
+ * Peek at the next token (after current) without consuming.
+ */
+const peekIsAny = (state: ParserState, ...kinds: TokenKind[]): boolean => {
+  const savedPos = state.lexer.pos;
+  const savedCurrent = state.current;
+  advance(state);
+  const result = kinds.includes(state.current[0]);
+  state.lexer.pos = savedPos;
+  state.current = savedCurrent;
+  return result;
+};
+
+/**
+ * Parse record literal fields: { field1 = value1, field2 = value2 }
+ */
+const parseRecordLiteralFields = (state: ParserState, start: number): ast.Record => {
   const fields: ast.RecordField[] = [];
 
-  if (!at(state, TokenKind.RBrace)) {
-    do {
-      if (at(state, TokenKind.Comma)) advance(state);
+  do {
+    if (at(state, TokenKind.Comma)) advance(state);
 
-      const nameToken = expect(state, TokenKind.Lower, "expected field name");
-      if (!nameToken) break;
-      const name = text(state, nameToken);
-      const fieldStart = nameToken[1];
-      const fieldEnd = nameToken[2];
+    const nameToken = expect(state, TokenKind.Lower, "expected field name");
+    if (!nameToken) break;
+    const name = text(state, nameToken);
+    const fieldStart = nameToken[1];
+    const fieldEnd = nameToken[2];
 
-      // Support field punning: { x, y } is shorthand for { x = x, y = y }
-      if (at(state, TokenKind.Eq)) {
-        advance(state);
-        const value = parseExpr(state);
-        const valueEnd = value.span?.end ?? state.current[1];
-        fields.push(ast.field(name, value, span(fieldStart, valueEnd)));
-      } else {
-        // Punning: { x } means { x = x }
-        const value = ast.var_(name, span(fieldStart, fieldEnd));
-        fields.push(ast.field(name, value, span(fieldStart, fieldEnd)));
-      }
-    } while (at(state, TokenKind.Comma));
-  }
+    // Support field punning: { x, y } is shorthand for { x = x, y = y }
+    if (at(state, TokenKind.Eq)) {
+      advance(state);
+      const value = parseExpr(state);
+      const valueEnd = value.span?.end ?? state.current[1];
+      fields.push(ast.field(name, value, span(fieldStart, valueEnd)));
+    } else {
+      // Punning: { x } means { x = x }
+      const value = ast.var_(name, span(fieldStart, fieldEnd));
+      fields.push(ast.field(name, value, span(fieldStart, fieldEnd)));
+    }
+  } while (at(state, TokenKind.Comma));
 
   const endToken = expect(state, TokenKind.RBrace, "expected '}' after record");
   const end = endToken ? endToken[2] : state.current[1];
   return ast.record(fields, span(start, end));
+};
+
+/**
+ * Parse record update fields (after the |): field1 = value1, field2 = value2
+ * Note: No field punning in updates - must use explicit assignment.
+ */
+const parseRecordUpdateFields = (state: ParserState): ast.RecordField[] => {
+  const fields: ast.RecordField[] = [];
+
+  if (at(state, TokenKind.RBrace)) {
+    error(state, "expected at least one field in record update");
+    return fields;
+  }
+
+  do {
+    if (at(state, TokenKind.Comma)) advance(state);
+
+    const nameToken = expect(state, TokenKind.Lower, "expected field name");
+    if (!nameToken) break;
+    const name = text(state, nameToken);
+    const fieldStart = nameToken[1];
+
+    if (!expect(state, TokenKind.Eq, "expected '=' after field name in record update")) {
+      break;
+    }
+
+    const value = parseExpr(state);
+    const valueEnd = value.span?.end ?? state.current[1];
+    fields.push(ast.field(name, value, span(fieldStart, valueEnd)));
+  } while (at(state, TokenKind.Comma));
+
+  return fields;
 };
 
 /**

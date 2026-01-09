@@ -65,6 +65,7 @@ export type Expr =
   | App // Function application
   | Tuple // Tuples: (a, b, c)
   | Record // Records: { x: 1, y: "hello" }
+  | RecordUpdate // Record update: { r | x = 1 }
   | FieldAccess // Field access: record.field
   | TupleIndex // Tuple indexing: tuple.0, tuple.1
   | If // Conditional expressions
@@ -309,6 +310,24 @@ export interface Record extends Node {
 export interface RecordField extends Node {
   readonly name: string;
   readonly value: Expr;
+}
+
+/**
+ * Record update expression - creates a new record by updating fields of an existing one.
+ *
+ * Syntax: { record | field1 = value1, field2 = value2 }
+ * Example: { point | x = 10 } updates the x field of point
+ *
+ * This is a non-destructive update: the original record is unchanged,
+ * and a new record is created with the updated fields.
+ *
+ * With row polymorphism, a function like `r -> { r | x = 0 }` can work on any
+ * record that has an `x` field, returning a record of the same type with x updated.
+ */
+export interface RecordUpdate extends Node {
+  readonly kind: "RecordUpdate";
+  readonly base: Expr;
+  readonly fields: readonly RecordField[];
 }
 
 /**
@@ -733,6 +752,26 @@ export interface DataDecl extends Node {
   readonly constructors: readonly ConDecl[];
 }
 
+/**
+ * Type alias declaration - creates a synonym for an existing type.
+ *
+ * Syntax: type TypeName typeParams = TypeExpr
+ *
+ * Examples:
+ * - type UserId = Int
+ * - type Handler a = a -> Either Error a
+ * - type Pair a = (a, a)
+ *
+ * Unlike data declarations, type aliases don't create new constructors.
+ * They are expanded at type checking time to their underlying type.
+ */
+export interface AliasDecl extends Node {
+  readonly kind: "AliasDecl";
+  readonly name: string;
+  readonly typeParams: readonly string[];
+  readonly type: TypeExpr;
+}
+
 // =============================================================================
 // MODULE DECLARATIONS
 // =============================================================================
@@ -750,12 +789,17 @@ export interface DataDecl extends Node {
  * Everything defined in a module is public by default. Items can be accessed
  * via qualified names (Module.name) or imported unqualified via use statements.
  */
+/**
+ * Union type for type declarations (ADTs and type aliases).
+ */
+export type TypeDecl = DataDecl | AliasDecl;
+
 export interface ModuleDecl extends Node {
   readonly kind: "ModuleDecl";
   readonly name: string;
   readonly nameSpan?: Span;
   readonly uses: readonly UseDecl[];
-  readonly declarations: readonly DataDecl[];
+  readonly declarations: readonly TypeDecl[];
   readonly bindings: readonly RecBinding[];
   readonly foreignBindings: readonly ForeignBinding[];
 }
@@ -923,6 +967,17 @@ export const field = (name: string, value: Expr, span?: Span): RecordField => ({
   span,
 });
 
+export const recordUpdate = (
+  base: Expr,
+  fields: readonly RecordField[],
+  span?: Span,
+): RecordUpdate => ({
+  kind: "RecordUpdate",
+  base,
+  fields,
+  span,
+});
+
 export const fieldAccess = (record: Expr, field: string, span?: Span): FieldAccess => ({
   kind: "FieldAccess",
   record,
@@ -1072,6 +1127,13 @@ export const dataDecl = (
   span?: Span,
 ): DataDecl => ({ kind: "DataDecl", name, typeParams, constructors, span });
 
+export const aliasDecl = (
+  name: string,
+  typeParams: string[],
+  type: TypeExpr,
+  span?: Span,
+): AliasDecl => ({ kind: "AliasDecl", name, typeParams, type, span });
+
 // --- Qualified Access ---
 
 export const qualifiedVar = (
@@ -1111,7 +1173,7 @@ export const qualifiedPCon = (
 export const moduleDecl = (
   name: string,
   uses: readonly UseDecl[],
-  declarations: readonly DataDecl[],
+  declarations: readonly TypeDecl[],
   bindings: readonly RecBinding[],
   foreignBindings: readonly ForeignBinding[] = [],
   span?: Span,

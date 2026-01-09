@@ -330,6 +330,9 @@ const lowerExpr = (ctx: LowerContext, expr: ast.Expr): ir.IRExpr => {
     case "Record":
       return lowerRecord(ctx, expr);
 
+    case "RecordUpdate":
+      return lowerRecordUpdate(ctx, expr);
+
     case "FieldAccess":
       return lowerFieldAccess(ctx, expr);
 
@@ -636,6 +639,50 @@ const lowerRecord = (ctx: LowerContext, expr: ast.Record): ir.IRExpr => {
   const result = ir.irLet(name, binding, ir.irAtomExpr(ir.irVar(name, recordType)));
 
   return wrapWithBindings(bindings, result);
+};
+
+const lowerRecordUpdate = (ctx: LowerContext, expr: ast.RecordUpdate): ir.IRExpr => {
+  // Normalize the base record to an atom
+  const baseResult = normalize(ctx, expr.base);
+
+  // Normalize all field values to atoms
+  const fieldExprs = expr.fields.map((f) => f.value);
+  const fieldResults = normalizeMany(ctx, fieldExprs);
+
+  // Build IR record fields
+  const irFields = expr.fields.map((f, i) => ir.irRecordField(f.name, fieldResults.atoms[i]!));
+
+  // Build the result type from the base type and updated fields
+  let resultType: Type;
+  const baseType = baseResult.atom.type;
+  if (baseType.kind === "TRecord") {
+    // Clone base fields and update/add the new ones
+    const fieldTypes = new Map(baseType.fields);
+    for (let i = 0; i < expr.fields.length; i++) {
+      fieldTypes.set(expr.fields[i]!.name, fieldResults.atoms[i]!.type);
+    }
+    resultType = { kind: "TRecord", fields: fieldTypes, row: baseType.row };
+  } else {
+    // Fallback: build type from just the updated fields
+    const fieldTypes = new Map<string, Type>();
+    for (let i = 0; i < expr.fields.length; i++) {
+      fieldTypes.set(expr.fields[i]!.name, fieldResults.atoms[i]!.type);
+    }
+    resultType = { kind: "TRecord", fields: fieldTypes, row: null };
+  }
+
+  // Create the record update binding
+  const binding = ir.irRecordUpdateBinding(baseResult.atom, irFields, resultType);
+
+  // Generate a name for the result
+  const name = freshVar(ctx);
+  extendEnv(ctx, name, resultType);
+
+  const result = ir.irLet(name, binding, ir.irAtomExpr(ir.irVar(name, resultType)));
+
+  // Combine all bindings
+  const allBindings = [...baseResult.bindings, ...fieldResults.bindings];
+  return wrapWithBindings(allBindings, result);
 };
 
 const lowerFieldAccess = (ctx: LowerContext, expr: ast.FieldAccess): ir.IRExpr => {

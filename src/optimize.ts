@@ -368,6 +368,20 @@ const foldBinding = (binding: ir.IRBinding, env: ConstEnv): ir.IRBinding => {
       }
       return binding;
     }
+
+    case "IRRecordUpdateBinding": {
+      const base = substituteAtom(binding.base, env);
+      const fields = binding.fields.map((f) => ({
+        name: f.name,
+        value: substituteAtom(f.value, env),
+      }));
+      const changed =
+        base !== binding.base || fields.some((f, i) => f.value !== binding.fields[i]?.value);
+      if (changed) {
+        return ir.irRecordUpdateBinding(base, fields, binding.type);
+      }
+      return binding;
+    }
   }
 };
 
@@ -429,6 +443,7 @@ const inlineConstantIfsBinding = (binding: ir.IRBinding): ir.IRBinding => {
     case "IRBinOpBinding":
     case "IRTupleBinding":
     case "IRRecordBinding":
+    case "IRRecordUpdateBinding":
     case "IRFieldAccessBinding":
     case "IRTupleIndexBinding":
     case "IRClosureBinding":
@@ -674,6 +689,20 @@ const simplifyBinding = (binding: ir.IRBinding, env: CopyEnv): ir.IRBinding => {
       }
       return binding;
     }
+
+    case "IRRecordUpdateBinding": {
+      const base = copyAtom(binding.base, env);
+      const fields = binding.fields.map((f) => ({
+        name: f.name,
+        value: copyAtom(f.value, env),
+      }));
+      const changed =
+        base !== binding.base || fields.some((f, i) => f.value !== binding.fields[i]?.value);
+      if (changed) {
+        return ir.irRecordUpdateBinding(base, fields, binding.type);
+      }
+      return binding;
+    }
   }
 };
 
@@ -759,6 +788,13 @@ const collectUsesBinding = (binding: ir.IRBinding, uses: Map<string, number>): v
       break;
 
     case "IRRecordBinding":
+      for (const field of binding.fields) {
+        addAtom(field.value);
+      }
+      break;
+
+    case "IRRecordUpdateBinding":
+      addAtom(binding.base);
       for (const field of binding.fields) {
         addAtom(field.value);
       }
@@ -911,6 +947,7 @@ const removeUnusedInBinding = (binding: ir.IRBinding): ir.IRBinding => {
     case "IRBinOpBinding":
     case "IRTupleBinding":
     case "IRRecordBinding":
+    case "IRRecordUpdateBinding":
     case "IRFieldAccessBinding":
     case "IRTupleIndexBinding":
     case "IRClosureBinding":
@@ -1122,6 +1159,9 @@ const hasRecursiveCall = (binding: ir.IRBinding, funcName: string): boolean => {
 
     case "IRRecordBinding":
       return binding.fields.some((f) => checkAtom(f.value));
+
+    case "IRRecordUpdateBinding":
+      return checkAtom(binding.base) || binding.fields.some((f) => checkAtom(f.value));
 
     case "IRFieldAccessBinding":
       return checkAtom(binding.record);
@@ -1338,6 +1378,7 @@ const transformBindingTCO = (binding: ir.IRBinding): ir.IRBinding => {
     case "IRBinOpBinding":
     case "IRTupleBinding":
     case "IRRecordBinding":
+    case "IRRecordUpdateBinding":
     case "IRFieldAccessBinding":
     case "IRTupleIndexBinding":
     case "IRClosureBinding":

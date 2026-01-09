@@ -166,6 +166,12 @@ const genBinding = (ctx: CodeGenContext, binding: ir.IRBinding): string => {
       return `{ ${fields.join(", ")} }`;
     }
 
+    case "IRRecordUpdateBinding": {
+      const base = genAtom(ctx, binding.base);
+      const fields = binding.fields.map((f) => `${f.name}: ${genAtom(ctx, f.value)}`);
+      return `{ ...${base}, ${fields.join(", ")} }`;
+    }
+
     case "IRFieldAccessBinding": {
       const record = genAtom(ctx, binding.record);
       return `${record}.${binding.field}`;

@@ -71,6 +71,7 @@ type CheckContext = {
   readonly definitionMap: ReadonlyMap<string, Definition>;
   readonly moduleEnv: ModuleTypeEnv;
   readonly moduleAliases: Map<string, string>; // alias -> real name
+  readonly aliasRegistry: AliasRegistry; // type aliases
   /** Counter for generating unique type variable names */
   typeVarCounter: number;
   /** Direct span to type mapping for lowering */
@@ -84,6 +85,7 @@ const createContext = (
   symbols: SymbolTable,
   moduleEnv: ModuleTypeEnv = new Map(),
   moduleAliases: Map<string, string> = new Map(),
+  aliasRegistry: AliasRegistry = new Map(),
 ): CheckContext => {
   const definitionMap = new Map<string, Definition>();
   for (const def of symbols.definitions) {
@@ -97,6 +99,7 @@ const createContext = (
     definitionMap,
     moduleEnv,
     moduleAliases,
+    aliasRegistry,
     typeVarCounter: 0,
     spanTypes: new Map(),
   };
@@ -411,6 +414,18 @@ type PatternBindings = Map<string, Type>;
  * its constructors ["Nothing", "Just"] to verify all cases are covered.
  */
 export type ConstructorRegistry = Map<string, readonly string[]>;
+
+/**
+ * Registry of type aliases for expansion.
+ *
+ * Maps alias names to their definition: type parameters and the aliased type.
+ * Example: `type UserId = int` → { params: [], type: TCon("int") }
+ * Example: `type Pair a = (a, a)` → { params: ["a"], type: TTuple([TVar("a"), TVar("a")]) }
+ */
+export type AliasRegistry = Map<
+  string,
+  { readonly params: readonly string[]; readonly type: Type }
+>;
 
 /**
  * Information about a module's exports.
@@ -1152,8 +1167,9 @@ export const check = (
   symbols: SymbolTable,
   moduleEnv: ModuleTypeEnv = new Map(),
   moduleAliases: Map<string, string> = new Map(),
+  aliasRegistry: AliasRegistry = new Map(),
 ): CheckOutput => {
-  const ctx = createContext(symbols, moduleEnv, moduleAliases);
+  const ctx = createContext(symbols, moduleEnv, moduleAliases, aliasRegistry);
   const [subst, type, constraints] = inferExpr(ctx, env, registry, expr);
   const finalConstraints = applySubstConstraints(subst, constraints);
   solveConstraints(ctx, finalConstraints);
@@ -1229,6 +1245,8 @@ const inferExpr = (
       return inferTupleIndex(ctx, env, registry, expr);
     case "Record":
       return inferRecord(ctx, env, registry, expr);
+    case "RecordUpdate":
+      return inferRecordUpdate(ctx, env, registry, expr);
   }
 };
 
@@ -1368,6 +1386,93 @@ const inferRecord = (
 
   // Return a closed record type (no row variable)
   return [subst, trecord([...fieldTypes.entries()]), constraints];
+};
+
+/**
+ * Infer the type of a record update expression { base | field1 = value1, ... }.
+ *
+ * Algorithm:
+ * 1. Infer the base record type
+ * 2. For each updated field:
+ *    - Infer the field value type
+ *    - If field exists in base, unify types (can change type)
+ *    - If field doesn't exist and record is closed, error
+ *    - If record is open (type var or has row), constrain it
+ * 3. Return the record type with updated fields
+ */
+const inferRecordUpdate = (
+  ctx: CheckContext,
+  env: TypeEnv,
+  registry: ConstructorRegistry,
+  expr: ast.RecordUpdate,
+): InferResult => {
+  // Infer the base record type
+  const [s1, baseType, c1] = inferExpr(ctx, env, registry, expr.base);
+  let subst = s1;
+  let constraints = c1;
+  const resolvedBase = applySubst(subst, baseType);
+
+  // If base is a type variable, constrain it to be a record with the updated fields
+  if (resolvedBase.kind === "TVar") {
+    // Create an open record type with the updated fields
+    const fieldTypes = new Map<string, Type>();
+    for (const field of expr.fields) {
+      const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), registry, field.value);
+      subst = composeSubst(subst, s);
+      constraints = [...applySubstConstraints(subst, constraints), ...c];
+      fieldTypes.set(field.name, applySubst(subst, t));
+    }
+    const rowVar = freshTypeVar(ctx);
+    const expectedRecord = trecord([...fieldTypes.entries()], rowVar);
+    const s2 = unify(ctx, applySubst(subst, resolvedBase), expectedRecord);
+    subst = composeSubst(subst, s2);
+    return [subst, applySubst(subst, expectedRecord), constraints];
+  }
+
+  // Must be a record type
+  if (resolvedBase.kind !== "TRecord") {
+    addError(ctx, `Cannot update non-record type: ${typeToString(resolvedBase)}`);
+    return [subst, freshTypeVar(ctx), constraints];
+  }
+
+  // Build the result record type with updated fields
+  const resultFields = new Map(resolvedBase.fields);
+
+  for (const field of expr.fields) {
+    const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), registry, field.value);
+    subst = composeSubst(subst, s);
+    constraints = [...applySubstConstraints(subst, constraints), ...c];
+    const fieldType = applySubst(subst, t);
+
+    // Check if field exists in base
+    const existingType = resolvedBase.fields.get(field.name);
+    if (existingType) {
+      // Field exists - unify types (allows updating to same or compatible type)
+      const s2 = unify(ctx, applySubst(subst, existingType), fieldType);
+      subst = composeSubst(subst, s2);
+      resultFields.set(field.name, applySubst(subst, fieldType));
+    } else if (resolvedBase.row === null) {
+      // Closed record without field - error
+      addError(
+        ctx,
+        `Record has no field '${field.name}' to update. Available: ${[...resolvedBase.fields.keys()].join(", ")}`,
+      );
+      resultFields.set(field.name, fieldType);
+    } else {
+      // Open record - field is allowed, add it
+      resultFields.set(field.name, fieldType);
+    }
+  }
+
+  // Apply substitutions to all result fields
+  const finalFields = new Map<string, Type>();
+  for (const [name, type] of resultFields) {
+    finalFields.set(name, applySubst(subst, type));
+  }
+
+  // Preserve the row variable if the base was open
+  const row = resolvedBase.row ? applySubst(subst, resolvedBase.row) : null;
+  return [subst, trecord([...finalFields.entries()], row), constraints];
 };
 
 // =============================================================================
@@ -2650,6 +2755,19 @@ const inferMatch = (
 // DATA DECLARATION PROCESSING
 // =============================================================================
 
+/** Map of uppercase type names to lowercase primitive names */
+const TYPE_NAME_NORMALIZATION: Record<string, string> = {
+  Int: "int",
+  Float: "float",
+  String: "string",
+  Bool: "boolean",
+  Boolean: "boolean",
+  Char: "string", // Char is treated as string
+};
+
+/** Normalize a type constructor name (e.g., Int -> int) */
+const normalizeTypeName = (name: string): string => TYPE_NAME_NORMALIZATION[name] ?? name;
+
 /**
  * Convert a type expression (from AST) to internal Type representation.
  */
@@ -2658,7 +2776,7 @@ const typeExprToType = (texpr: ast.TypeExpr): Type => {
     case "TyApp":
       return tapp(typeExprToType(texpr.con), typeExprToType(texpr.arg));
     case "TyCon":
-      return tcon(texpr.name);
+      return tcon(normalizeTypeName(texpr.name));
     case "TyQual":
       // Qualified type reference: Module.Type becomes a type constructor named "Module.Type"
       return tcon(`${texpr.moduleName}.${texpr.typeName}`);
@@ -2683,18 +2801,79 @@ const PRIMITIVE_TYPES = new Set(["int", "float", "string", "boolean"]);
  * should become fresh inference variables.
  *
  * Known primitive types (number, string, boolean) are treated as type constructors.
+ * Type aliases are expanded using the alias registry.
  *
  * Returns the instantiated type and a substitution mapping the fresh variables.
  */
 const instantiateTypeExpr = (ctx: CheckContext, texpr: ast.TypeExpr): Type => {
   const varMapping = new Map<string, Type>();
 
+  // Expand a type alias, substituting type parameters
+  const expandAlias = (aliasName: string, args: Type[]): Type | null => {
+    const alias = ctx.aliasRegistry.get(aliasName);
+    if (!alias) return null;
+
+    // Build a mapping from alias params to provided type args
+    const paramSubst = new Map<string, Type>();
+    for (let i = 0; i < alias.params.length && i < args.length; i++) {
+      paramSubst.set(alias.params[i]!, args[i]!);
+    }
+
+    // Apply the substitution to the alias body type
+    const substituteInType = (t: Type): Type => {
+      switch (t.kind) {
+        case "TVar":
+          return paramSubst.get(t.name) ?? t;
+        case "TCon":
+          return t;
+        case "TFun":
+          return tfun(substituteInType(t.param), substituteInType(t.ret));
+        case "TApp":
+          return tapp(substituteInType(t.con), substituteInType(t.arg));
+        case "TTuple":
+          return ttuple(t.elements.map(substituteInType));
+        case "TRecord": {
+          const newFields: [string, Type][] = [];
+          for (const [k, v] of t.fields) {
+            newFields.push([k, substituteInType(v)]);
+          }
+          return trecord(newFields, t.row ? substituteInType(t.row) : null);
+        }
+      }
+    };
+
+    return substituteInType(alias.type);
+  };
+
+  // Collect type application arguments for alias expansion
+  const collectAppArgs = (t: ast.TypeExpr): { head: ast.TypeExpr; args: ast.TypeExpr[] } => {
+    const args: ast.TypeExpr[] = [];
+    let current = t;
+    while (current.kind === "TyApp") {
+      args.unshift(current.arg);
+      current = current.con;
+    }
+    return { head: current, args };
+  };
+
   const convert = (t: ast.TypeExpr): Type => {
     switch (t.kind) {
-      case "TyApp":
+      case "TyApp": {
+        // Collect all args and check if head is an alias
+        const { head, args } = collectAppArgs(t);
+        if (head.kind === "TyCon") {
+          const expandedArgs = args.map(convert);
+          const expanded = expandAlias(head.name, expandedArgs);
+          if (expanded) return expanded;
+        }
         return tapp(convert(t.con), convert(t.arg));
-      case "TyCon":
-        return tcon(t.name);
+      }
+      case "TyCon": {
+        // Check if this is a type alias (with no args)
+        const expanded = expandAlias(t.name, []);
+        if (expanded) return expanded;
+        return tcon(normalizeTypeName(t.name));
+      }
       case "TyQual":
         // Qualified type reference: Module.Type
         return tcon(`${t.moduleName}.${t.typeName}`);
@@ -3438,39 +3617,62 @@ export const mergeRegistries = (
 };
 
 /**
- * Result of processing data declarations.
+ * Result of processing type declarations (ADTs and aliases).
  */
 export type ProcessedDeclarations = {
   readonly typeEnv: TypeEnv;
   readonly registry: ConstructorRegistry;
+  readonly aliasRegistry: AliasRegistry;
   readonly constructorNames: readonly string[];
 };
 
 /**
- * Process multiple data declarations and collect their environments, registries, and constructor names.
+ * Process a type alias declaration.
+ * Converts the aliased type expression to internal Type representation.
+ */
+export const processAliasDecl = (decl: ast.AliasDecl): AliasRegistry => {
+  const registry: AliasRegistry = new Map();
+  // Convert the type expression using the type parameter names as TVar
+  const type = typeExprToType(decl.type);
+  registry.set(decl.name, { params: decl.typeParams, type });
+  return registry;
+};
+
+/**
+ * Process multiple type declarations (ADTs and aliases) and collect their environments, registries, and constructor names.
  */
 export const processDeclarations = (
-  declarations: readonly ast.DataDecl[],
+  declarations: readonly ast.TypeDecl[],
   initial: ProcessedDeclarations = {
     typeEnv: new Map(),
     registry: new Map(),
+    aliasRegistry: new Map(),
     constructorNames: [],
   },
 ): ProcessedDeclarations => {
   let typeEnv = initial.typeEnv;
   let registry = initial.registry;
+  let aliasRegistry: AliasRegistry = new Map(initial.aliasRegistry);
   const constructorNames = [...initial.constructorNames];
 
   for (const decl of declarations) {
-    const [newEnv, newReg] = processDataDecl(decl);
-    typeEnv = mergeEnvs(typeEnv, newEnv);
-    registry = mergeRegistries(registry, newReg);
-    for (const con of decl.constructors) {
-      constructorNames.push(con.name);
+    if (decl.kind === "DataDecl") {
+      const [newEnv, newReg] = processDataDecl(decl);
+      typeEnv = mergeEnvs(typeEnv, newEnv);
+      registry = mergeRegistries(registry, newReg);
+      for (const con of decl.constructors) {
+        constructorNames.push(con.name);
+      }
+    } else {
+      // AliasDecl
+      const newAliases = processAliasDecl(decl);
+      for (const [name, def] of newAliases) {
+        aliasRegistry.set(name, def);
+      }
     }
   }
 
-  return { typeEnv, registry, constructorNames };
+  return { typeEnv, registry, aliasRegistry, constructorNames };
 };
 
 // =============================================================================
