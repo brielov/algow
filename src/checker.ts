@@ -2388,9 +2388,9 @@ const inferMatch = (
     // Booleans have 2 "constructors" (true/false) but aren't in the registry
     const isBoolean = typeName === "boolean";
     const constructorCount = isBoolean ? 2 : typeName ? (registry.get(typeName)?.length ?? 0) : 0;
-    // DISABLED for now due to performance issues
-    // TODO: Optimize exhaustiveness algorithm for production use
-    const MAX_CONSTRUCTORS_FOR_EXHAUSTIVENESS = 0;
+    // Limit exhaustiveness checking to types with reasonable constructor counts
+    // to avoid performance issues with very large ADTs
+    const MAX_CONSTRUCTORS_FOR_EXHAUSTIVENESS = 50;
     if (constructorCount > 0 && constructorCount <= MAX_CONSTRUCTORS_FOR_EXHAUSTIVENESS) {
       const missing = checkExhaustiveness(
         env,
