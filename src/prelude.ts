@@ -617,8 +617,8 @@ export const coreModule = ast.moduleDecl(
 
 // Type helpers (must match types in checker.ts)
 const tString = ast.tycon("string");
-const tInt = ast.tycon("Int");
-const tFloat = ast.tycon("Float");
+const tInt = ast.tycon("int");
+const tFloat = ast.tycon("float");
 const tBool = ast.tycon("boolean");
 const tChar = ast.tycon("char");
 const tUnit = ast.tycon("Unit");

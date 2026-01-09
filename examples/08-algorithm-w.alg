@@ -6,12 +6,12 @@
 -- =============================================================================
 
 type Token
-  = TkInt Int | TkBool bool | TkIdent string
+  = TkInt int | TkBool bool | TkIdent string
   | TkLambda | TkArrow | TkLet | TkIn | TkIf | TkThen | TkElse
   | TkLParen | TkRParen | TkEq | TkEof | TkError string
 
 type Expr
-  = EInt Int | EBool bool | EVar string
+  = EInt int | EBool bool | EVar string
   | EAbs string Expr | EApp Expr Expr
   | ELet string Expr Expr | EIf Expr Expr Expr
 

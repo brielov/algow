@@ -44,9 +44,9 @@ const typeToGo = (type: Type): string | null => {
   switch (type.kind) {
     case "TCon":
       switch (type.name) {
-        case "Int":
+        case "int":
           return "int64";
-        case "Float":
+        case "float":
           return "float64";
         case "string":
           return "string";
@@ -473,7 +473,7 @@ const isStringType = (type: Type): boolean => {
 const isComplexType = (type: Type): boolean => {
   switch (type.kind) {
     case "TCon":
-      return !["Int", "Float", "string", "boolean"].includes(type.name);
+      return !["int", "float", "string", "boolean"].includes(type.name);
     case "TVar":
       return true;
     case "TFun":

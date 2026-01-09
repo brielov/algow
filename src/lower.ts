@@ -128,8 +128,8 @@ const getFieldType = (type: Type, field: string): Type => {
 // BUILT-IN TYPES
 // =============================================================================
 
-const tInt: Type = { kind: "TCon", name: "Int" };
-const tFloat: Type = { kind: "TCon", name: "Float" };
+const tInt: Type = { kind: "TCon", name: "int" };
+const tFloat: Type = { kind: "TCon", name: "float" };
 const tStr: Type = { kind: "TCon", name: "string" };
 const tChar: Type = { kind: "TCon", name: "char" };
 const tBool: Type = { kind: "TCon", name: "boolean" };

@@ -233,7 +233,7 @@ const isComplexType = (type: Type): boolean => {
   switch (type.kind) {
     case "TCon":
       // Primitives use ===
-      return !["Int", "Float", "string", "char", "boolean"].includes(type.name);
+      return !["int", "float", "string", "char", "boolean"].includes(type.name);
     case "TVar":
       // Unknown type - use deep equality to be safe
       return true;

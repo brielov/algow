@@ -5,7 +5,7 @@ import { generateJS } from "../src/backend/js";
 import { RUNTIME } from "../src/backend/runtime";
 
 // Type helpers
-const intType: Type = { kind: "TCon", name: "Int" };
+const intType: Type = { kind: "TCon", name: "int" };
 const strType: Type = { kind: "TCon", name: "string" };
 const boolType: Type = { kind: "TCon", name: "boolean" };
 const funType = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret });

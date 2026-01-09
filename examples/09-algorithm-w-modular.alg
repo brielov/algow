@@ -11,7 +11,7 @@
 module Types
   -- Tokens produced by the lexer
   type Token
-    = TkInt Int
+    = TkInt int
     | TkBool bool
     | TkIdent string
     | TkLambda
@@ -28,7 +28,7 @@ module Types
 
   -- Abstract syntax tree
   type Expr
-    = EInt Int
+    = EInt int
     | EBool bool
     | EVar string
     | EAbs string Expr

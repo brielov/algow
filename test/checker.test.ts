@@ -72,7 +72,7 @@ describe("Type Inference", () => {
     it("infers number type", () => {
       const { type, diagnostics } = infer(baseEnv, new Map(), ast.int(42));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers boolean type for true", () => {
@@ -146,7 +146,7 @@ describe("Type Inference", () => {
         ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int -> Int");
+      expect(typeToString(type)).toBe("int -> int");
     });
 
     it("infers curried function type", () => {
@@ -163,7 +163,7 @@ describe("Type Inference", () => {
     it("infers lambda returning constant", () => {
       const { type, diagnostics } = infer(baseEnv, new Map(), ast.abs("x", ast.int(42)));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toMatch(/t\d+ -> Int/);
+      expect(typeToString(type)).toMatch(/t\d+ -> int/);
     });
 
     it("infers deeply nested lambdas", () => {
@@ -186,7 +186,7 @@ describe("Type Inference", () => {
         ast.app(ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1))), ast.int(5)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers curried application", () => {
@@ -202,7 +202,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers partial application", () => {
@@ -215,7 +215,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int -> Int");
+      expect(typeToString(type)).toBe("int -> int");
     });
 
     it("reports type error for wrong argument type", () => {
@@ -242,7 +242,7 @@ describe("Type Inference", () => {
           ast.binOp("+", ast.int(1), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers string concatenation", () => {
@@ -262,7 +262,7 @@ describe("Type Inference", () => {
           ast.binOp("-", ast.int(5), ast.int(3)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers multiplication", () => {
@@ -272,7 +272,7 @@ describe("Type Inference", () => {
           ast.binOp("*", ast.int(2), ast.int(3)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers division", () => {
@@ -282,7 +282,7 @@ describe("Type Inference", () => {
           ast.binOp("/", ast.int(10), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("widens Int + Float to Float", () => {
@@ -292,7 +292,7 @@ describe("Type Inference", () => {
           ast.binOp("+", ast.int(1), ast.float(2.5)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Float");
+        expect(typeToString(type)).toBe("float");
       });
 
       it("widens Float + Int to Float", () => {
@@ -302,7 +302,7 @@ describe("Type Inference", () => {
           ast.binOp("+", ast.float(1.5), ast.int(2)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Float");
+        expect(typeToString(type)).toBe("float");
       });
 
       it("widens Int * Float to Float", () => {
@@ -312,7 +312,7 @@ describe("Type Inference", () => {
           ast.binOp("*", ast.int(2), ast.float(3.5)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Float");
+        expect(typeToString(type)).toBe("float");
       });
 
       it("keeps Float + Float as Float", () => {
@@ -322,7 +322,7 @@ describe("Type Inference", () => {
           ast.binOp("+", ast.float(1.5), ast.float(2.5)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Float");
+        expect(typeToString(type)).toBe("float");
       });
 
       it("infers + string concatenation", () => {
@@ -455,7 +455,7 @@ describe("Type Inference", () => {
           ast.binOp("+", ast.binOp("*", ast.int(2), ast.int(3)), ast.int(4)),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers combined comparison and arithmetic", () => {
@@ -478,7 +478,7 @@ describe("Type Inference", () => {
         ast.if_(ast.bool(true), ast.int(1), ast.int(2)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers if with string branches", () => {
@@ -508,7 +508,7 @@ describe("Type Inference", () => {
         ast.if_(ast.bool(true), ast.if_(ast.bool(false), ast.int(1), ast.int(2)), ast.int(3)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("reports error for non-boolean condition", () => {
@@ -538,7 +538,7 @@ describe("Type Inference", () => {
         ast.let_("x", ast.int(42), ast.var_("x")),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers let with usage in body", () => {
@@ -548,7 +548,7 @@ describe("Type Inference", () => {
         ast.let_("x", ast.int(10), ast.binOp("+", ast.var_("x"), ast.int(5))),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers nested let", () => {
@@ -562,7 +562,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("supports shadowing", () => {
@@ -592,7 +592,7 @@ describe("Type Inference", () => {
           ),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("(Int, string)");
+        expect(typeToString(type)).toBe("(int, string)");
       });
 
       it("generalizes function types", () => {
@@ -636,7 +636,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers recursive list function", () => {
@@ -667,7 +667,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toMatch(/List t\d+ -> Int/);
+      expect(typeToString(type)).toMatch(/List t\d+ -> int/);
     });
 
     it("allows recursive reference in body", () => {
@@ -692,7 +692,7 @@ describe("Type Inference", () => {
         ast.tuple([ast.int(1), ast.str("hello")]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(Int, string)");
+      expect(typeToString(type)).toBe("(int, string)");
     });
 
     it("infers 3-tuple", () => {
@@ -702,7 +702,7 @@ describe("Type Inference", () => {
         ast.tuple([ast.int(1), ast.str("hello"), ast.bool(true)]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(Int, string, boolean)");
+      expect(typeToString(type)).toBe("(int, string, boolean)");
     });
 
     it("infers nested tuple", () => {
@@ -712,13 +712,13 @@ describe("Type Inference", () => {
         ast.tuple([ast.tuple([ast.int(1), ast.int(2)]), ast.str("nested")]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("((Int, Int), string)");
+      expect(typeToString(type)).toBe("((int, int), string)");
     });
 
     it("unwraps single-element tuple", () => {
       const { type, diagnostics } = infer(baseEnv, new Map(), ast.tuple([ast.int(42)]));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("reports error for empty tuple", () => {
@@ -735,7 +735,7 @@ describe("Type Inference", () => {
         ast.record([ast.field("x", ast.int(1))]),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("{ x: Int }");
+      expect(typeToString(type)).toBe("{ x: int }");
     });
 
     it("infers record with multiple fields", () => {
@@ -746,7 +746,7 @@ describe("Type Inference", () => {
       );
       expect(diagnostics).toHaveLength(0);
       const typeStr = typeToString(type);
-      expect(typeStr).toContain("x: Int");
+      expect(typeStr).toContain("x: int");
       expect(typeStr).toContain("y: string");
     });
 
@@ -764,7 +764,7 @@ describe("Type Inference", () => {
       );
       expect(diagnostics).toHaveLength(0);
       expect(typeToString(type)).toContain("inner:");
-      expect(typeToString(type)).toContain("value: Int");
+      expect(typeToString(type)).toContain("value: int");
     });
   });
 
@@ -776,7 +776,7 @@ describe("Type Inference", () => {
         ast.fieldAccess(ast.record([ast.field("x", ast.int(42))]), "x"),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers nested field access", () => {
@@ -789,7 +789,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toContain("value: Int");
+      expect(typeToString(type)).toContain("value: int");
     });
 
     it("reports error for missing field on closed record", () => {
@@ -832,7 +832,7 @@ describe("Type Inference", () => {
           ),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers function accessing multiple fields", () => {
@@ -864,7 +864,7 @@ describe("Type Inference", () => {
         ast.tupleIndex(ast.tuple([ast.int(1), ast.str("hello")]), 0),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers second element of pair", () => {
@@ -926,7 +926,7 @@ describe("Type Inference", () => {
           ast.match(ast.int(42), [ast.case_(ast.pvar("x"), ast.var_("x"))]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers match with wildcard pattern", () => {
@@ -967,7 +967,7 @@ describe("Type Inference", () => {
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers match on List", () => {
@@ -983,7 +983,7 @@ describe("Type Inference", () => {
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("reports error for unknown constructor", () => {
@@ -1021,7 +1021,7 @@ describe("Type Inference", () => {
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("reports error for tuple arity mismatch", () => {
@@ -1046,7 +1046,7 @@ describe("Type Inference", () => {
           ]),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("infers nested record pattern", () => {
@@ -1066,7 +1066,7 @@ describe("Type Inference", () => {
           ),
         );
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
     });
 
@@ -1384,7 +1384,7 @@ describe("Type Inference", () => {
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
 
       it("reports error for non-boolean guard", () => {
@@ -1410,7 +1410,7 @@ describe("Type Inference", () => {
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
     });
 
@@ -1425,7 +1425,7 @@ describe("Type Inference", () => {
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("(Int, Int)");
+        expect(typeToString(type)).toBe("(int, int)");
       });
 
       it("as-binding and inner bindings are both in scope", () => {
@@ -1438,7 +1438,7 @@ describe("Type Inference", () => {
         ]);
         const { type, diagnostics } = infer(baseEnv, new Map(), expr);
         expect(diagnostics).toHaveLength(0);
-        expect(typeToString(type)).toBe("Int");
+        expect(typeToString(type)).toBe("int");
       });
     });
   });
@@ -1485,7 +1485,7 @@ describe("Type Inference", () => {
 
       const { type, diagnostics } = infer(env, maybeReg, ast.app(ast.var_("Just"), ast.int(42)));
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Maybe Int");
+      expect(typeToString(type)).toBe("Maybe int");
     });
 
     it("infers binary constructor application", () => {
@@ -1498,7 +1498,7 @@ describe("Type Inference", () => {
         ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("Nil")),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("List Int");
+      expect(typeToString(type)).toBe("List int");
     });
   });
 
@@ -1547,7 +1547,7 @@ describe("Type Inference", () => {
 
     it("later environments override earlier ones", () => {
       const env1 = new Map([
-        ["x", { vars: [], constraints: [], type: { kind: "TCon" as const, name: "Int" } }],
+        ["x", { vars: [], constraints: [], type: { kind: "TCon" as const, name: "int" } }],
       ]);
       const env2 = new Map([
         ["x", { vars: [], constraints: [], type: { kind: "TCon" as const, name: "string" } }],
@@ -1578,7 +1578,7 @@ describe("Type Inference", () => {
         ast.if_(ast.bool(true), ast.int(1), ast.int(2)),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
   });
 
@@ -1609,7 +1609,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers map-like function on custom ADT", () => {
@@ -1709,7 +1709,7 @@ describe("Type Inference", () => {
         ast.app(ast.app(ast.var_("Cons"), ast.int(1)), ast.var_("Nil")),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("List Int");
+      expect(typeToString(type)).toBe("List int");
     });
   });
 
@@ -1741,7 +1741,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(Int, Int)");
+      expect(typeToString(type)).toBe("(int, int)");
     });
   });
 
@@ -1776,7 +1776,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(Int, Int)");
+      expect(typeToString(type)).toBe("(int, int)");
     });
 
     it("reports error for missing field on closed record during unification", () => {
@@ -1812,7 +1812,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("handles both records with unique extra fields", () => {
@@ -1855,7 +1855,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("infers tuple pattern when expected type is variable", () => {
@@ -1878,7 +1878,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("reports error for record pattern against non-record type", () => {
@@ -1932,7 +1932,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("reports error for record pattern with non-existent field on closed record", () => {
@@ -1993,7 +1993,7 @@ describe("Type Inference", () => {
         ast.app(ast.var_("MkFn"), ast.abs("x", ast.binOp("+", ast.var_("x"), ast.int(1)))),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Fn Int Int");
+      expect(typeToString(type)).toBe("Fn int int");
     });
   });
 
@@ -2029,7 +2029,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("reports error when closed record missing required fields", () => {
@@ -2097,7 +2097,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("unifies open record with closed record having extra fields", () => {
@@ -2116,7 +2116,7 @@ describe("Type Inference", () => {
         ),
       );
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int");
+      expect(typeToString(type)).toBe("int");
     });
 
     it("reports error for closed record missing fields from open record", () => {
@@ -2196,7 +2196,7 @@ describe("Type Inference", () => {
         "Expr",
         [],
         [
-          ast.conDecl("Lit", [ast.tycon("Int")]),
+          ast.conDecl("Lit", [ast.tycon("int")]),
           ast.conDecl("Bin", [ast.tycon("Expr"), ast.tycon("Expr")]),
         ],
       );
@@ -2249,13 +2249,13 @@ describe("Type Inference", () => {
           ast.binOp("+", ast.var_("x"), ast.int(1)),
           undefined,
           undefined,
-          ast.tycon("Int"),
+          ast.tycon("int"),
         ),
         ast.var_("f"),
       );
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int -> Int");
+      expect(typeToString(type)).toBe("int -> int");
     });
 
     it("accepts correct return type annotation", () => {
@@ -2263,13 +2263,13 @@ describe("Type Inference", () => {
       const expr: ast.Let = {
         kind: "Let",
         name: "f",
-        returnType: ast.tycon("Int"),
+        returnType: ast.tycon("int"),
         value: ast.abs("x", ast.var_("x")),
         body: ast.var_("f"),
       };
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int -> Int");
+      expect(typeToString(type)).toBe("int -> int");
     });
 
     it("rejects mismatched return type annotation", () => {
@@ -2278,7 +2278,7 @@ describe("Type Inference", () => {
         kind: "Let",
         name: "f",
         returnType: ast.tyvar("string"),
-        value: ast.abs("x", ast.var_("x"), undefined, undefined, ast.tycon("Int")),
+        value: ast.abs("x", ast.var_("x"), undefined, undefined, ast.tycon("int")),
         body: ast.var_("f"),
       };
       const { diagnostics } = infer(baseEnv, new Map(), expr);
@@ -2303,7 +2303,7 @@ describe("Type Inference", () => {
 
     it("accepts function type annotation", () => {
       // let apply (f : Int -> Int) (x : number) = f x in apply
-      const fType = ast.tyfun(ast.tycon("Int"), ast.tycon("Int"));
+      const fType = ast.tyfun(ast.tycon("int"), ast.tycon("int"));
       const expr = ast.let_(
         "apply",
         ast.abs(
@@ -2313,7 +2313,7 @@ describe("Type Inference", () => {
             ast.app(ast.var_("f"), ast.var_("x")),
             undefined,
             undefined,
-            ast.tycon("Int"),
+            ast.tycon("int"),
           ),
           undefined,
           undefined,
@@ -2323,7 +2323,7 @@ describe("Type Inference", () => {
       );
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("(Int -> Int) -> Int -> Int");
+      expect(typeToString(type)).toBe("(int -> int) -> int -> int");
     });
 
     it("accepts annotated recursive binding", () => {
@@ -2339,20 +2339,20 @@ describe("Type Inference", () => {
       );
       const recBinding: ast.RecBinding = {
         name: "fact",
-        returnType: ast.tycon("Int"),
-        value: ast.abs("n", factBody, undefined, undefined, ast.tycon("Int")),
+        returnType: ast.tycon("int"),
+        value: ast.abs("n", factBody, undefined, undefined, ast.tycon("int")),
       };
       const expr = ast.letRec([recBinding], ast.var_("fact"));
       const { type, diagnostics } = infer(baseEnv, new Map(), expr);
       expect(diagnostics).toHaveLength(0);
-      expect(typeToString(type)).toBe("Int -> Int");
+      expect(typeToString(type)).toBe("int -> int");
     });
 
     it("uses annotation to constrain inferred type", () => {
       // let f (x : number) = x in f "hello" -- should fail
       const expr = ast.let_(
         "f",
-        ast.abs("x", ast.var_("x"), undefined, undefined, ast.tycon("Int")),
+        ast.abs("x", ast.var_("x"), undefined, undefined, ast.tycon("int")),
         ast.app(ast.var_("f"), ast.str("hello")),
       );
       const { diagnostics } = infer(baseEnv, new Map(), expr);
@@ -2367,12 +2367,12 @@ describe("Type Inference", () => {
         [],
         [],
         [],
-        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("Int")))],
+        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("int")))],
       );
       const info = processModule(mod);
       expect(info.typeEnv.has("length")).toBe(true);
       const lengthScheme = info.typeEnv.get("length")!;
-      expect(typeToString(lengthScheme.type)).toBe("string -> Int");
+      expect(typeToString(lengthScheme.type)).toBe("string -> int");
     });
 
     it("processes foreign binding with type parameters", () => {
@@ -2417,7 +2417,7 @@ describe("Type Inference", () => {
             ast.abs("s", ast.binOp("==", ast.app(ast.var_("length"), ast.var_("s")), ast.int(0))),
           ),
         ],
-        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("Int")))],
+        [ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("int")))],
       );
       const info = processModule(mod);
       expect(info.typeEnv.has("isEmpty")).toBe(true);
@@ -2432,7 +2432,7 @@ describe("Type Inference", () => {
         [],
         [],
         [
-          ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("Int"))),
+          ast.foreignBinding("length", ast.tyfun(ast.tycon("string"), ast.tycon("int"))),
           ast.foreignBinding(
             "concat",
             ast.tyfun(ast.tycon("string"), ast.tyfun(ast.tycon("string"), ast.tycon("string"))),
@@ -2469,7 +2469,7 @@ describe("Type Inference", () => {
       const infoB = processModule(modB);
 
       // A.process should be Int -> Int
-      expect(typeToString(infoA.typeEnv.get("process")!.type)).toBe("Int -> Int");
+      expect(typeToString(infoA.typeEnv.get("process")!.type)).toBe("int -> int");
       // B.process should be polymorphic (a -> a)
       const bProcessType = infoB.typeEnv.get("process")!;
       expect(bProcessType.vars.length).toBe(1); // One type variable
@@ -2529,7 +2529,7 @@ describe("processUseStatements", () => {
 
     // Create an existing environment with 'bar'
     const existingEnv: TypeEnv = new Map();
-    existingEnv.set("bar", { vars: [], constraints: [], type: { kind: "TCon", name: "Int" } });
+    existingEnv.set("bar", { vars: [], constraints: [], type: { kind: "TCon", name: "int" } });
 
     // Try to import 'bar' from ModA
     const uses = [ast.useDecl("ModA", ast.importSpecific([ast.importItem("bar")]))];

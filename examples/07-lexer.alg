@@ -7,8 +7,8 @@
 -- =============================================================================
 
 type Token
-  = TkInt Int
-  | TkFloat Float
+  = TkInt int
+  | TkFloat float
   | TkString string
   | TkChar char
   | TkLower string      -- lowercase identifier

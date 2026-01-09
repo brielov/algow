@@ -275,10 +275,10 @@ const ttuple = (elements: readonly Type[]): Type => ({ kind: "TTuple", elements 
 // =============================================================================
 
 /** The integer type */
-const tInt = tcon("Int");
+const tInt = tcon("int");
 
 /** The floating-point type */
-const tFloat = tcon("Float");
+const tFloat = tcon("float");
 
 /** The string type */
 const tStr = tcon("string");
@@ -317,14 +317,14 @@ type Constraint = {
  */
 const instances: Map<string, Set<string>> = new Map([
   // Eq: types that support equality testing (==, !=)
-  ["Eq", new Set(["Int", "Float", "string", "boolean", "char"])],
+  ["Eq", new Set(["int", "float", "string", "boolean", "char"])],
 
   // Ord: types that support ordering comparisons (<, >, <=, >=)
-  ["Ord", new Set(["Int", "Float", "string", "char"])],
+  ["Ord", new Set(["int", "float", "string", "char"])],
 
   // Add: types that support the + operator (addition or concatenation)
   // Note: For mixed Int/Float, type widening to Float happens in inferBinOp
-  ["Add", new Set(["Int", "Float", "string"])],
+  ["Add", new Set(["int", "float", "string"])],
 ]);
 
 // =============================================================================
@@ -1488,9 +1488,9 @@ const inferBinOp = (
   const resolvedRight = rightType;
 
   // Helper to check if a type is Int
-  const isInt = (t: Type): boolean => t.kind === "TCon" && t.name === "Int";
+  const isInt = (t: Type): boolean => t.kind === "TCon" && t.name === "int";
   // Helper to check if a type is Float
-  const isFloat = (t: Type): boolean => t.kind === "TCon" && t.name === "Float";
+  const isFloat = (t: Type): boolean => t.kind === "TCon" && t.name === "float";
   // Helper to check if a type is numeric (Int or Float)
   const isNumeric = (t: Type): boolean => isInt(t) || isFloat(t);
 
@@ -2675,7 +2675,7 @@ const typeExprToType = (texpr: ast.TypeExpr): Type => {
  * Known primitive type names that should be treated as type constructors
  * even though they're parsed as TyVar (lowercase identifiers).
  */
-const PRIMITIVE_TYPES = new Set(["Int", "Float", "string", "boolean"]);
+const PRIMITIVE_TYPES = new Set(["int", "float", "string", "boolean"]);
 
 /**
  * Convert a type expression to a Type, replacing type variables with fresh ones.

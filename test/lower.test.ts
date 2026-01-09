@@ -5,7 +5,7 @@ import { lowerToIR } from "../src/lower";
 
 // Create a minimal CheckOutput with empty substitution
 const makeCheckOutput = (subst: Map<string, Type> = new Map()): CheckOutput => ({
-  type: { kind: "TCon", name: "Int" },
+  type: { kind: "TCon", name: "int" },
   subst,
   diagnostics: [],
   constraints: [],
@@ -23,7 +23,7 @@ const makeTypeEnv = (bindings: Record<string, Type> = {}): TypeEnv => {
 };
 
 // Type helpers
-const intType: Type = { kind: "TCon", name: "Int" };
+const intType: Type = { kind: "TCon", name: "int" };
 const strType: Type = { kind: "TCon", name: "string" };
 const boolType: Type = { kind: "TCon", name: "boolean" };
 const funType = (param: Type, ret: Type): Type => ({ kind: "TFun", param, ret });
