@@ -46,6 +46,7 @@ export enum TokenKind {
   Module, // module
   Use, // use
   Foreign, // foreign
+  Do, // do
 
   // Operators
   Plus, // +
@@ -60,6 +61,7 @@ export enum TokenKind {
   Ne, // !=
   Pipe, // |>
   Arrow, // ->
+  LeftArrow, // <-
   Eq, // =
   Bar, // |
   Comma, // ,
@@ -167,6 +169,7 @@ const keywords: ReadonlyMap<string, TokenKind> = new Map([
   ["module", TokenKind.Module],
   ["use", TokenKind.Use],
   ["foreign", TokenKind.Foreign],
+  ["do", TokenKind.Do],
 ]);
 
 // =============================================================================
@@ -396,6 +399,10 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
       return [TokenKind.Slash, start, state.pos];
 
     case LT:
+      if (peek(state) === MINUS) {
+        advance(state);
+        return [TokenKind.LeftArrow, start, state.pos];
+      }
       if (peek(state) === EQ) {
         advance(state);
         return [TokenKind.Le, start, state.pos];

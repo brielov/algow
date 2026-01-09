@@ -427,6 +427,9 @@ const maybeFlatMapExpr = ast.abs(
   ),
 );
 
+// Maybe.pure : a -> Maybe a (alias for Just, used with do-notation)
+const maybePureExpr = ast.abs("x", ast.app(ast.var_("Just"), ast.var_("x")));
+
 // Maybe.withDefault : a -> Maybe a -> a
 const maybeWithDefaultExpr = ast.abs(
   "def",
@@ -515,6 +518,9 @@ const eitherFlatMapExpr = ast.abs(
   ),
 );
 
+// Either.pure : b -> Either a b (alias for Right, used with do-notation)
+const eitherPureExpr = ast.abs("x", ast.app(ast.var_("Right"), ast.var_("x")));
+
 // Either.withDefault : b -> Either a b -> b
 const eitherWithDefaultExpr = ast.abs(
   "def",
@@ -552,6 +558,7 @@ export const maybeModule = ast.moduleDecl(
     ast.recBinding("isNothing", isNothingExpr),
     ast.recBinding("map", maybeMapExpr),
     ast.recBinding("flatMap", maybeFlatMapExpr),
+    ast.recBinding("pure", maybePureExpr),
     ast.recBinding("withDefault", maybeWithDefaultExpr),
     ast.recBinding("toList", maybeToListExpr),
   ],
@@ -567,6 +574,7 @@ export const eitherModule = ast.moduleDecl(
     ast.recBinding("map", eitherMapExpr),
     ast.recBinding("mapLeft", eitherMapLeftExpr),
     ast.recBinding("flatMap", eitherFlatMapExpr),
+    ast.recBinding("pure", eitherPureExpr),
     ast.recBinding("withDefault", eitherWithDefaultExpr),
     ast.recBinding("fromMaybe", eitherFromMaybeExpr),
   ],

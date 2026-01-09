@@ -186,7 +186,17 @@ const parseLambda = (state: ParserState): ast.Expr => {
 
 const synchronize = (state: ParserState): void => {
   while (!at(state, TokenKind.Eof)) {
-    if (atAny(state, TokenKind.Let, TokenKind.Type, TokenKind.If, TokenKind.Match, TokenKind.End)) {
+    if (
+      atAny(
+        state,
+        TokenKind.Let,
+        TokenKind.Type,
+        TokenKind.If,
+        TokenKind.Match,
+        TokenKind.End,
+        TokenKind.Do,
+      )
+    ) {
       return;
     }
     advance(state);
@@ -1012,6 +1022,9 @@ const parsePrefixImpl = (state: ParserState, allowLambda: boolean): ast.Expr => 
     case TokenKind.Match:
       return parseMatch(state);
 
+    case TokenKind.Do:
+      return parseDo(state);
+
     case TokenKind.Let:
       return parseLetExpr(state);
 
@@ -1489,6 +1502,163 @@ const parseMatch = (state: ParserState): ast.Expr => {
   const end = endToken ? endToken[2] : state.current[1];
 
   return ast.match(scrutinee, cases, span(start, end));
+};
+
+/**
+ * Parse a do-expression with monadic bind syntax.
+ *
+ * Syntax:
+ *   do
+ *     x <- expr           -- simple bind
+ *     (a, b) <- expr      -- pattern bind (destructuring)
+ *     _ <- expr           -- discard result
+ *     let x = expr        -- simple let
+ *     let (a, b) = expr   -- pattern let (destructuring)
+ *     expr                -- expression statement (bind to _)
+ *     finalExpr           -- final expression (returned as-is)
+ *   end
+ *
+ * Desugars to nested flatMap, let, and match expressions:
+ *   x <- e; rest          =>  flatMap (x -> rest) e
+ *   (a, b) <- e; rest     =>  flatMap ($do -> match $do when (a, b) -> rest end) e
+ *   let x = e; rest       =>  let x = e in rest
+ *   let (a, b) = e; rest  =>  match e when (a, b) -> rest end
+ *   e; rest               =>  flatMap (_ -> rest) e
+ *   finalExpr             =>  finalExpr
+ */
+const parseDo = (state: ParserState): ast.Expr => {
+  const start = state.current[1];
+  advance(state); // 'do'
+
+  type DoStmt =
+    | { kind: "bind"; pattern: ast.Pattern; expr: ast.Expr }
+    | { kind: "let"; pattern: ast.Pattern; value: ast.Expr }
+    | { kind: "expr"; expr: ast.Expr };
+
+  const stmts: DoStmt[] = [];
+  let tempCounter = 0;
+
+  while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
+    // Check for let statement: let pattern = expr
+    if (at(state, TokenKind.Let)) {
+      advance(state);
+      if (at(state, TokenKind.Rec)) {
+        error(state, "'let rec' is not allowed in do-notation");
+        advance(state);
+      }
+      const pattern = parsePattern(state);
+      expect(state, TokenKind.Eq, "expected '='");
+      const value = parseExpr(state);
+      stmts.push({ kind: "let", pattern, value });
+      continue;
+    }
+
+    // Check if this looks like a pattern followed by <-
+    // Patterns can start with: _, lowercase, uppercase, (, {, literals
+    if (
+      atAny(
+        state,
+        TokenKind.Underscore,
+        TokenKind.Lower,
+        TokenKind.Upper,
+        TokenKind.LParen,
+        TokenKind.LBrace,
+      )
+    ) {
+      // Save state for potential backtracking
+      const savedLexerPos = state.lexer.pos;
+      const savedLexerAtLineStart = state.lexer.atLineStart;
+      const savedCurrent = state.current;
+      const savedDiagCount = state.diagnostics.length;
+
+      // Try to parse as pattern
+      const pattern = parsePattern(state);
+
+      // Check if followed by <-
+      if (at(state, TokenKind.LeftArrow)) {
+        advance(state); // '<-'
+        const bindExpr = parseExpr(state);
+        stmts.push({ kind: "bind", pattern, expr: bindExpr });
+        continue;
+      }
+
+      // Not a bind - backtrack and parse as expression
+      state.lexer.pos = savedLexerPos;
+      state.lexer.atLineStart = savedLexerAtLineStart;
+      state.current = savedCurrent;
+      // Remove any diagnostics added during pattern parsing attempt
+      state.diagnostics.length = savedDiagCount;
+    }
+
+    // Parse as expression statement
+    const expr = parseExpr(state);
+    stmts.push({ kind: "expr", expr });
+  }
+
+  const endToken = expect(state, TokenKind.End, "expected 'end'");
+  const end = endToken ? endToken[2] : state.current[1];
+
+  if (stmts.length === 0) {
+    error(state, "do block cannot be empty");
+    return ast.int(0, span(start, end));
+  }
+
+  const lastStmt = stmts[stmts.length - 1]!;
+  if (lastStmt.kind !== "expr") {
+    error(state, "do block must end with an expression");
+  }
+
+  // Helper: check if pattern is a simple variable
+  const isSimpleVar = (p: ast.Pattern): p is ast.PVar => p.kind === "PVar";
+  const isWildcard = (p: ast.Pattern): p is ast.PWildcard => p.kind === "PWildcard";
+
+  // Desugar right-to-left
+  let result: ast.Expr = lastStmt.kind === "expr" ? lastStmt.expr : ast.int(0);
+
+  for (let i = stmts.length - 2; i >= 0; i--) {
+    const stmt = stmts[i]!;
+    switch (stmt.kind) {
+      case "bind": {
+        if (isSimpleVar(stmt.pattern)) {
+          // x <- e  =>  flatMap (x -> rest) e
+          const lambda = ast.abs(stmt.pattern.name, result, undefined, stmt.pattern.span);
+          result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
+        } else if (isWildcard(stmt.pattern)) {
+          // _ <- e  =>  flatMap (_ -> rest) e
+          const lambda = ast.abs("_", result);
+          result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
+        } else {
+          // (a, b) <- e  =>  flatMap ($do0 -> match $do0 when (a, b) -> rest end) e
+          const tempVar = `$do${tempCounter++}`;
+          const matchExpr = ast.match(ast.var_(tempVar), [ast.case_(stmt.pattern, result)]);
+          const lambda = ast.abs(tempVar, matchExpr);
+          result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
+        }
+        break;
+      }
+      case "let": {
+        if (isSimpleVar(stmt.pattern)) {
+          // let x = e  =>  let x = e in rest
+          result = ast.let_(stmt.pattern.name, stmt.value, result, undefined, stmt.pattern.span);
+        } else if (isWildcard(stmt.pattern)) {
+          // let _ = e  =>  let _ = e in rest (just evaluate e for side effects)
+          result = ast.let_("_", stmt.value, result);
+        } else {
+          // let (a, b) = e  =>  match e when (a, b) -> rest end
+          result = ast.match(stmt.value, [ast.case_(stmt.pattern, result)]);
+        }
+        break;
+      }
+      case "expr": {
+        // e  =>  flatMap (_ -> rest) e
+        const lambda = ast.abs("_", result);
+        result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
+        break;
+      }
+    }
+  }
+
+  return result;
 };
 
 /**
