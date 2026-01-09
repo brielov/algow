@@ -322,12 +322,21 @@ const parseLetBindingOrExpr = (state: ParserState): LetResult => {
     return { kind: "expr", expr: ast.match(value, [ast.case_(pattern, body)], span(start, end)) };
   }
 
-  const nameToken = expect(state, TokenKind.Lower, "expected binding name");
-  if (!nameToken) {
-    synchronize(state);
-    return { kind: "expr", expr: ast.int(0) };
+  // Accept either lowercase identifier or underscore for binding name
+  let nameToken: Token | null = null;
+  let name: string;
+  if (at(state, TokenKind.Underscore)) {
+    nameToken = state.current;
+    advance(state);
+    name = "_";
+  } else {
+    nameToken = expect(state, TokenKind.Lower, "expected binding name");
+    if (!nameToken) {
+      synchronize(state);
+      return { kind: "expr", expr: ast.int(0) };
+    }
+    name = text(state, nameToken);
   }
-  const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
   const params = parseParams(state);
 
@@ -1239,11 +1248,20 @@ const parseMatch = (state: ParserState): ast.Expr => {
  * Returns { name, nameSpan, value } where value has params wrapped as lambdas
  */
 const parseRecBinding = (state: ParserState): ast.RecBinding => {
-  const nameToken = expect(state, TokenKind.Lower, "expected binding name");
-  if (!nameToken) {
-    return ast.recBinding("_error_", ast.int(0));
+  // Accept either a lowercase identifier or underscore for binding name
+  let nameToken: Token | null = null;
+  let name: string;
+  if (at(state, TokenKind.Underscore)) {
+    nameToken = state.current;
+    advance(state);
+    name = "_";
+  } else {
+    nameToken = expect(state, TokenKind.Lower, "expected binding name");
+    if (!nameToken) {
+      return ast.recBinding("_error_", ast.int(0));
+    }
+    name = text(state, nameToken);
   }
-  const name = text(state, nameToken);
   const nameSpan = tokenSpan(nameToken);
   const params = parseParams(state);
 
