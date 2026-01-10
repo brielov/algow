@@ -1328,7 +1328,7 @@ module Parser
       when TokUse ->
         match parseUseDecl (advance state)
           when PErr e p -> PErr e p
-          when POk d s2 -> parseDeclsAndExpr (snoc decls d) s2
+          when POk u s2 -> parseDeclsAndExpr (snoc decls (SDeclUse u)) s2
         end
       when TokType ->
         match parseTypeDecl (advance state)

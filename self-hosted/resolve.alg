@@ -354,6 +354,11 @@ module Resolve
       let (resolvedName, s1) = freshName name state in
       let env2 = extendEnv name resolvedName env in
       ResOk (CDeclForeign resolvedName mod jsName ty, env2) s1
+
+    when CDeclUse u ->
+      -- Top-level use statements: for now just pass through
+      -- Full module resolution would update env with imported names
+      ResOk (CDeclUse u, env) state
   end
 
   and resolveDecls env state decls =

@@ -183,6 +183,7 @@ module Types
     | SDeclLetRec (List SBinding)                    -- let rec f = ... and g = ...
     | SDeclForeign string SType                      -- foreign foo : Int -> Int
     | SDeclModule string (List SUse) (List SDecl)    -- module Foo use ... end
+    | SDeclUse SUse                                  -- top-level use statement
 
   type SConDecl = SConDecl string (List SType)       -- constructor name, field types
 
@@ -253,6 +254,7 @@ module Types
     | CDeclLet Name CExpr                            -- let binding
     | CDeclLetRec (List CBinding)                    -- recursive bindings
     | CDeclForeign Name string string CType          -- foreign (name, module, jsName, type)
+    | CDeclUse SUse                                  -- top-level use (for name resolution)
 
   type CConDecl = CConDecl string (List CType)       -- constructor name, field types
 

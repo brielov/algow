@@ -384,6 +384,10 @@ module Desugar
       -- The inner declarations are desugared but kept in module structure
       -- This will be handled by the name resolver
       (CDeclType name Nil Nil, s1)  -- Placeholder, modules handled specially
+
+    when SDeclUse u ->
+      -- Top-level use statements pass through for name resolution
+      (CDeclUse u, state)
   end
 
   and desugarDecls state decls =

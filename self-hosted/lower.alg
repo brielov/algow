@@ -415,6 +415,10 @@ module Lower
     when CDeclForeign name mod jsName ty ->
       let binding = IRBForeign mod jsName [] in
       (ctx, Just (IRDeclLet name binding))
+
+    when CDeclUse _ ->
+      -- Use statements don't generate IR
+      (ctx, Nothing)
   end
 
   let rec lowerDecls ctx decls =

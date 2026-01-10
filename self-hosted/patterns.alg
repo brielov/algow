@@ -491,6 +491,7 @@ module Patterns
       let newBindings = compilePatternsBindings bindings in
       CDeclLetRec newBindings
     when CDeclForeign name mod jsName ty -> decl
+    when CDeclUse u -> decl
   end
 
   let rec compilePatternsBindings bindings = match bindings

@@ -312,5 +312,5 @@ end
 let testIR = match testPatterns
   when (decls, maybeExpr) -> Lower.lowerProgram decls maybeExpr
 end
-let testJS = Codegen.generate testIR
-testJS
+let testOptimized = Optimize.optimizeProgramDefault testIR
+let testJS = Codegen.generate testOptimized in testJS
