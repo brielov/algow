@@ -97,9 +97,10 @@ module Lexer
     ("false", TokFalse)
   ]
 
-  -- Check if identifier is a keyword
+  -- Check if identifier is a keyword or underscore
   let identToToken ident =
-    match Map.lookup ident keywords
+    if ident == "_" then TokUnderscore
+    else match Map.lookup ident keywords
       when Just tok -> tok
       when Nothing -> TokLower ident
     end

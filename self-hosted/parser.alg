@@ -151,7 +151,9 @@ module Parser
   -- ===========================================================================
 
   -- Check if token can start an atom
-  let canStartAtom tok = match tok
+  -- Tokens that can be function arguments (without parentheses)
+  -- Note: Let, If, Match, Do require parentheses to be used as arguments
+  let canBeArgument tok = match tok
     when TokInt _ -> true
     when TokFloat _ -> true
     when TokString _ -> true
@@ -163,12 +165,17 @@ module Parser
     when TokLParen -> true
     when TokLBracket -> true
     when TokLBrace -> true
+    when _ -> false
+  end
+
+  -- Tokens that can start an expression (including keywords)
+  let canStartAtom tok = match tok
+    when TokMinus -> true
     when TokIf -> true
     when TokMatch -> true
     when TokLet -> true
     when TokDo -> true
-    when TokMinus -> true
-    when _ -> false
+    when _ -> canBeArgument tok
   end
 
   -- Parse atom (highest precedence)
@@ -469,7 +476,8 @@ module Parser
         -- Check for guard
         match peek s2
           when TokIf ->
-            match parseExpr 0 (advance s2)
+            -- Use parseExprNoLambda for guard to avoid confusing 'guard ->' with bare lambda
+            match parseExprNoLambda 0 (advance s2)
               when PErr e p -> PErr e p
               when POk guard s3 ->
                 match expect TokArrow s3
@@ -490,12 +498,52 @@ module Parser
         end
     end
 
+  -- Check if token starts a destructuring pattern (not a simple variable binding)
+  and isPatternStart tok = match tok
+    when TokLParen -> true
+    when TokLBrace -> true
+    when TokUnderscore -> true
+    when TokUpper _ -> true
+    when _ -> false
+  end
+
   -- Parse let expression
   and parseLetExpr state =
     match peek state
       when TokRec -> parseLetRec (advance state)
       when TokLower x -> parseLetSimple x (advance state)
-      when _ -> PErr "Expected 'rec' or identifier" (getPos state)
+      when _ ->
+        -- Check for destructuring pattern: let (a, b) = expr in body
+        if isPatternStart (peek state) then
+          parseLetDestructure state
+        else
+          PErr "Expected 'rec' or identifier" (getPos state)
+    end
+
+  -- Parse let destructuring: let pattern = expr in body
+  -- Desugars to: match expr when pattern -> body end
+  and parseLetDestructure state =
+    match parsePattern state
+      when PErr e p -> PErr e p
+      when POk pat s2 ->
+        match expect TokEq s2
+          when PErr e p -> PErr e p
+          when POk _ s3 ->
+            match parseExpr 0 s3
+              when PErr e p -> PErr e p
+              when POk value s4 ->
+                match expect TokIn s4
+                  when PErr e p -> PErr e p
+                  when POk _ s5 ->
+                    match parseExpr 0 s5
+                      when PErr e p -> PErr e p
+                      when POk body s6 ->
+                        -- Desugar to match
+                        POk (SMatch value [SCase pat Nothing body]) s6
+                    end
+                end
+            end
+        end
     end
 
   and parseLetSimple name state =
@@ -640,10 +688,17 @@ module Parser
     if minPrec == 0 && isLambdaStart state then
       parseBareLambda state
     else
-      match parseAtom state
-        when PErr e p -> PErr e p
-        when POk left s2 -> parseExprRest minPrec left s2
-      end
+      parseExprCore minPrec state
+
+  -- Parse expression without bare lambda check (for guard expressions)
+  and parseExprNoLambda minPrec state =
+    parseExprCore minPrec state
+
+  and parseExprCore minPrec state =
+    match parseAtom state
+      when PErr e p -> PErr e p
+      when POk left s2 -> parseExprRest minPrec left s2
+    end
 
   and parseExprRest minPrec left state =
     let tok = peek state in
@@ -675,8 +730,8 @@ module Parser
           end
         else POk left state
       when Nothing ->
-        -- Check for function application
-        if canStartAtom tok then
+        -- Check for function application (only simple tokens, not keywords)
+        if canBeArgument tok then
           match parseAtom state
             when PErr e p -> PErr e p
             when POk arg s2 -> parseExprRest minPrec (SApp left arg) s2
@@ -1163,7 +1218,15 @@ module Parser
       when TokLet ->
         match parseLetDecl (advance state)
           when PErr e p -> PErr e p
-          when POk d s2 -> parseModuleBody name uses (snoc decls d) s2
+          when POk d s2 ->
+            -- Handle 'and' for mutually recursive bindings
+            parseModuleBodyAndBindings name uses (snoc decls d) s2
+        end
+      when TokAnd ->
+        -- Handle 'and' as continuation of previous let rec
+        match parseAndBinding (advance state)
+          when PErr e p -> PErr e p
+          when POk d s2 -> parseModuleBodyAndBindings name uses (snoc decls d) s2
         end
       when TokForeign ->
         match parseForeignDecl (advance state)
@@ -1172,6 +1235,38 @@ module Parser
         end
       when TokEnd -> POk (SDeclModule name uses decls) (advance state)
       when _ -> PErr "Expected 'use', 'type', 'let', 'foreign', or 'end'" (getPos state)
+    end
+
+  -- After parsing a let/and binding, check for more 'and' bindings
+  and parseModuleBodyAndBindings name uses decls state =
+    match peek state
+      when TokAnd ->
+        match parseAndBinding (advance state)
+          when PErr e p -> PErr e p
+          when POk d s2 -> parseModuleBodyAndBindings name uses (snoc decls d) s2
+        end
+      when _ -> parseModuleBody name uses decls state
+    end
+
+  -- Parse an 'and' binding (like a let rec binding but without 'let rec')
+  and parseAndBinding state =
+    match peek state
+      when TokLower name ->
+        match parseParams Nil (advance state)
+          when PErr e p -> PErr e p
+          when POk params s2 ->
+            match expect TokEq s2
+              when PErr e p -> PErr e p
+              when POk _ s3 ->
+                match parseExpr 0 s3
+                  when PErr e p -> PErr e p
+                  when POk value s4 ->
+                    let boundExpr = if List.isEmpty params then value else SAbs params value in
+                    POk (SDeclLetRec [SBinding name boundExpr]) s4
+                end
+            end
+        end
+      when _ -> PErr "Expected identifier after 'and'" (getPos state)
     end
 
   and parseUseDecl state =
@@ -1230,6 +1325,11 @@ module Parser
   and parseDeclsAndExpr decls state =
     match peek state
       when TokEof -> POk (SProgram decls Nothing) state
+      when TokUse ->
+        match parseUseDecl (advance state)
+          when PErr e p -> PErr e p
+          when POk d s2 -> parseDeclsAndExpr (snoc decls d) s2
+        end
       when TokType ->
         match parseTypeDecl (advance state)
           when PErr e p -> PErr e p
@@ -1281,6 +1381,31 @@ module Parser
                 end
               when _ -> parseDeclsAndExpr (snoc decls d) s2
             end
+        end
+      when TokLParen ->
+        -- Destructuring pattern: let (a, b) = expr in body
+        -- Always produces an expression, not a binding
+        match parseLetDestructure state
+          when PErr e p -> PErr e p
+          when POk expr s2 -> POk (SProgram decls (Just expr)) s2
+        end
+      when TokLBrace ->
+        -- Record destructuring pattern: let {x, y} = expr in body
+        match parseLetDestructure state
+          when PErr e p -> PErr e p
+          when POk expr s2 -> POk (SProgram decls (Just expr)) s2
+        end
+      when TokUnderscore ->
+        -- Wildcard pattern: let _ = expr in body
+        match parseLetDestructure state
+          when PErr e p -> PErr e p
+          when POk expr s2 -> POk (SProgram decls (Just expr)) s2
+        end
+      when TokUpper _ ->
+        -- Constructor pattern: let Just x = expr in body
+        match parseLetDestructure state
+          when PErr e p -> PErr e p
+          when POk expr s2 -> POk (SProgram decls (Just expr)) s2
         end
       when TokLower name ->
         match parseParams Nil (advance state)
