@@ -1012,9 +1012,11 @@ const genMatchSwitch = (
     ctx.indent += 3;
     const bodyLines: string[] = [];
     const savedLines = ctx.lines;
+    const savedDeclaredNames = new Set(ctx.declaredNames);
     ctx.lines = bodyLines;
     const bodyResult = genExpr(ctx, case_.body);
     ctx.lines = savedLines;
+    ctx.declaredNames = savedDeclaredNames;
     ctx.indent -= 3;
 
     for (const line of bodyLines) {
