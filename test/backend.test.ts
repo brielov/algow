@@ -46,7 +46,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("x", intType));
       const expr = ir.irLet("x", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("const x = 42;");
+      expect(result.code).toContain("let x = 42;");
       expect(result.code).toContain("const $result = x;");
     });
 
@@ -55,7 +55,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("x", intType));
       const expr = ir.irLet("x", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("const x = 1;");
+      expect(result.code).toContain("let x = 1;");
     });
 
     it("generates recursive let binding", () => {
@@ -70,14 +70,14 @@ describe("JavaScript Backend", () => {
       expect(result.code).toContain("f = (n) => n;");
     });
 
-    it("generates non-lambda recursive let binding with const", () => {
+    it("generates non-lambda recursive let binding with let", () => {
       // A recursive binding that's not a lambda (e.g., a simple value)
       const binding = ir.irAtomBinding(ir.irLit(42, intType));
       const body = ir.irAtomExpr(ir.irVar("x", intType));
       const expr = ir.irLetRec([ir.irRecBinding("x", binding)], body);
       const result = generateJS(expr, []);
-      // Non-lambda recursive bindings use const
-      expect(result.code).toContain("const x = 42;");
+      // Non-lambda recursive bindings use let to support shadowing
+      expect(result.code).toContain("let x = 42;");
     });
   });
 
@@ -366,7 +366,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_fn", fnType_));
       const expr = ir.irLet("_fn", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("const y = 1");
+      expect(result.code).toContain("let y = 1");
       expect(result.code).toContain("return y");
     });
   });
@@ -386,7 +386,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("y", intType));
       const expr = ir.irLet("y", binding, body);
       const result = generateJS(expr, ["Nothing", "Just"]);
-      expect(result.code).toContain("const y = x;");
+      expect(result.code).toContain("let y = x;");
       expect(result.code).not.toContain('$con("x")');
     });
   });
@@ -401,7 +401,7 @@ describe("JavaScript Backend", () => {
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
       expect(result.code).toContain("if (true)");
-      expect(result.code).toContain("const n = _s;");
+      expect(result.code).toContain("const n = _s0;");
     });
 
     it("generates match with wildcard pattern", () => {
@@ -424,7 +424,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("_s === 0");
+      expect(result.code).toContain("_s0 === 0");
     });
 
     it("generates match with string literal pattern", () => {
@@ -435,7 +435,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain('_s === "hello"');
+      expect(result.code).toContain('_s0 === "hello"');
     });
 
     it("generates match with boolean literal pattern", () => {
@@ -446,7 +446,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("_s === true");
+      expect(result.code).toContain("_s0 === true");
     });
 
     it("generates match with constructor pattern", () => {
@@ -460,9 +460,9 @@ describe("JavaScript Backend", () => {
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, ["Just", "Nothing"]);
       // Uses switch-based dispatch for unique constructor tags
-      expect(result.code).toContain("switch (_s.$tag)");
+      expect(result.code).toContain("switch (_s0.$tag)");
       expect(result.code).toContain('case "Just"');
-      expect(result.code).toContain("const n = _s.$args[0]");
+      expect(result.code).toContain("const n = _s0.$args[0]");
     });
 
     it("generates match with tuple pattern", () => {
@@ -474,8 +474,8 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("const a = _s[0]");
-      expect(result.code).toContain("const b = _s[1]");
+      expect(result.code).toContain("const a = _s0[0]");
+      expect(result.code).toContain("const b = _s0[1]");
     });
 
     it("generates match with tuple pattern containing literals", () => {
@@ -487,7 +487,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("_s[0] === 1 && _s[1] === 2");
+      expect(result.code).toContain("_s0[0] === 1 && _s0[1] === 2");
     });
 
     it("generates match with record pattern", () => {
@@ -499,7 +499,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("const val = _s.x");
+      expect(result.code).toContain("const val = _s0.x");
     });
 
     it("generates multiple match cases with else if", () => {
@@ -512,8 +512,8 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("if (_s === 0)");
-      expect(result.code).toContain("} else if (_s === 1)");
+      expect(result.code).toContain("if (_s0 === 0)");
+      expect(result.code).toContain("} else if (_s0 === 1)");
       expect(result.code).toContain("} else if (true)");
     });
 
@@ -527,10 +527,9 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, ["Just", "Nothing"]);
-      // Uses switch-based dispatch; nested literal check inside case
-      expect(result.code).toContain("switch (_s.$tag)");
-      expect(result.code).toContain('case "Just"');
-      expect(result.code).toContain("_s.$args[0] === 42");
+      // Uses if/else dispatch due to nested literal pattern (can't use switch)
+      expect(result.code).toContain('_s0.$tag === "Just"');
+      expect(result.code).toContain("_s0.$args[0] === 42");
     });
 
     it("generates match with complex case body", () => {
@@ -543,7 +542,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("_t", intType));
       const expr = ir.irLet("_t", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("const y = 1");
+      expect(result.code).toContain("let y = 1");
       expect(result.code).toContain("return y;");
     });
   });
@@ -566,7 +565,7 @@ describe("JavaScript Backend", () => {
       const body = ir.irAtomExpr(ir.irVar("x-y", intType));
       const expr = ir.irLet("x-y", binding, body);
       const result = generateJS(expr, []);
-      expect(result.code).toContain("const x_y = 1;");
+      expect(result.code).toContain("let x_y = 1;");
     });
   });
 
@@ -701,8 +700,8 @@ describe("As-Patterns", () => {
     const body = ir.irAtomExpr(ir.irVar("_t", maybeType));
     const expr = ir.irLet("_t", binding, body);
     const result = generateJS(expr, ["Just", "Nothing"]);
-    expect(result.code).toContain("const whole = _s");
-    expect(result.code).toContain("const n = _s.$args[0]");
+    expect(result.code).toContain("const whole = _s0");
+    expect(result.code).toContain("const n = _s0.$args[0]");
   });
 });
 
@@ -716,7 +715,7 @@ describe("Or-Patterns", () => {
     const body = ir.irAtomExpr(ir.irVar("_t", boolType));
     const expr = ir.irLet("_t", binding, body);
     const result = generateJS(expr, []);
-    expect(result.code).toContain("(_s === 0) || (_s === 1)");
+    expect(result.code).toContain("(_s0 === 0) || (_s0 === 1)");
   });
 });
 
@@ -895,7 +894,7 @@ describe("TCO (Tail Call Optimization)", () => {
     const result = generateJS(expr, ["Nil", "Cons"]);
 
     // Should use switch-based pattern matching (optimized)
-    expect(result.code).toContain("switch (_s.$tag)");
+    expect(result.code).toContain("switch (_s0.$tag)");
     expect(result.code).toContain('case "Nil"');
     expect(result.code).toContain('case "Cons"');
   });

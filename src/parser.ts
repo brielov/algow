@@ -2065,6 +2065,323 @@ const parseCharContent = (state: ParserState, quoted: string, tokenStart: number
 // =============================================================================
 
 /**
+ * Qualify variable references in an expression by replacing unqualified names
+ * that match module binding names with their qualified equivalents.
+ * E.g., `helper` becomes `Foo.helper` if `helper` is a binding in module `Foo`.
+ */
+const qualifyVarsInExpr = (
+  expr: ast.Expr,
+  moduleName: string,
+  bindingNames: Set<string>,
+): ast.Expr => {
+  switch (expr.kind) {
+    case "Int":
+    case "Float":
+    case "Bool":
+    case "Str":
+    case "Char":
+    case "QualifiedVar":
+      return expr;
+
+    case "Var":
+      // If the variable is a module binding, qualify it
+      if (bindingNames.has(expr.name)) {
+        return ast.var_(`${moduleName}.${expr.name}`, expr.span);
+      }
+      return expr;
+
+    case "Abs":
+      // Don't qualify the parameter name, but do qualify the body
+      // unless the parameter shadows the binding name
+      if (bindingNames.has(expr.param)) {
+        // Shadowed - don't qualify inside this scope for this name
+        const innerNames = new Set(bindingNames);
+        innerNames.delete(expr.param);
+        return ast.abs(
+          expr.param,
+          qualifyVarsInExpr(expr.body, moduleName, innerNames),
+          expr.span,
+          expr.paramSpan,
+          expr.paramType,
+        );
+      }
+      return ast.abs(
+        expr.param,
+        qualifyVarsInExpr(expr.body, moduleName, bindingNames),
+        expr.span,
+        expr.paramSpan,
+        expr.paramType,
+      );
+
+    case "App":
+      return ast.app(
+        qualifyVarsInExpr(expr.func, moduleName, bindingNames),
+        qualifyVarsInExpr(expr.param, moduleName, bindingNames),
+        expr.span,
+      );
+
+    case "Let": {
+      const value = qualifyVarsInExpr(expr.value, moduleName, bindingNames);
+      // Binding name shadows module names in body
+      const innerNames = new Set(bindingNames);
+      innerNames.delete(expr.name);
+      const body = qualifyVarsInExpr(expr.body, moduleName, innerNames);
+      return ast.let_(expr.name, value, body, expr.span, expr.nameSpan, expr.returnType);
+    }
+
+    case "LetRec": {
+      // Add all binding names to scope (they shadow module names)
+      const innerNames = new Set(bindingNames);
+      for (const b of expr.bindings) {
+        innerNames.delete(b.name);
+      }
+      const bindings = expr.bindings.map((b) =>
+        ast.recBinding(
+          b.name,
+          qualifyVarsInExpr(b.value, moduleName, innerNames),
+          b.nameSpan,
+          b.returnType,
+        ),
+      );
+      const body = qualifyVarsInExpr(expr.body, moduleName, innerNames);
+      return ast.letRec(bindings, body);
+    }
+
+    case "If":
+      return ast.if_(
+        qualifyVarsInExpr(expr.cond, moduleName, bindingNames),
+        qualifyVarsInExpr(expr.then, moduleName, bindingNames),
+        qualifyVarsInExpr(expr.else, moduleName, bindingNames),
+        expr.span,
+      );
+
+    case "Match": {
+      const scrutinee = qualifyVarsInExpr(expr.expr, moduleName, bindingNames);
+      const cases = expr.cases.map((c) => {
+        // Pattern variables shadow module names in guard and body
+        const patternVars = collectPatternVars(c.pattern);
+        const innerNames = new Set(bindingNames);
+        for (const v of patternVars) {
+          innerNames.delete(v);
+        }
+        const guard = c.guard ? qualifyVarsInExpr(c.guard, moduleName, innerNames) : undefined;
+        const body = qualifyVarsInExpr(c.body, moduleName, innerNames);
+        return ast.case_(c.pattern, body, guard);
+      });
+      return ast.match(scrutinee, cases, expr.span);
+    }
+
+    case "BinOp":
+      return ast.binOp(
+        expr.op,
+        qualifyVarsInExpr(expr.left, moduleName, bindingNames),
+        qualifyVarsInExpr(expr.right, moduleName, bindingNames),
+        expr.span,
+      );
+
+    case "Tuple":
+      return ast.tuple(
+        expr.elements.map((e) => qualifyVarsInExpr(e, moduleName, bindingNames)),
+        expr.span,
+      );
+
+    case "Record":
+      return ast.record(
+        expr.fields.map((f) =>
+          ast.field(f.name, qualifyVarsInExpr(f.value, moduleName, bindingNames)),
+        ),
+        expr.span,
+      );
+
+    case "RecordUpdate":
+      return ast.recordUpdate(
+        qualifyVarsInExpr(expr.base, moduleName, bindingNames),
+        expr.fields.map((f) =>
+          ast.field(f.name, qualifyVarsInExpr(f.value, moduleName, bindingNames)),
+        ),
+        expr.span,
+      );
+
+    case "FieldAccess":
+      return ast.fieldAccess(
+        qualifyVarsInExpr(expr.record, moduleName, bindingNames),
+        expr.field,
+        expr.span,
+      );
+
+    case "TupleIndex":
+      return ast.tupleIndex(
+        qualifyVarsInExpr(expr.tuple, moduleName, bindingNames),
+        expr.index,
+        expr.span,
+      );
+  }
+};
+
+/**
+ * Resolve imported variable references by replacing unqualified names
+ * with their qualified equivalents based on the import map.
+ * E.g., `freeVarsExpr` becomes `IR.freeVarsExpr` if imported from IR module.
+ */
+const resolveImportsInExpr = (expr: ast.Expr, importMap: Map<string, string>): ast.Expr => {
+  if (importMap.size === 0) return expr;
+
+  switch (expr.kind) {
+    case "Int":
+    case "Float":
+    case "Bool":
+    case "Str":
+    case "Char":
+    case "QualifiedVar":
+      return expr;
+
+    case "Var": {
+      const qualified = importMap.get(expr.name);
+      if (qualified) {
+        return ast.var_(qualified, expr.span);
+      }
+      return expr;
+    }
+
+    case "Abs":
+      // Parameter shadows imports
+      if (importMap.has(expr.param)) {
+        const innerMap = new Map(importMap);
+        innerMap.delete(expr.param);
+        return ast.abs(
+          expr.param,
+          resolveImportsInExpr(expr.body, innerMap),
+          expr.span,
+          expr.paramSpan,
+          expr.paramType,
+        );
+      }
+      return ast.abs(
+        expr.param,
+        resolveImportsInExpr(expr.body, importMap),
+        expr.span,
+        expr.paramSpan,
+        expr.paramType,
+      );
+
+    case "App":
+      return ast.app(
+        resolveImportsInExpr(expr.func, importMap),
+        resolveImportsInExpr(expr.param, importMap),
+        expr.span,
+      );
+
+    case "Let": {
+      const value = resolveImportsInExpr(expr.value, importMap);
+      const innerMap = new Map(importMap);
+      innerMap.delete(expr.name);
+      const body = resolveImportsInExpr(expr.body, innerMap);
+      return ast.let_(expr.name, value, body, expr.span, expr.nameSpan, expr.returnType);
+    }
+
+    case "LetRec": {
+      const innerMap = new Map(importMap);
+      for (const b of expr.bindings) {
+        innerMap.delete(b.name);
+      }
+      const bindings = expr.bindings.map((b) =>
+        ast.recBinding(b.name, resolveImportsInExpr(b.value, innerMap), b.nameSpan, b.returnType),
+      );
+      const body = resolveImportsInExpr(expr.body, innerMap);
+      return ast.letRec(bindings, body);
+    }
+
+    case "If":
+      return ast.if_(
+        resolveImportsInExpr(expr.cond, importMap),
+        resolveImportsInExpr(expr.then, importMap),
+        resolveImportsInExpr(expr.else, importMap),
+        expr.span,
+      );
+
+    case "Match": {
+      const scrutinee = resolveImportsInExpr(expr.expr, importMap);
+      const cases = expr.cases.map((c) => {
+        const patternVars = collectPatternVars(c.pattern);
+        const innerMap = new Map(importMap);
+        for (const v of patternVars) {
+          innerMap.delete(v);
+        }
+        const guard = c.guard ? resolveImportsInExpr(c.guard, innerMap) : undefined;
+        const body = resolveImportsInExpr(c.body, innerMap);
+        return ast.case_(c.pattern, body, guard);
+      });
+      return ast.match(scrutinee, cases, expr.span);
+    }
+
+    case "BinOp":
+      return ast.binOp(
+        expr.op,
+        resolveImportsInExpr(expr.left, importMap),
+        resolveImportsInExpr(expr.right, importMap),
+        expr.span,
+      );
+
+    case "Tuple":
+      return ast.tuple(
+        expr.elements.map((e) => resolveImportsInExpr(e, importMap)),
+        expr.span,
+      );
+
+    case "Record":
+      return ast.record(
+        expr.fields.map((f) => ast.field(f.name, resolveImportsInExpr(f.value, importMap))),
+        expr.span,
+      );
+
+    case "RecordUpdate":
+      return ast.recordUpdate(
+        resolveImportsInExpr(expr.base, importMap),
+        expr.fields.map((f) => ast.field(f.name, resolveImportsInExpr(f.value, importMap))),
+        expr.span,
+      );
+
+    case "FieldAccess":
+      return ast.fieldAccess(resolveImportsInExpr(expr.record, importMap), expr.field, expr.span);
+
+    case "TupleIndex":
+      return ast.tupleIndex(resolveImportsInExpr(expr.tuple, importMap), expr.index, expr.span);
+  }
+};
+
+/** Collect all variable names bound by a pattern */
+const collectPatternVars = (pattern: ast.Pattern): string[] => {
+  const vars: string[] = [];
+  const collect = (p: ast.Pattern): void => {
+    switch (p.kind) {
+      case "PVar":
+        vars.push(p.name);
+        break;
+      case "PCon":
+        for (const arg of p.args) collect(arg);
+        break;
+      case "PTuple":
+        for (const elem of p.elements) collect(elem);
+        break;
+      case "PRecord":
+        for (const field of p.fields) collect(field.pattern);
+        break;
+      case "PAs":
+        vars.push(p.name);
+        collect(p.pattern);
+        break;
+      case "POr":
+        for (const alt of p.alternatives) collect(alt);
+        break;
+      default:
+        break;
+    }
+  };
+  collect(pattern);
+  return vars;
+};
+
+/**
  * Convert a program to a single expression for type inference and evaluation.
  * Wraps with imported module bindings, then user's top-level bindings.
  */
@@ -2100,6 +2417,7 @@ export const programToExpr = (
   // QualifiedVar tells the type checker to look up from moduleEnv.
   // At runtime, these are evaluated after qualified bindings (outer scope).
   const seenModules = new Set<string>();
+  const seenNames = new Set<string>(); // Track names to avoid duplicate bindings
   for (let i = uses.length - 1; i >= 0; i--) {
     const use = uses[i]!;
     if (seenModules.has(use.moduleName)) continue;
@@ -2121,6 +2439,12 @@ export const programToExpr = (
     }
     // Note: `use Module` (no imports) -> no unqualified aliases, only qualified access
 
+    // Filter out names that have already been bound (earlier imports win)
+    namesToImport = namesToImport.filter((name) => !seenNames.has(name));
+    for (const name of namesToImport) {
+      seenNames.add(name);
+    }
+
     if (namesToImport.length > 0) {
       const unqualifiedBindings = namesToImport.map((name) =>
         ast.recBinding(name, ast.qualifiedVar(mod.name, name)),
@@ -2136,25 +2460,52 @@ export const programToExpr = (
   // The type checker detects `Module.name` bindings and looks up their types
   // from moduleEnv instead of re-inferring them.
   //
-  // IMPORTANT: We also include unqualified aliases (name = Var(Module.name)) in the
-  // SAME letRec block so that recursive references within the body work correctly.
-  // E.g., `let rec tokenize s = ... tokenize ... end` has Var("tokenize") in the body,
-  // but we renamed the binding to Module.tokenize, so we need an alias.
+  // We qualify variable references within binding bodies so that:
+  // 1. Same-module references use qualified names (e.g., `helper` -> `Foo.helper`)
+  // 2. Cross-module imports via `use` are resolved (e.g., `freeVarsExpr` -> `IR.freeVarsExpr`)
+  // This ensures DCE can track transitive dependencies correctly.
   for (let i = modules.length - 1; i >= 0; i--) {
     const mod = modules[i]!;
     if (mod.bindings.length === 0) continue;
 
-    const bindings: ast.RecBinding[] = [];
+    // Build import map from module-internal use statements
+    // Maps unqualified name -> qualified name (e.g., "freeVarsExpr" -> "IR.freeVarsExpr")
+    const importMap = new Map<string, string>();
+    for (const use of mod.uses) {
+      const importedMod = modules.find((m) => m.name === use.moduleName);
+      if (!importedMod) continue;
 
-    // First, add qualified bindings with actual implementations
-    for (const b of mod.bindings) {
-      bindings.push(ast.recBinding(`${mod.name}.${b.name}`, b.value, b.nameSpan, b.returnType));
+      if (use.imports?.kind === "All") {
+        // use Module (..) - import all bindings
+        for (const b of importedMod.bindings) {
+          if (!importMap.has(b.name)) {
+            importMap.set(b.name, `${use.moduleName}.${b.name}`);
+          }
+        }
+      } else if (use.imports?.kind === "Specific") {
+        // use Module (a, b, c) - import specific bindings
+        for (const item of use.imports.items) {
+          if (importedMod.bindings.some((b) => b.name === item.name)) {
+            if (!importMap.has(item.name)) {
+              importMap.set(item.name, `${use.moduleName}.${item.name}`);
+            }
+          }
+        }
+      }
     }
 
-    // Then, add unqualified aliases for recursion support
-    // These allow Var("tokenize") to resolve to Var("Module.tokenize")
+    const bindings: ast.RecBinding[] = [];
+    const bindingNames = new Set(mod.bindings.map((b) => b.name));
+
+    // Add qualified bindings with implementations
+    // Variable references to sibling bindings are qualified (e.g., `helper` -> `Foo.helper`)
     for (const b of mod.bindings) {
-      bindings.push(ast.recBinding(b.name, ast.var_(`${mod.name}.${b.name}`)));
+      let qualifiedBody = qualifyVarsInExpr(b.value, mod.name, bindingNames);
+      // Also resolve cross-module imports
+      qualifiedBody = resolveImportsInExpr(qualifiedBody, importMap);
+      bindings.push(
+        ast.recBinding(`${mod.name}.${b.name}`, qualifiedBody, b.nameSpan, b.returnType),
+      );
     }
 
     expr = ast.letRec(bindings, expr);

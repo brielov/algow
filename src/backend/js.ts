@@ -32,13 +32,29 @@ type CodeGenContext = {
   lines: string[];
   /** Set of constructor names (for identifying constructors vs variables) */
   constructors: Set<string>;
+  /** Set of already-declared variable names (to avoid duplicate const declarations) */
+  declaredNames: Set<string>;
+  /** Counter for generating unique scrutinee variable names */
+  scrutineeCounter: number;
+  /** Flag to track if a continue was emitted at the current TCO level */
+  emittedContinue: boolean;
 };
 
 const createContext = (constructorNames: readonly string[]): CodeGenContext => ({
   indent: 0,
   lines: [],
   constructors: new Set(constructorNames),
+  declaredNames: new Set(),
+  scrutineeCounter: 0,
+  emittedContinue: false,
 });
+
+/** Generate a unique scrutinee variable name */
+const freshScrutinee = (ctx: CodeGenContext): string => {
+  const name = `_s${ctx.scrutineeCounter}`;
+  ctx.scrutineeCounter++;
+  return name;
+};
 
 /** Add a line of code with current indentation */
 const emit = (ctx: CodeGenContext, code: string): void => {
@@ -46,10 +62,69 @@ const emit = (ctx: CodeGenContext, code: string): void => {
   ctx.lines.push(indentation + code);
 };
 
+/** JavaScript reserved words that cannot be used as identifiers */
+const JS_RESERVED = new Set([
+  // Keywords
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "export",
+  "extends",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "instanceof",
+  "let",
+  "new",
+  "return",
+  "static",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield",
+  // Reserved in strict mode
+  "implements",
+  "interface",
+  "package",
+  "private",
+  "protected",
+  "public",
+  // Literals
+  "null",
+  "true",
+  "false",
+  // Future reserved
+  "enum",
+  "await",
+]);
+
 /** Generate a valid JavaScript identifier from an IR variable name */
 const toJsId = (name: string): string => {
   // Replace any invalid characters
-  return name.replace(/[^a-zA-Z0-9_$]/g, "_");
+  const sanitized = name.replace(/[^a-zA-Z0-9_$]/g, "_");
+  // Escape reserved words by prefixing with $
+  if (JS_RESERVED.has(sanitized)) {
+    return `$${sanitized}`;
+  }
+  return sanitized;
 };
 
 // =============================================================================
@@ -68,7 +143,15 @@ const genExpr = (ctx: CodeGenContext, expr: ir.IRExpr): string => {
     case "IRLet": {
       const binding = genBinding(ctx, expr.binding);
       const jsName = toJsId(expr.name);
-      emit(ctx, `const ${jsName} = ${binding};`);
+      // Use let for first declaration to allow reassignment (shadowing)
+      // Since nested scopes in Algow become flat in JS, shadowing becomes reassignment
+      if (!ctx.declaredNames.has(jsName)) {
+        emit(ctx, `let ${jsName} = ${binding};`);
+        ctx.declaredNames.add(jsName);
+      } else {
+        // Already declared, reassign (this implements shadowing)
+        emit(ctx, `${jsName} = ${binding};`);
+      }
       return genExpr(ctx, expr.body);
     }
 
@@ -81,9 +164,13 @@ const genExpr = (ctx: CodeGenContext, expr: ir.IRExpr): string => {
       const hasLambda = expr.bindings.some((b) => b.binding.kind === "IRLambdaBinding");
 
       if (hasLambda) {
-        // Declare all variables first
+        // Declare all variables first (skip if already declared)
         for (const { name } of expr.bindings) {
-          emit(ctx, `let ${toJsId(name)};`);
+          const jsName = toJsId(name);
+          if (!ctx.declaredNames.has(jsName)) {
+            emit(ctx, `let ${jsName};`);
+            ctx.declaredNames.add(jsName);
+          }
         }
         // Then assign all values
         for (const { name, binding } of expr.bindings) {
@@ -91,10 +178,17 @@ const genExpr = (ctx: CodeGenContext, expr: ir.IRExpr): string => {
           emit(ctx, `${toJsId(name)} = ${bindingCode};`);
         }
       } else {
-        // No lambdas, can use const directly
+        // No lambdas - use let for new names, assignment for already declared
         for (const { name, binding } of expr.bindings) {
+          const jsName = toJsId(name);
           const bindingCode = genBinding(ctx, binding);
-          emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
+          if (!ctx.declaredNames.has(jsName)) {
+            emit(ctx, `let ${jsName} = ${bindingCode};`);
+            ctx.declaredNames.add(jsName);
+          } else {
+            // Already declared, reassign (shadowing becomes reassignment)
+            emit(ctx, `${jsName} = ${bindingCode};`);
+          }
         }
       }
       return genExpr(ctx, expr.body);
@@ -287,22 +381,25 @@ const genIf = (ctx: CodeGenContext, binding: ir.IRIfBinding): string => {
  * Generate JavaScript for lambda expression.
  */
 const genLambda = (ctx: CodeGenContext, binding: ir.IRLambdaBinding): string => {
+  const param = toJsId(binding.param);
+
   // Check for tail-recursive optimization
   if (binding.tailRecursive) {
     return genTailRecursiveLambda(ctx, binding);
   }
 
-  const param = toJsId(binding.param);
-
   // Generate body
+  // Save and restore context state for new scope
   ctx.indent++;
   const bodyLines: string[] = [];
   const savedLines = ctx.lines;
+  const savedDeclaredNames = new Set(ctx.declaredNames);
   ctx.lines = bodyLines;
 
   const bodyResult = genExpr(ctx, binding.body);
 
   ctx.lines = savedLines;
+  ctx.declaredNames = savedDeclaredNames;
   ctx.indent--;
 
   if (bodyLines.length === 0) {
@@ -331,14 +428,20 @@ const genTailRecursiveLambda = (ctx: CodeGenContext, binding: ir.IRLambdaBinding
   }
 
   // Generate the loop body
+  // Save and restore context state for new scope
   ctx.indent++;
   const bodyLines: string[] = [];
   const savedLines = ctx.lines;
+  const savedEmittedContinue = ctx.emittedContinue;
+  const savedDeclaredNames = new Set(ctx.declaredNames);
   ctx.lines = bodyLines;
+  ctx.emittedContinue = false;
 
   const bodyResult = genExprTCO(ctx, innerBody, selfName, params);
 
   ctx.lines = savedLines;
+  ctx.emittedContinue = savedEmittedContinue;
+  ctx.declaredNames = savedDeclaredNames;
   ctx.indent--;
 
   // Build curried function that captures params and runs loop
@@ -393,6 +496,7 @@ const genExprTCO = (
           .map((p, i) => `${p} = ${genAtom(ctx, tailCallArgs[i]!)};`)
           .join(" ");
         emit(ctx, `${assignments} continue;`);
+        ctx.emittedContinue = true;
         return "undefined"; // Never reached
       }
 
@@ -438,6 +542,10 @@ const emitNonAppBindings = (ctx: CodeGenContext, expr: ir.IRExpr, selfName: stri
 
     // Skip application bindings (they're part of the tail call chain)
     if (binding.kind !== "IRAppBinding") {
+      const bindingCode = genBinding(ctx, binding);
+      emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
+    } else if (binding.func.kind === "IRForeignVar") {
+      // Foreign function calls are never part of the tail call chain - always emit them
       const bindingCode = genBinding(ctx, binding);
       emit(ctx, `const ${toJsId(name)} = ${bindingCode};`);
     } else if (binding.func.kind === "IRVar" && binding.func.name !== selfName) {
@@ -583,20 +691,26 @@ const genIfTCO = (
   ctx.indent++;
   const thenLines: string[] = [];
   const savedLines = ctx.lines;
+  const savedDeclaredNames = new Set(ctx.declaredNames);
 
   ctx.lines = thenLines;
+  ctx.emittedContinue = false;
   const thenResult = genExprTCO(ctx, binding.thenBranch, selfName, params);
-  const thenHasContinue = thenLines.some((l) => l.includes("continue;"));
+  const thenHasContinue = ctx.emittedContinue;
   const thenCode = thenHasContinue
     ? `(() => {\n${thenLines.join("\n")}\n${"  ".repeat(ctx.indent - 1)}return ${thenResult};\n${"  ".repeat(ctx.indent - 1)}})()`
     : thenLines.length > 0
       ? `(() => {\n${thenLines.join("\n")}\n${"  ".repeat(ctx.indent - 1)}return ${thenResult};\n${"  ".repeat(ctx.indent - 1)}})()`
       : thenResult;
 
+  // Restore declaredNames between branches since they're independent scopes
+  ctx.declaredNames = new Set(savedDeclaredNames);
+
   const elseLines: string[] = [];
   ctx.lines = elseLines;
+  ctx.emittedContinue = false;
   const elseResult = genExprTCO(ctx, binding.elseBranch, selfName, params);
-  const elseHasContinue = elseLines.some((l) => l.includes("continue;"));
+  const elseHasContinue = ctx.emittedContinue;
   const elseCode = elseHasContinue
     ? `(() => {\n${elseLines.join("\n")}\n${"  ".repeat(ctx.indent - 1)}return ${elseResult};\n${"  ".repeat(ctx.indent - 1)}})()`
     : elseLines.length > 0
@@ -604,6 +718,7 @@ const genIfTCO = (
       : elseResult;
 
   ctx.lines = savedLines;
+  ctx.declaredNames = savedDeclaredNames;
   ctx.indent--;
 
   // If either branch has a continue, we need to use if/else statements
@@ -624,6 +739,8 @@ const genIfTCO = (
       emit(ctx, `  return ${elseResult};`);
     }
     emit(ctx, `}`);
+    // Propagate the continue status to the caller
+    ctx.emittedContinue = true;
     return "undefined"; // Control transferred via if/else
   }
 
@@ -643,7 +760,7 @@ const genMatchTCO = (
   params: string[],
 ): string => {
   const scrutinee = genAtom(ctx, binding.scrutinee);
-  const scrutineeVar = "_s";
+  const scrutineeVar = freshScrutinee(ctx);
 
   const hasGuards = binding.cases.some((c) => c.guard !== undefined);
 
@@ -655,26 +772,34 @@ const genMatchTCO = (
     bodyResult: string;
     hasContinue: boolean;
     guardResult?: string;
+    guardLines: string[];
   }> = [];
 
   for (const case_ of binding.cases) {
     ctx.indent += 2;
-    const bodyLines: string[] = [];
     const savedLines = ctx.lines;
-    ctx.lines = bodyLines;
+    const savedDeclaredNames = new Set(ctx.declaredNames);
 
+    // Generate guard computation separately
     let guardResult: string | undefined;
+    const guardLines: string[] = [];
     if (case_.guard) {
+      ctx.lines = guardLines;
       guardResult = genExpr(ctx, case_.guard);
     }
 
+    // Generate body computation
+    const bodyLines: string[] = [];
+    ctx.lines = bodyLines;
+    ctx.emittedContinue = false;
     const bodyResult = genExprTCO(ctx, case_.body, selfName, params);
-    const hasContinue = bodyLines.some((l) => l.includes("continue;"));
+    const hasContinue = ctx.emittedContinue;
 
     ctx.lines = savedLines;
+    ctx.declaredNames = savedDeclaredNames;
     ctx.indent -= 2;
 
-    caseResults.push({ case_, bodyLines, bodyResult, hasContinue, guardResult });
+    caseResults.push({ case_, bodyLines, bodyResult, hasContinue, guardResult, guardLines });
   }
 
   const anyContinue = caseResults.some((r) => r.hasContinue);
@@ -688,7 +813,8 @@ const genMatchTCO = (
     emit(ctx, `let ${scrutineeVar} = ${scrutinee};`);
 
     for (let i = 0; i < caseResults.length; i++) {
-      const { case_, bodyLines, bodyResult, hasContinue, guardResult } = caseResults[i]!;
+      const { case_, bodyLines, bodyResult, hasContinue, guardResult, guardLines } =
+        caseResults[i]!;
       const { condition, bindings } = genPatternMatch(scrutineeVar, case_.pattern);
 
       const prefix = hasGuards || i === 0 ? "if" : "} else if";
@@ -702,17 +828,28 @@ const genMatchTCO = (
         emit(ctx, `const ${toJsId(name)} = ${expr};`);
       }
 
-      for (const line of bodyLines) {
+      // Emit guard computation first (if any)
+      for (const line of guardLines) {
         emit(ctx, line.trimStart());
       }
 
       if (guardResult) {
-        if (hasContinue) {
-          emit(ctx, `if (${guardResult}) { /* continue handled above */ }`);
-        } else {
-          emit(ctx, `if (${guardResult}) { ${scrutineeVar} = ${bodyResult}; }`);
+        // When there's a guard, wrap the body in the guard check
+        emit(ctx, `if (${guardResult}) {`);
+        ctx.indent++;
+        for (const line of bodyLines) {
+          emit(ctx, line.trimStart());
         }
+        if (!hasContinue) {
+          emit(ctx, `${scrutineeVar} = ${bodyResult};`);
+        }
+        ctx.indent--;
+        emit(ctx, `}`);
       } else {
+        // No guard - emit body directly
+        for (const line of bodyLines) {
+          emit(ctx, line.trimStart());
+        }
         if (!hasContinue) {
           emit(ctx, `${scrutineeVar} = ${bodyResult};`);
         }
@@ -721,6 +858,14 @@ const genMatchTCO = (
     }
 
     emit(ctx, "}");
+
+    // If some branches continue but others don't, we need to return for non-continue paths
+    const allContinue = caseResults.every((r) => r.hasContinue);
+    if (!allContinue) {
+      emit(ctx, `return ${scrutineeVar};`);
+    }
+    // Propagate the continue status to the caller
+    ctx.emittedContinue = true;
     return scrutineeVar;
   }
 
@@ -728,7 +873,7 @@ const genMatchTCO = (
   lines.push(`((${scrutineeVar}) => {`);
 
   for (let i = 0; i < caseResults.length; i++) {
-    const { case_, bodyLines, bodyResult, guardResult } = caseResults[i]!;
+    const { case_, bodyLines, bodyResult, guardResult, guardLines } = caseResults[i]!;
     const { condition, bindings } = genPatternMatch(scrutineeVar, case_.pattern);
 
     const prefix = hasGuards || i === 0 ? "if" : "} else if";
@@ -741,6 +886,12 @@ const genMatchTCO = (
       lines.push(`    const ${toJsId(name)} = ${expr};`);
     }
 
+    // Emit guard computation first (if any)
+    for (const line of guardLines) {
+      lines.push("    " + line.trimStart());
+    }
+
+    // Emit body lines
     for (const line of bodyLines) {
       lines.push("    " + line.trimStart());
     }
@@ -760,7 +911,8 @@ const genMatchTCO = (
 
 /**
  * Check if pattern matching can use switch-based dispatch.
- * Requires: all patterns are constructor patterns with unique tags, no guards.
+ * Requires: all patterns are constructor patterns with unique tags, no guards,
+ * and no nested constructor patterns (which could fail independently).
  */
 const canUseSwitchDispatch = (cases: readonly ir.IRCase[]): boolean => {
   if (cases.length === 0) return false;
@@ -773,9 +925,38 @@ const canUseSwitchDispatch = (cases: readonly ir.IRCase[]): boolean => {
     if (tags.has(case_.pattern.name)) {
       return false; // Duplicate tag - need if/else for disambiguation
     }
+    // Check for nested constructors in arguments - these can fail independently
+    if (hasNestedConstructor(case_.pattern)) {
+      return false;
+    }
     tags.add(case_.pattern.name);
   }
   return true;
+};
+
+/**
+ * Check if a pattern has nested constructor patterns that could fail to match.
+ */
+const hasNestedConstructor = (pattern: ir.IRPattern): boolean => {
+  switch (pattern.kind) {
+    case "IRPVar":
+    case "IRPWildcard":
+    case "IRPLit":
+      return false;
+    case "IRPCon":
+      // Check if any argument is a constructor pattern
+      return pattern.args.some(
+        (arg) => arg.kind === "IRPCon" || arg.kind === "IRPLit" || hasNestedConstructor(arg),
+      );
+    case "IRPTuple":
+      return pattern.elements.some(hasNestedConstructor);
+    case "IRPRecord":
+      return pattern.fields.some((f) => hasNestedConstructor(f.pattern));
+    case "IRPAs":
+      return hasNestedConstructor(pattern.pattern);
+    case "IRPOr":
+      return pattern.alternatives.some(hasNestedConstructor);
+  }
 };
 
 /**
@@ -863,7 +1044,7 @@ const genMatchSwitch = (
  */
 const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
   const scrutinee = genAtom(ctx, binding.scrutinee);
-  const scrutineeVar = "_s";
+  const scrutineeVar = freshScrutinee(ctx);
 
   // Check if any case has a guard
   const hasGuards = binding.cases.some((c) => c.guard !== undefined);
@@ -898,6 +1079,7 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
     ctx.indent += 2;
     const bodyLines: string[] = [];
     const savedLines = ctx.lines;
+    const savedDeclaredNames = new Set(ctx.declaredNames);
     ctx.lines = bodyLines;
 
     // Generate guard if present
@@ -909,6 +1091,7 @@ const genMatch = (ctx: CodeGenContext, binding: ir.IRMatchBinding): string => {
     const bodyResult = genExpr(ctx, case_.body);
 
     ctx.lines = savedLines;
+    ctx.declaredNames = savedDeclaredNames;
     ctx.indent -= 2;
 
     for (const line of bodyLines) {

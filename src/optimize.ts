@@ -857,22 +857,25 @@ export const deadCodeElimination: OptPass = {
 /**
  * Remove unused bindings from an expression, computing uses locally.
  * This properly handles recursive bindings by not counting self-references.
+ * The outerUses parameter tracks variables used by enclosing scopes (for forward references).
  */
-const removeUnusedExpr = (expr: ir.IRExpr): ir.IRExpr => {
+const removeUnusedExpr = (expr: ir.IRExpr, outerUses: Set<string> = new Set()): ir.IRExpr => {
   switch (expr.kind) {
     case "IRAtomExpr":
       return expr;
 
     case "IRLet": {
       const newBinding = removeUnusedInBinding(expr.binding);
-      const newBody = removeUnusedExpr(expr.body);
+      const newBody = removeUnusedExpr(expr.body, outerUses);
 
-      // Check if this binding is used in the body
+      // Check if this binding is used in the body OR by outer scopes
       const uses = new Map<string, number>();
       collectUses(newBody, uses);
 
-      const usageCount = uses.get(expr.name) ?? 0;
-      if (usageCount === 0 && isPure(newBinding)) {
+      const usedInBody = (uses.get(expr.name) ?? 0) > 0;
+      const usedByOuter = outerUses.has(expr.name);
+
+      if (!usedInBody && !usedByOuter && isPure(newBinding)) {
         return newBody;
       }
 
@@ -880,12 +883,25 @@ const removeUnusedExpr = (expr: ir.IRExpr): ir.IRExpr => {
     }
 
     case "IRLetRec": {
+      // First, collect all uses from bindings (these become outer uses for the body)
+      const bindingUses = new Set<string>();
+      for (const b of expr.bindings) {
+        const uses = new Map<string, number>();
+        collectUsesBinding(b.binding, uses);
+        for (const name of uses.keys()) {
+          bindingUses.add(name);
+        }
+      }
+
+      // Combine with existing outer uses
+      const combinedOuter = new Set([...outerUses, ...bindingUses]);
+
       // First, recursively process all binding bodies
       const processedBindings = expr.bindings.map((b) => ({
         name: b.name,
         binding: removeUnusedInBinding(b.binding),
       }));
-      const newBody = removeUnusedExpr(expr.body);
+      const newBody = removeUnusedExpr(expr.body, combinedOuter);
 
       // Collect uses from the body only
       const bodyUses = new Map<string, number>();
@@ -1218,6 +1234,12 @@ const isTailRecursive = (name: string, binding: ir.IRBinding): { params: string[
 
   const params = collectLambdaParams(binding);
   const innerBody = getInnermostBody(binding);
+
+  // First, check if the function actually calls itself
+  // If there are no recursive calls, it's not tail-recursive
+  if (!hasRecursiveCallExpr(innerBody, name)) {
+    return null;
+  }
 
   // Check if the body only has tail calls
   const result = checkTailCallsInBody(innerBody, name, params.length);

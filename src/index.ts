@@ -366,7 +366,7 @@ const printDiagnostics = (
  * Only core data types and combinators are auto-imported.
  * Other modules (Int, Float, String, etc.) require explicit import or qualified access.
  */
-const AUTO_IMPORT_MODULES = new Set(["Maybe", "Either", "List", "Core"]);
+const AUTO_IMPORT_MODULES = new Set(["Maybe", "Either", "List", "Core", "Bool"]);
 
 const preludeUses: ast.UseDecl[] = preludeModules
   .filter((mod) => AUTO_IMPORT_MODULES.has(mod.name))
@@ -814,8 +814,29 @@ const processMergedProgram = (merged: MergedProgram) => {
   const typeEnv = new Map(localEnv);
   for (const [k, v] of declEnv) typeEnv.set(k, v);
 
+  // Add all module-internal constructors to typeEnv for lowering
+  // This ensures constructors like CodegenConfig are available when lowering
+  // module bindings that reference them
+  for (const [, info] of moduleEnv) {
+    for (const conName of info.constructorNames) {
+      const scheme = info.typeEnv.get(conName);
+      if (scheme && !typeEnv.has(conName)) {
+        typeEnv.set(conName, scheme);
+      }
+    }
+  }
+
   const registry = new Map(localRegistry);
   for (const [k, v] of declRegistry) registry.set(k, v);
+
+  // Also merge all module registries for pattern matching
+  for (const [, info] of moduleEnv) {
+    for (const [k, v] of info.registry) {
+      if (!registry.has(k)) {
+        registry.set(k, v);
+      }
+    }
+  }
 
   // Combine all constructor names
   const allConstructorNames = [
