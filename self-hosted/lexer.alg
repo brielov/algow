@@ -328,12 +328,14 @@ module Lexer
   -- Tokenize Entire String
   -- ===========================================================================
 
-  let rec tokenizeFrom s pos =
+  -- Tail-recursive tokenization using accumulator
+  -- This avoids stack overflow on large files (6000+ tokens)
+  let rec tokenizeAcc acc s pos =
     match lexToken s pos
-      when LexResult TokEof _ _ -> [TokEof]
-      when LexResult tok rest newPos -> tok :: tokenizeFrom rest newPos
+      when LexResult TokEof _ _ -> List.reverse (TokEof :: acc)
+      when LexResult tok rest newPos -> tokenizeAcc (tok :: acc) rest newPos
     end
 
-  let tokenize s = tokenizeFrom s 0
+  let tokenize s = tokenizeAcc Nil s 0
 
 end
