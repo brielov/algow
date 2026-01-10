@@ -656,6 +656,10 @@ export const stringModule = ast.moduleDecl(
     ast.foreignBinding("head", fn(tString, tMaybe(tChar))),
     // tail : String -> String
     ast.foreignBinding("tail", fn(tString, tString)),
+    // drop : Int -> String -> String
+    ast.foreignBinding("drop", fn(tInt, fn(tString, tString))),
+    // take : Int -> String -> String
+    ast.foreignBinding("take", fn(tInt, fn(tString, tString))),
     // isEmpty : String -> Bool
     ast.foreignBinding("isEmpty", fn(tString, tBool)),
     // toList : String -> List Char

@@ -97,6 +97,12 @@ const $foreign = {
     // tail : String -> String
     tail: (s) => (s.length === 0 ? "" : s.slice(1)),
 
+    // drop : Int -> String -> String
+    drop: (n) => (s) => s.slice(n),
+
+    // take : Int -> String -> String
+    take: (n) => (s) => s.slice(0, n),
+
     // isEmpty : String -> Bool
     isEmpty: (s) => s.length === 0,
 
