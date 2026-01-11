@@ -1,460 +1,425 @@
 -- =============================================================================
--- Codegen Module
--- JavaScript Code Generation from ANF IR
+-- JAVASCRIPT CODE GENERATION
+-- =============================================================================
+--
+-- Generates JavaScript code from optimized ANF IR.
+--
+-- Runtime representations:
+-- - Primitives: JavaScript primitives (number, string, boolean)
+-- - Closures: Native JavaScript closures
+-- - Constructors: { $tag: "Name", $args: [...] }
+-- - Tuples: JavaScript arrays
+-- - Records: Plain JavaScript objects
+--
 -- Reference: SPEC.md Section 12
+--
 -- =============================================================================
 
 module Codegen
-  use Types (..)
+
+  use Common (..)
   use IR (..)
+  use Infer (Type, TVar, TCon, TFun, TApp, TRecord, TTuple)
 
-  -- ===========================================================================
-  -- Code Generation Context
-  -- ===========================================================================
+  -- =========================================================================
+  -- CODE GENERATION CONTEXT
+  -- =========================================================================
 
-  -- CodegenConfig: debug, minify
-  type CodegenConfig = CodegenConfig bool bool
+  type CodeGenContext = {
+    indent : int,
+    lines : List string,
+    constructors : List string,
+    declaredNames : List string,
+    scrutineeCounter : int
+  }
 
-  let defaultConfig = CodegenConfig false false
-  let debugConfig = CodegenConfig true false
+  let initContext = constructors -> {
+    indent = 0,
+    lines = Nil,
+    constructors = constructors,
+    declaredNames = Nil,
+    scrutineeCounter = 0
+  }
 
-  -- ===========================================================================
-  -- Name Mangling
-  -- ===========================================================================
+  -- Emit a line of code
+  let emit = code ctx ->
+    let indentation = String.replicate (ctx.indent * 2) " " in
+    { ctx | lines = Cons (String.concat indentation code) ctx.lines }
 
-  -- Convert Name to valid JavaScript identifier
-  let mangleName name = match name
-    when Name id original ->
-      let base = sanitizeIdent original in
-      base + "$" + Int.toString id
+  -- Generate fresh scrutinee variable
+  let freshScrutinee = ctx ->
+    let name = String.concat "_s" (Int.toString ctx.scrutineeCounter) in
+    (name, { ctx | scrutineeCounter = ctx.scrutineeCounter + 1 })
+
+  -- Check if name is declared
+  let isDeclared = name ctx -> List.any (n -> n == name) ctx.declaredNames
+
+  -- Add declared name
+  let addDeclared = name ctx -> { ctx | declaredNames = Cons name ctx.declaredNames }
+
+  -- Check if name is a constructor
+  let isConstructor = name ctx -> List.any (c -> c == name) ctx.constructors
+
+  -- =========================================================================
+  -- JAVASCRIPT RESERVED WORDS
+  -- =========================================================================
+
+  let jsReserved = [
+    "break", "case", "catch", "class", "const", "continue", "debugger",
+    "default", "delete", "do", "else", "export", "extends", "finally",
+    "for", "function", "if", "import", "in", "instanceof", "let", "new",
+    "return", "static", "super", "switch", "this", "throw", "try",
+    "typeof", "var", "void", "while", "with", "yield",
+    "null", "true", "false", "enum", "await"
+  ]
+
+  let isReserved = name -> List.any (w -> w == name) jsReserved
+
+  -- Convert name to valid JS identifier
+  let toJsId = name ->
+    if isReserved name then String.concat "$" name
+    else name
+
+  -- =========================================================================
+  -- ATOM GENERATION
+  -- =========================================================================
+
+  let genAtom = atom ctx -> match atom
+    when ALit lit _ -> genLiteral lit
+    when AVar name _ ->
+      if isConstructor name ctx then String.concat "$con(\"" (String.concat name "\")")
+      else toJsId name
+    when AForeignVar mod name _ ->
+      String.concat "$foreign[\"" (String.concat mod (String.concat "\"][\"" (String.concat name "\"]")))
   end
 
-  -- Sanitize identifier for JavaScript
-  let sanitizeIdent s =
-    let rec sanitize chars = match chars
-      when Nil -> Nil
-      when Cons c rest ->
-        let c2 = if isValidJsChar c then c else '_' in
-        Cons c2 (sanitize rest)
-    end in
-    String.fromList (sanitize (String.toList s))
-
-  let isValidJsChar c =
-    Char.isAlphaNum c || c == '_' || c == '$'
-
-  -- ===========================================================================
-  -- Literal Generation
-  -- ===========================================================================
-
-  let genLiteral lit = match lit
+  and genLiteral = lit -> match lit
     when LInt n -> Int.toString n
     when LFloat f -> Float.toString f
-    when LString s -> "\"" + escapeString s + "\""
-    when LChar c -> "\"" + escapeChar c + "\""
-    when LBool true -> "true"
-    when LBool false -> "false"
+    when LString s -> String.concat "\"" (String.concat (escapeString s) "\"")
+    when LChar c -> String.concat "\"" (String.concat (Char.toString c) "\"")
+    when LBool b -> if b then "true" else "false"
   end
 
-  -- Escape string for JavaScript
-  let escapeString s =
-    let rec escape chars = match chars
-      when Nil -> Nil
-      when Cons c rest ->
-        let escaped = escapeChar c in
-        List.append (String.toList escaped) (escape rest)
-    end in
-    String.fromList (escape (String.toList s))
+  -- Escape special characters in strings
+  and escapeString = s ->
+    -- Simplified: just handle common escapes
+    String.replace "\"" "\\\"" (String.replace "\n" "\\n" (String.replace "\\" "\\\\" s))
 
-  let escapeChar c =
-    if c == '\n' then "\\n"
-    else if c == '\r' then "\\r"
-    else if c == '\t' then "\\t"
-    else if c == '"' then "\\\""
-    else if c == '\\' then "\\\\"
-    else Char.toString c
+  -- =========================================================================
+  -- EXPRESSION GENERATION
+  -- =========================================================================
 
-  -- ===========================================================================
-  -- Atom Generation
-  -- ===========================================================================
+  let rec genExpr = expr ctx -> match expr
+    when EAtom atom -> (genAtom atom ctx, ctx)
 
-  let genAtom atom = match atom
-    when AVar name -> mangleName name
-    when ALit lit -> genLiteral lit
-    when ACon name tag ->
-      -- Nullary constructor
-      if name == "Nil" then "null"
-      else if name == "Nothing" then "[" + Int.toString tag + "]"
-      else "[" + Int.toString tag + "]"
+    when ELet name binding body ->
+      let (bindingCode, ctx1) = genBinding binding ctx in
+      let jsName = toJsId name in
+      let ctx2 = if isDeclared jsName ctx1 then
+          emit (String.concat jsName (String.concat " = " (String.concat bindingCode ";"))) ctx1
+        else
+          emit (String.concat "let " (String.concat jsName (String.concat " = " (String.concat bindingCode ";")))) (addDeclared jsName ctx1)
+      in
+      genExpr body ctx2
+
+    when ELetRec bindings body ->
+      -- Two-phase init for mutual recursion
+      let ctx1 = List.foldl (c pair -> match pair when (n, _) ->
+        let jsName = toJsId n in
+        if isDeclared jsName c then c
+        else emit (String.concat "let " (String.concat jsName ";")) (addDeclared jsName c)
+      end) ctx bindings in
+      let ctx2 = List.foldl (c pair -> match pair when (n, b) ->
+        let (code, c1) = genBinding b c in
+        emit (String.concat (toJsId n) (String.concat " = " (String.concat code ";"))) c1
+      end) ctx1 bindings in
+      genExpr body ctx2
   end
 
-  -- ===========================================================================
-  -- Expression Generation
-  -- ===========================================================================
+  -- =========================================================================
+  -- BINDING GENERATION
+  -- =========================================================================
 
-  let rec genExpr expr = match expr
-    when IRAtom atom -> genAtom atom
+  and genBinding = binding ctx -> match binding
+    when BAtom atom -> (genAtom atom ctx, ctx)
 
-    when IRLet name binding body ->
-      let bindCode = genBinding binding in
-      let varName = mangleName name in
-      let bodyCode = genExpr body in
-      "(()=>{const " + varName + "=" + bindCode + ";return " + bodyCode + "})()"
+    when BApp func arg _ ->
+      let funcCode = genAtom func ctx in
+      let argCode = genAtom arg ctx in
+      (String.concat "$apply(" (String.concat funcCode (String.concat ", " (String.concat argCode ")"))), ctx)
 
-    when IRLetRec bindings body ->
-      let bindingsCode = genRecBindings bindings in
-      let bodyCode = genExpr body in
-      "(()=>{" + bindingsCode + "return " + bodyCode + "})()"
+    when BBinOp op left right opType resType ->
+      genBinOp op left right opType ctx
 
-    when IRMatch atom cases ->
-      genMatch atom cases
+    when BIf cond thenB elseB _ ->
+      genIf cond thenB elseB ctx
+
+    when BTuple elems _ ->
+      let elemCodes = List.map (e -> genAtom e ctx) elems in
+      (String.concat "[" (String.concat (String.join ", " elemCodes) "]"), ctx)
+
+    when BRecord fields _ ->
+      let fieldCodes = List.map (pair -> match pair when (n, v) -> String.concat n (String.concat ": " (genAtom v ctx)) end) fields in
+      (String.concat "{ " (String.concat (String.join ", " fieldCodes) " }"), ctx)
+
+    when BRecordUpdate base fields _ ->
+      let baseCode = genAtom base ctx in
+      let fieldCodes = List.map (pair -> match pair when (n, v) -> String.concat n (String.concat ": " (genAtom v ctx)) end) fields in
+      (String.concat "{ ..." (String.concat baseCode (String.concat ", " (String.concat (String.join ", " fieldCodes) " }"))), ctx)
+
+    when BFieldAccess record field _ ->
+      let recordCode = genAtom record ctx in
+      (String.concat recordCode (String.concat "." field), ctx)
+
+    when BTupleIndex tuple idx _ ->
+      let tupleCode = genAtom tuple ctx in
+      (String.concat tupleCode (String.concat "[" (String.concat (Int.toString idx) "]")), ctx)
+
+    when BMatch scrutinee cases _ ->
+      genMatch scrutinee cases ctx
+
+    when BLambda param paramType body funcType ->
+      genLambda param body ctx
   end
 
-  -- ===========================================================================
-  -- Binding Generation
-  -- ===========================================================================
+  -- =========================================================================
+  -- BINARY OPERATIONS
+  -- =========================================================================
 
-  and genBinding binding = match binding
-    when IRBAtom atom ->
-      genAtom atom
+  and genBinOp = op left right opType ctx ->
+    let leftCode = genAtom left ctx in
+    let rightCode = genAtom right ctx in
+    match op
+      when "+" -> (String.concat "(" (String.concat leftCode (String.concat " + " (String.concat rightCode ")"))), ctx)
+      when "-" -> (String.concat "(" (String.concat leftCode (String.concat " - " (String.concat rightCode ")"))), ctx)
+      when "*" -> (String.concat "(" (String.concat leftCode (String.concat " * " (String.concat rightCode ")"))), ctx)
+      when "/" -> (String.concat "(" (String.concat leftCode (String.concat " / " (String.concat rightCode ")"))), ctx)
+      when "<" -> (String.concat "(" (String.concat leftCode (String.concat " < " (String.concat rightCode ")"))), ctx)
+      when ">" -> (String.concat "(" (String.concat leftCode (String.concat " > " (String.concat rightCode ")"))), ctx)
+      when "<=" -> (String.concat "(" (String.concat leftCode (String.concat " <= " (String.concat rightCode ")"))), ctx)
+      when ">=" -> (String.concat "(" (String.concat leftCode (String.concat " >= " (String.concat rightCode ")"))), ctx)
+      when "==" ->
+        if isComplexType opType then
+          (String.concat "$eq(" (String.concat leftCode (String.concat ", " (String.concat rightCode ")"))), ctx)
+        else
+          (String.concat "(" (String.concat leftCode (String.concat " === " (String.concat rightCode ")"))), ctx)
+      when "!=" ->
+        if isComplexType opType then
+          (String.concat "!$eq(" (String.concat leftCode (String.concat ", " (String.concat rightCode ")"))), ctx)
+        else
+          (String.concat "(" (String.concat leftCode (String.concat " !== " (String.concat rightCode ")"))), ctx)
+      when _ -> (String.concat "(" (String.concat leftCode (String.concat " " (String.concat op (String.concat " " (String.concat rightCode ")"))))), ctx)
+    end
 
-    when IRBApp f x ->
-      genAtom f + "(" + genAtom x + ")"
-
-    when IRBBinOp op a b ->
-      let jsOp = translateOp op in
-      "(" + genAtom a + jsOp + genAtom b + ")"
-
-    when IRBTuple atoms ->
-      "[" + String.join "," (List.map genAtom atoms) + "]"
-
-    when IRBRecord fields ->
-      let fieldStrs = List.map (f -> match f
-        when (name, atom) -> name + ":" + genAtom atom
-      end) fields in
-      "{" + String.join "," fieldStrs + "}"
-
-    when IRBRecordUpdate base fields ->
-      let baseCode = genAtom base in
-      let fieldStrs = List.map (f -> match f
-        when (name, atom) -> name + ":" + genAtom atom
-      end) fields in
-      "{..." + baseCode + "," + String.join "," fieldStrs + "}"
-
-    when IRBField record field ->
-      genAtom record + "." + field
-
-    when IRBLambda param body ->
-      let paramName = mangleName param in
-      let bodyCode = genExpr body in
-      "(" + paramName + ")=>" + bodyCode
-
-    when IRBForeign mod name args ->
-      let argsCode = List.map genAtom args in
-      -- Foreign function access
-      if mod == "" then
-        name
-      else
-        mod + "." + name + List.foldl (acc a -> acc + "(" + a + ")") "" argsCode
-
-    when IRBCon name tag args ->
-      -- Constructor application
-      if name == "Cons" then
-        -- Special case: List uses { h, t } representation
-        match args
-          when Cons h (Cons t Nil) -> "{h:" + genAtom h + ",t:" + genAtom t + "}"
-          when _ -> genDefaultCon tag args
-        end
-      else if name == "Nil" then
-        "null"
-      else
-        genDefaultCon tag args
+  -- Check if type needs deep equality
+  and isComplexType = typ -> match typ
+    when TCon name -> not (List.any (n -> n == name) ["int", "float", "string", "char", "boolean"])
+    when TVar _ -> true
+    when TFun _ _ -> true
+    when TApp _ _ -> true
+    when TRecord _ _ -> true
+    when TTuple _ -> true
   end
 
-  -- Default constructor representation: [tag, ...args]
-  let genDefaultCon tag args =
-    let argsCode = List.map genAtom args in
-    "[" + Int.toString tag + (if List.isEmpty argsCode then "" else ",") + String.join "," argsCode + "]"
+  -- =========================================================================
+  -- CONDITIONAL GENERATION
+  -- =========================================================================
 
-  -- Translate operator to JavaScript
-  let translateOp op = match op
-    when "+" -> "+"
-    when "-" -> "-"
-    when "*" -> "*"
-    when "/" -> "/"
-    when "==" -> "==="
-    when "!=" -> "!=="
-    when "<" -> "<"
-    when "<=" -> "<="
-    when ">" -> ">"
-    when ">=" -> ">="
-    when "&&" -> "&&"
-    when "||" -> "||"
-    when _ -> op
-  end
+  and genIf = cond thenB elseB ctx ->
+    let condCode = genAtom cond ctx in
+    -- Generate branches in IIFEs
+    let ctx1 = { ctx | indent = ctx.indent + 1, lines = Nil } in
+    let (thenResult, ctx2) = genExpr thenB ctx1 in
+    let thenLines = ctx2.lines in
+    let ctx3 = { ctx | indent = ctx.indent + 1, lines = Nil } in
+    let (elseResult, ctx4) = genExpr elseB ctx3 in
+    let elseLines = ctx4.lines in
+    let thenCode = if List.isEmpty thenLines then thenResult
+      else String.concat "(() => {\n" (String.concat (String.join "\n" (List.reverse thenLines)) (String.concat "\nreturn " (String.concat thenResult ";\n})()")))
+    in
+    let elseCode = if List.isEmpty elseLines then elseResult
+      else String.concat "(() => {\n" (String.concat (String.join "\n" (List.reverse elseLines)) (String.concat "\nreturn " (String.concat elseResult ";\n})()")))
+    in
+    (String.concat "(" (String.concat condCode (String.concat " ? " (String.concat thenCode (String.concat " : " (String.concat elseCode ")"))))), ctx)
 
-  -- ===========================================================================
-  -- Recursive Bindings Generation
-  -- ===========================================================================
+  -- =========================================================================
+  -- LAMBDA GENERATION
+  -- =========================================================================
 
-  and genRecBindings bindings =
-    let bindingStrs = List.map (b -> match b
-      when IRRecBinding name binding ->
-        let varName = mangleName name in
-        let bindCode = genBinding binding in
-        "const " + varName + "=" + bindCode + ";"
-    end) bindings in
-    String.join "" bindingStrs
-
-  -- ===========================================================================
-  -- Match Generation
-  -- ===========================================================================
-
-  and genMatch atom cases =
-    let scrutinee = genAtom atom in
-    -- Check match type: literal, list, tuple, or ADT
-    if isLiteralMatchCases cases then
-      genLiteralMatch scrutinee cases
-    else if isListMatchCases cases then
-      genListMatch scrutinee cases
-    else if isTupleMatchCases cases then
-      genTupleMatch scrutinee cases
+  and genLambda = param body ctx ->
+    let jsParam = toJsId param in
+    let ctx1 = { ctx | indent = ctx.indent + 1, lines = Nil, declaredNames = Cons jsParam ctx.declaredNames } in
+    let (bodyResult, ctx2) = genExpr body ctx1 in
+    let bodyLines = ctx2.lines in
+    if List.isEmpty bodyLines then
+      let code = String.concat "(" (String.concat jsParam (String.concat ") => " bodyResult)) in
+      (code, ctx)
     else
-      genTagMatch scrutinee cases
+      let bodyCode = String.join "\n" (List.reverse bodyLines) in
+      let returnStmt = String.concat "return " (String.concat bodyResult ";") in
+      let code = String.concat "(" (String.concat jsParam (String.concat ") => {\n" (String.concat bodyCode (String.concat "\n" (String.concat returnStmt "\n}"))))) in
+      (code, ctx)
 
-  -- Check if this is a match on literal values
-  let isLiteralMatchCases cases =
-    List.any (c -> match c
-      when IRCase pat _ ->
-        match pat
-          when IRPLit _ -> true
-          when _ -> false
-        end
-    end) cases
+  -- =========================================================================
+  -- PATTERN MATCHING
+  -- =========================================================================
 
-  -- Check if this is a match on List type
-  let isListMatchCases cases =
-    List.any (c -> match c
-      when IRCase pat _ ->
-        match pat
-          when IRPCon name _ _ -> name == "Nil" || name == "Cons"
-          when _ -> false
-        end
-    end) cases
+  and genMatch = scrutinee cases ctx ->
+    let scrutineeCode = genAtom scrutinee ctx in
+    let (scrutineeVar, ctx1) = freshScrutinee ctx in
+    let lines = [String.concat "((" (String.concat scrutineeVar ") => {")] in
+    let (caseLines, ctx2) = genCases scrutineeVar cases 0 ctx1 in
+    let allLines = List.concat lines (List.concat caseLines ["})" (String.concat "(" (String.concat scrutineeCode ")"))]) in
+    (String.join "\n" allLines, ctx2)
 
-  -- Check if this is a match on tuple type
-  let isTupleMatchCases cases =
-    List.any (c -> match c
-      when IRCase pat _ ->
-        match pat
-          when IRPTuple _ -> true
-          when _ -> false
-        end
-    end) cases
-
-  -- Generate tuple match (just bind pattern variables)
-  and genTupleMatch scrutinee cases =
-    -- Tuples don't have tags, just bind the pattern variables directly
-    match cases
-      when Cons (IRCase pat body) _ ->
-        let bindings = genPatternBinding scrutinee pat in
-        "(()=>{" + bindings + "return " + genExpr body + "})()"
-      when Nil -> "undefined"
-    end
-
-  -- Generate literal match (direct switch on value)
-  and genLiteralMatch scrutinee cases =
-    let switchCases = List.map (genLiteralCase scrutinee) cases in
-    "(()=>{switch(" + scrutinee + "){" + String.join "" switchCases + "}})()"
-
-  and genLiteralCase scrutinee c = match c
-    when IRCase pat body ->
-      match pat
-        when IRPLit lit ->
-          "case " + genLiteral lit + ":return " + genExpr body + ";"
-        when IRPWild ->
-          "default:return " + genExpr body + ";"
-        when IRPVar name ->
-          let varName = mangleName name in
-          "default:{const " + varName + "=" + scrutinee + ";return " + genExpr body + ";}"
-        when _ ->
-          "default:return " + genExpr body + ";"
-      end
+  and genCases = scrutineeVar cases idx ctx -> match cases
+    when Nil -> (Nil, ctx)
+    when Cons c rest ->
+      let (caseLines, ctx1) = genCase scrutineeVar c idx ctx in
+      let (restLines, ctx2) = genCases scrutineeVar rest (idx + 1) ctx1 in
+      (List.concat caseLines restLines, ctx2)
   end
 
-  -- Generate List match (null vs object check)
-  and genListMatch scrutinee cases =
-    let branches = List.map (genListCase scrutinee) cases in
-    String.join "" branches + "undefined"
+  and genCase = scrutineeVar c idx ctx ->
+    let (condition, bindings) = genPatternMatch scrutineeVar c.pattern in
+    let prefix = if idx == 0 then "  if" else "  } else if" in
+    let lines = [String.concat prefix (String.concat " (" (String.concat condition ") {"))] in
+    -- Emit bindings
+    let bindingLines = List.map (pair -> match pair when (n, expr) -> String.concat "    const " (String.concat (toJsId n) (String.concat " = " (String.concat expr ";"))) end) bindings in
+    -- Generate body
+    let ctx1 = { ctx | indent = ctx.indent + 2, lines = Nil } in
+    let (bodyResult, ctx2) = genExpr c.body ctx1 in
+    let bodyLines = List.map (l -> String.concat "    " l) (List.reverse ctx2.lines) in
+    let returnLine = String.concat "    return " (String.concat bodyResult ";") in
+    let allLines = List.concat lines (List.concat bindingLines (List.concat bodyLines [returnLine])) in
+    (allLines, ctx)
 
-  and genListCase scrutinee c = match c
-    when IRCase pat body ->
-      match pat
-        when IRPCon name _ pats ->
-          if name == "Nil" then
-            scrutinee + "===null?" + genExpr body + ":"
-          else if name == "Cons" then
-            -- Extract head and tail
-            let bindings = genConsBindings scrutinee pats in
-            scrutinee + "!==null?(()=>{" + bindings + "return " + genExpr body + "})():"
-          else
-            genTagCase scrutinee pat body
-        when IRPWild -> genExpr body
-        when IRPVar name ->
-          let varName = mangleName name in
-          "(()=>{const " + varName + "=" + scrutinee + ";return " + genExpr body + "})()"
-        when _ -> genTagCase scrutinee pat body
-      end
+  -- Generate pattern match condition and bindings
+  and genPatternMatch = scrutinee pattern -> match pattern
+    when PVar name _ -> ("true", [(name, scrutinee)])
+    when PWild _ -> ("true", Nil)
+    when PLit lit _ ->
+      let value = genLiteral lit in
+      (String.concat scrutinee (String.concat " === " value), Nil)
+    when PCon name args _ ->
+      let tagCheck = String.concat scrutinee (String.concat ".$tag === \"" (String.concat name "\"")) in
+      let (argConditions, argBindings) = genConArgs scrutinee args 0 in
+      let condition = if List.isEmpty argConditions then tagCheck
+        else String.concat tagCheck (String.concat " && " (String.join " && " argConditions))
+      in
+      (condition, argBindings)
+    when PTuple elems _ ->
+      let (elemConditions, elemBindings) = genTupleElems scrutinee elems 0 in
+      let condition = if List.isEmpty elemConditions then "true" else String.join " && " elemConditions in
+      (condition, elemBindings)
+    when PRecord fields _ ->
+      let (fieldConditions, fieldBindings) = genRecordFields scrutinee fields in
+      let condition = if List.isEmpty fieldConditions then "true" else String.join " && " fieldConditions in
+      (condition, fieldBindings)
+    when PAs name inner _ ->
+      let (innerCond, innerBindings) = genPatternMatch scrutinee inner in
+      (innerCond, Cons (name, scrutinee) innerBindings)
+    when POr alts _ ->
+      -- Use first alternative's bindings
+      let conditionsAndBindings = List.map (p -> genPatternMatch scrutinee p) alts in
+      let conditions = List.map (pair -> match pair when (c, _) -> String.concat "(" (String.concat c ")") end) conditionsAndBindings in
+      let bindings = match conditionsAndBindings when Cons (_, b) _ -> b when _ -> Nil end in
+      (String.join " || " conditions, bindings)
   end
 
-  -- Generate bindings for Cons pattern
-  let genConsBindings scrutinee pats = match pats
-    when Cons hPat (Cons tPat Nil) ->
-      genPatternBinding (scrutinee + ".h") hPat +
-      genPatternBinding (scrutinee + ".t") tPat
-    when _ -> ""
+  and genConArgs = scrutinee args idx -> match args
+    when Nil -> (Nil, Nil)
+    when Cons arg rest ->
+      let argScrutinee = String.concat scrutinee (String.concat ".$args[" (String.concat (Int.toString idx) "]")) in
+      let (cond, binds) = genPatternMatch argScrutinee arg in
+      let (restConds, restBinds) = genConArgs scrutinee rest (idx + 1) in
+      let conditions = if cond == "true" then restConds else Cons cond restConds in
+      (conditions, List.concat binds restBinds)
   end
 
-  -- Generate a single tag case (fallback from list matching)
-  and genTagCase scrutinee pat body =
-    match pat
-      when IRPCon _ tag pats ->
-        let bindings = genConBindings scrutinee 1 pats in
-        "(()=>{if(" + scrutinee + "[0]===" + Int.toString tag + "){" + bindings + "return " + genExpr body + ";}})() || "
-      when _ ->
-        genExpr body
-    end
-
-  -- Generate tag-based match (for ADTs)
-  and genTagMatch scrutinee cases =
-    -- Use switch on tag
-    let switchCases = List.map (genSwitchCase scrutinee) cases in
-    "(()=>{switch(" + scrutinee + "[0]){" + String.join "" switchCases + "}})()"
-
-  and genSwitchCase scrutinee c = match c
-    when IRCase pat body ->
-      match pat
-        when IRPCon _ tag pats ->
-          let bindings = genConBindings scrutinee 1 pats in
-          "case " + Int.toString tag + ":{" + bindings + "return " + genExpr body + ";}"
-        when IRPLit lit ->
-          -- Literal matching (shouldn't have tag, but handle it)
-          "case " + genLiteral lit + ":return " + genExpr body + ";"
-        when IRPWild ->
-          "default:return " + genExpr body + ";"
-        when IRPVar name ->
-          let varName = mangleName name in
-          "default:{const " + varName + "=" + scrutinee + ";return " + genExpr body + ";}"
-        when _ ->
-          "default:return " + genExpr body + ";"
-      end
+  and genTupleElems = scrutinee elems idx -> match elems
+    when Nil -> (Nil, Nil)
+    when Cons elem rest ->
+      let elemScrutinee = String.concat scrutinee (String.concat "[" (String.concat (Int.toString idx) "]")) in
+      let (cond, binds) = genPatternMatch elemScrutinee elem in
+      let (restConds, restBinds) = genTupleElems scrutinee rest (idx + 1) in
+      let conditions = if cond == "true" then restConds else Cons cond restConds in
+      (conditions, List.concat binds restBinds)
   end
 
-  -- Generate constructor argument bindings
-  let rec genConBindings scrutinee idx pats = match pats
-    when Nil -> ""
-    when Cons pat rest ->
-      let access = scrutinee + "[" + Int.toString idx + "]" in
-      genPatternBinding access pat + genConBindings scrutinee (idx + 1) rest
+  and genRecordFields = scrutinee fields -> match fields
+    when Nil -> (Nil, Nil)
+    when Cons (name, pattern) rest ->
+      let fieldScrutinee = String.concat scrutinee (String.concat "." name) in
+      let (cond, binds) = genPatternMatch fieldScrutinee pattern in
+      let (restConds, restBinds) = genRecordFields scrutinee rest in
+      let conditions = if cond == "true" then restConds else Cons cond restConds in
+      (conditions, List.concat binds restBinds)
   end
 
-  -- Generate binding for a single pattern
-  let genPatternBinding access pat = match pat
-    when IRPWild -> ""
-    when IRPVar name ->
-      let varName = mangleName name in
-      "const " + varName + "=" + access + ";"
-    when IRPCon _ _ pats ->
-      genConBindings access 1 pats
-    when IRPTuple pats ->
-      genTupleBindings access 0 pats
-    when IRPRecord fields ->
-      genRecordBindings access fields
-    when IRPAs name inner ->
-      let varName = mangleName name in
-      "const " + varName + "=" + access + ";" + genPatternBinding access inner
-    when IRPLit _ -> ""
-  end
+  -- =========================================================================
+  -- RUNTIME HEADER
+  -- =========================================================================
 
-  let rec genTupleBindings access idx pats = match pats
-    when Nil -> ""
-    when Cons pat rest ->
-      let elemAccess = access + "[" + Int.toString idx + "]" in
-      genPatternBinding elemAccess pat + genTupleBindings access (idx + 1) rest
-  end
+  let runtimeHeader = "// Generated by Algow Compiler
+\"use strict\";
 
-  let genRecordBindings access fields =
-    List.foldl (acc f -> match f
-      when (name, pat) ->
-        let fieldAccess = access + "." + name in
-        acc + genPatternBinding fieldAccess pat
-    end) "" fields
-
-  -- ===========================================================================
-  -- Declaration Generation
-  -- ===========================================================================
-
-  let genDecl decl = match decl
-    when IRDeclLet name binding ->
-      let varName = mangleName name in
-      let bindCode = genBinding binding in
-      "const " + varName + "=" + bindCode + ";"
-
-    when IRDeclLetRec bindings ->
-      genRecBindings bindings
-  end
-
-  -- ===========================================================================
-  -- Program Generation
-  -- ===========================================================================
-
-  let genProgram program = match program
-    when IRProgram decls maybeExpr ->
-      let declsCode = String.join "\n" (List.map genDecl decls) in
-      let mainCode = match maybeExpr
-        when Nothing -> ""
-        when Just expr -> genExpr expr
-      end in
-      declsCode + (if mainCode == "" then "" else "\n" + mainCode)
-  end
-
-  -- ===========================================================================
-  -- Runtime Code
-  -- ===========================================================================
-
-  -- Minimal runtime support functions
-  let runtimeCode = "
-const $eq = (a) => (b) => {
-  if (a === b) return true;
-  if (a === null || b === null) return a === b;
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!$eq(a[i])(b[i])) return false;
-    return true;
-  }
-  if (typeof a === 'object' && typeof b === 'object') {
-    const ka = Object.keys(a), kb = Object.keys(b);
-    if (ka.length !== kb.length) return false;
-    for (const k of ka) if (!$eq(a[k])(b[k])) return false;
-    return true;
-  }
-  return false;
-};
+// Load runtime (defines $apply, $con, $eq, $foreign)
+const { $apply, $con, $eq, $foreign } = require(\"./runtime.js\");
 "
 
-  -- ===========================================================================
-  -- Entry Points
-  -- ===========================================================================
+  -- Inline runtime for standalone execution (no external file needed)
+  let inlineRuntime = "// Generated by Algow Compiler (standalone)
+\"use strict\";
 
-  -- Generate complete JavaScript program
-  let generate program =
-    runtimeCode + "\n" + genProgram program
+const $apply = (fn, arg) => {
+  if (typeof fn === \"function\") return fn(arg);
+  return { $tag: fn.$tag, $args: [...fn.$args, arg] };
+};
 
-  -- Generate without runtime (for testing)
-  let generateNoRuntime program =
-    genProgram program
+const $con = (tag, ...args) => ({ $tag: tag, $args: args });
 
-  -- Generate a single expression
-  let generateExpr expr =
-    genExpr expr
+const $eq = (a, b) => {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== \"object\" || a === null) return false;
+  if (\"$tag\" in a && \"$tag\" in b) {
+    if (a.$tag !== b.$tag) return false;
+    if (a.$args.length !== b.$args.length) return false;
+    return a.$args.every((x, i) => $eq(x, b.$args[i]));
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((x, i) => $eq(x, b[i]));
+  }
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => k in b && $eq(a[k], b[k]));
+};
+
+const $foreign = {};
+"
+
+  -- =========================================================================
+  -- MAIN ENTRY POINTS
+  -- =========================================================================
+
+  -- Generate with external runtime reference
+  let generate = ir constructors ->
+    let ctx = initContext constructors in
+    let (result, finalCtx) = genExpr ir ctx in
+    let codeLines = List.reverse finalCtx.lines in
+    let mainCode = String.join "\n" codeLines in
+    String.concat runtimeHeader (String.concat "\n// Generated code\n" (String.concat mainCode (String.concat "\nconst $result = " (String.concat result ";\nconsole.log($result);\n"))))
+
+  -- Generate standalone (runtime inlined)
+  let generateStandalone = ir constructors ->
+    let ctx = initContext constructors in
+    let (result, finalCtx) = genExpr ir ctx in
+    let codeLines = List.reverse finalCtx.lines in
+    let mainCode = String.join "\n" codeLines in
+    String.concat inlineRuntime (String.concat "\n// Generated code\n" (String.concat mainCode (String.concat "\nconst $result = " (String.concat result ";\nconsole.log($result);\n"))))
 
 end
