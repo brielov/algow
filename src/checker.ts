@@ -55,6 +55,9 @@ type CheckContext = {
   readonly typeMap: Map<number, Type>;
   // Map from span.start to instantiated type (for polymorphic expressions)
   readonly exprTypeMap: Map<number, Type>;
+  // Deferred tuple projections: TVar name -> (index -> element type)
+  // Used to collect all tuple index accesses before creating the tuple type
+  readonly tupleProjections: Map<string, Map<number, Type>>;
 };
 
 const createContext = (
@@ -66,6 +69,7 @@ const createContext = (
   aliasRegistry,
   typeMap: new Map(),
   exprTypeMap: new Map(),
+  tupleProjections: new Map(),
 });
 
 const addError = (ctx: CheckContext, message: string, span?: C.CExpr["span"]): void => {
@@ -83,6 +87,58 @@ const recordExprType = (ctx: CheckContext, span: C.CExpr["span"], type: Type): v
   if (span) {
     ctx.exprTypeMap.set(span.start, type);
   }
+};
+
+/**
+ * Record a tuple projection constraint: typeVar.index should have type elemType
+ * Returns the element type (existing if already recorded, or fresh)
+ */
+const recordTupleProjection = (ctx: CheckContext, typeVarName: string, index: number): Type => {
+  let projections = ctx.tupleProjections.get(typeVarName);
+  if (!projections) {
+    projections = new Map();
+    ctx.tupleProjections.set(typeVarName, projections);
+  }
+  let elemType = projections.get(index);
+  if (!elemType) {
+    elemType = freshTypeVar();
+    projections.set(index, elemType);
+  }
+  return elemType;
+};
+
+/**
+ * Resolve all pending tuple projections for a type variable into a proper tuple type.
+ * Returns a substitution binding the type variable to a tuple.
+ */
+const resolveTupleProjections = (ctx: CheckContext, typeVarName: string, subst: Subst): Subst => {
+  const projections = ctx.tupleProjections.get(typeVarName);
+  if (!projections || projections.size === 0) {
+    return subst;
+  }
+
+  // Find the maximum index to determine tuple size
+  const maxIndex = Math.max(...projections.keys());
+  const elements: Type[] = [];
+  for (let i = 0; i <= maxIndex; i++) {
+    const elemType = projections.get(i);
+    // Apply current substitution to the element type
+    elements.push(elemType ? applySubst(subst, elemType) : freshTypeVar());
+  }
+
+  const tupleType = ttuple(elements);
+
+  // Check if the type variable is already bound in the substitution
+  const existingType = subst.get(typeVarName);
+  if (existingType) {
+    // The TVar is already bound - unify the existing type with our tuple
+    const s = unify(ctx, applySubst(subst, existingType), tupleType, undefined);
+    return composeSubst(subst, s);
+  }
+
+  // Bind the type variable to the tuple
+  const s = new Map([[typeVarName, tupleType]]);
+  return composeSubst(subst, s);
 };
 
 // =============================================================================
@@ -302,11 +358,20 @@ const inferAbs = (ctx: CheckContext, env: TypeEnv, expr: C.CAbs): InferResult =>
   newEnv.set(key, mono(paramType));
 
   const [s, bodyType, constraints] = inferExpr(ctx, newEnv, expr.body);
-  const resultType = tfun(applySubst(s, paramType), bodyType);
 
-  recordType(ctx, expr.param, applySubst(s, paramType));
+  // Resolve any deferred tuple projections on the parameter's type variable
+  // This handles cases like: p -> let x = p.0 in let y = p.1 in (y, x)
+  // where multiple tuple accesses need to be collected before creating the tuple type
+  const s2 = resolveTupleProjections(ctx, paramType.name, s);
+  // Clean up resolved projections
+  ctx.tupleProjections.delete(paramType.name);
 
-  return [s, resultType, constraints];
+  const finalParamType = applySubst(s2, paramType);
+  const resultType = tfun(finalParamType, applySubst(s2, bodyType));
+
+  recordType(ctx, expr.param, finalParamType);
+
+  return [s2, resultType, constraints];
 };
 
 const inferLet = (ctx: CheckContext, env: TypeEnv, expr: C.CLet): InferResult => {
@@ -375,6 +440,9 @@ const inferMatch = (ctx: CheckContext, env: TypeEnv, expr: C.CMatch): InferResul
   const resultType = freshTypeVar();
 
   for (const c of expr.cases) {
+    // Validate or-pattern bindings before type checking
+    validateOrPatternBindings(ctx, c.pattern);
+
     const [patSubst, patBindings] = inferPattern(
       ctx,
       env,
@@ -407,6 +475,20 @@ const inferMatch = (ctx: CheckContext, env: TypeEnv, expr: C.CMatch): InferResul
     // Unify with result type
     const s = unify(ctx, applySubst(subst, resultType), bt, c.body.span);
     subst = composeSubst(subst, s);
+
+    // Record types for pattern-bound variables (for lowering)
+    recordPatternTypes(ctx, env, subst, c.pattern, applySubst(subst, scrutineeType));
+  }
+
+  // Check exhaustiveness (only if no guards - guards make exhaustiveness hard to check)
+  const hasGuards = expr.cases.some((c) => c.guard !== null);
+  if (!hasGuards) {
+    const patterns = expr.cases.map((c) => c.pattern);
+    const finalScrutineeType = applySubst(subst, scrutineeType);
+    const missing = checkExhaustiveness(ctx, finalScrutineeType, patterns);
+    if (missing.length > 0) {
+      addExhaustivenessWarning(ctx, missing, expr.span);
+    }
   }
 
   return [subst, applySubst(subst, resultType), allConstraints];
@@ -480,6 +562,36 @@ const inferField = (ctx: CheckContext, env: TypeEnv, expr: C.CField): InferResul
   const [s1, recordType, c1] = inferExpr(ctx, env, expr.record);
   const resolved = applySubst(s1, recordType);
 
+  // Check for tuple index access (e.g., pair.0, triple.1)
+  const tupleIndex = parseInt(expr.field, 10);
+  if (!isNaN(tupleIndex)) {
+    if (resolved.kind === "TTuple") {
+      if (tupleIndex < 0 || tupleIndex >= resolved.elements.length) {
+        addError(
+          ctx,
+          `Tuple index ${tupleIndex} out of bounds. Tuple has ${resolved.elements.length} element(s) (indices 0-${resolved.elements.length - 1})`,
+          expr.span,
+        );
+        return [s1, freshTypeVar(), c1];
+      }
+      return [s1, resolved.elements[tupleIndex]!, c1];
+    }
+    if (resolved.kind === "TVar") {
+      // Defer tuple constraint creation - record the projection for later resolution
+      // This allows multiple tuple accesses (e.g., p.0 and p.1) to be collected
+      // before creating the properly-sized tuple type
+      const elemType = recordTupleProjection(ctx, resolved.name, tupleIndex);
+      return [s1, elemType, c1];
+    }
+    addError(
+      ctx,
+      `Cannot use tuple index '.${tupleIndex}' on non-tuple type '${typeToString(resolved)}'`,
+      expr.span,
+    );
+    return [s1, freshTypeVar(), c1];
+  }
+
+  // Regular record field access
   if (resolved.kind === "TVar") {
     const fieldType = freshTypeVar();
     const rowVar = freshTypeVar();
@@ -528,6 +640,16 @@ const inferForeign = (_ctx: CheckContext, env: TypeEnv, expr: C.CForeign): Infer
 const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResult => {
   const [s1, t1, c1] = inferExpr(ctx, env, expr.left);
   const [s2, t2, c2] = inferExpr(ctx, applySubstEnv(s1, env), expr.right);
+
+  // Check for division by zero
+  if (
+    expr.op === "/" &&
+    expr.right.kind === "CLit" &&
+    expr.right.value.kind === "int" &&
+    expr.right.value.value === 0
+  ) {
+    addError(ctx, "Division by zero", expr.span);
+  }
 
   // Determine result type based on operator
   let operandType: Type;
@@ -733,6 +855,88 @@ const inferPattern = (
   return [subst, bindings];
 };
 
+/** Record types for all variables in a pattern */
+const recordPatternTypes = (
+  ctx: CheckContext,
+  env: TypeEnv,
+  subst: Subst,
+  pattern: C.CPattern,
+  scrutineeType: Type,
+): void => {
+  const recordInPattern = (pat: C.CPattern, expectedType: Type): void => {
+    switch (pat.kind) {
+      case "CPWild":
+        break;
+
+      case "CPVar":
+        recordType(ctx, pat.name, applySubst(subst, expectedType));
+        break;
+
+      case "CPLit":
+        break;
+
+      case "CPCon": {
+        // Get constructor type to find argument types
+        const conScheme = env.get(pat.name);
+        if (!conScheme) break;
+        const conType = instantiate(conScheme);
+
+        // Extract argument types
+        const argTypes: Type[] = [];
+        let resultType = conType;
+        while (resultType.kind === "TFun") {
+          argTypes.push(resultType.param);
+          resultType = resultType.ret;
+        }
+
+        // Unify to get specialized argument types
+        const conSubst = unify(ctx, expectedType, resultType);
+        for (let i = 0; i < pat.args.length && i < argTypes.length; i++) {
+          recordInPattern(pat.args[i]!, applySubst(conSubst, argTypes[i]!));
+        }
+        break;
+      }
+
+      case "CPTuple": {
+        if (expectedType.kind === "TTuple") {
+          for (let i = 0; i < pat.elements.length; i++) {
+            const elemType = expectedType.elements[i];
+            if (elemType) {
+              recordInPattern(pat.elements[i]!, elemType);
+            }
+          }
+        }
+        break;
+      }
+
+      case "CPRecord": {
+        if (expectedType.kind === "TRecord") {
+          for (const f of pat.fields) {
+            const fieldType = expectedType.fields.get(f.name);
+            if (fieldType) {
+              recordInPattern(f.pattern, fieldType);
+            }
+          }
+        }
+        break;
+      }
+
+      case "CPAs":
+        recordType(ctx, pat.name, applySubst(subst, expectedType));
+        recordInPattern(pat.pattern, expectedType);
+        break;
+
+      case "CPOr":
+        // For or-patterns, all alternatives should bind the same variables
+        // with the same types, so just process the left side
+        recordInPattern(pat.left, expectedType);
+        break;
+    }
+  };
+
+  recordInPattern(pattern, scrutineeType);
+};
+
 // =============================================================================
 // Declaration Processing
 // =============================================================================
@@ -923,4 +1127,356 @@ const solveConstraints = (ctx: CheckContext, constraints: readonly Constraint[])
 
     addError(ctx, `Type '${typeToString(type)}' does not satisfy ${className}`);
   }
+};
+
+// =============================================================================
+// Exhaustiveness Checking
+// =============================================================================
+
+/**
+ * Check if a set of patterns exhaustively covers all possible values of a type.
+ * Returns a list of missing pattern descriptions if not exhaustive.
+ */
+const checkExhaustiveness = (
+  ctx: CheckContext,
+  type: Type,
+  patterns: readonly C.CPattern[],
+): string[] => {
+  // If any pattern is a wildcard or variable at the top level, it's exhaustive
+  if (patterns.some((p) => p.kind === "CPWild" || p.kind === "CPVar")) {
+    return [];
+  }
+
+  // Check based on the type
+  const resolvedType = resolveType(ctx, type);
+
+  switch (resolvedType.kind) {
+    case "TVar":
+      // Unknown type - assume exhaustive if we have at least one pattern
+      return patterns.length > 0 ? [] : ["_"];
+
+    case "TCon": {
+      // Check for bool type specially
+      if (resolvedType.name === "bool") {
+        return checkBoolExhaustiveness(patterns);
+      }
+      // For other primitive types (int, float, string, char), literals are never exhaustive
+      if (["int", "float", "string", "char"].includes(resolvedType.name)) {
+        return ["_"];
+      }
+      // Check ADT exhaustiveness
+      return checkAdtExhaustiveness(ctx, resolvedType.name, patterns);
+    }
+
+    case "TApp": {
+      // Get the base type name for ADT checking
+      const baseName = getBaseTypeName(resolvedType);
+      if (baseName) {
+        return checkAdtExhaustiveness(ctx, baseName, patterns);
+      }
+      return [];
+    }
+
+    case "TTuple": {
+      return checkTupleExhaustiveness(ctx, resolvedType.elements, patterns);
+    }
+
+    case "TFun":
+      // Function types - can't really pattern match on them
+      return [];
+
+    case "TRecord":
+      // Record patterns - check if all patterns cover all possibilities
+      return checkRecordExhaustiveness(ctx, resolvedType, patterns);
+
+    default:
+      return [];
+  }
+};
+
+/** Resolve type aliases */
+const resolveType = (ctx: CheckContext, type: Type): Type => {
+  if (type.kind === "TCon") {
+    const alias = ctx.aliasRegistry.get(type.name);
+    if (alias && alias.params.length === 0) {
+      return resolveType(ctx, alias.type);
+    }
+  }
+  return type;
+};
+
+/** Get the base type constructor name from a type application */
+const getBaseTypeName = (type: Type): string | null => {
+  if (type.kind === "TCon") return type.name;
+  if (type.kind === "TApp") return getBaseTypeName(type.con);
+  return null;
+};
+
+/** Check exhaustiveness for bool type */
+const checkBoolExhaustiveness = (patterns: readonly C.CPattern[]): string[] => {
+  let hasTrue = false;
+  let hasFalse = false;
+
+  for (const p of patterns) {
+    if (p.kind === "CPWild" || p.kind === "CPVar") return [];
+    if (p.kind === "CPLit" && p.value.kind === "bool") {
+      if (p.value.value) hasTrue = true;
+      else hasFalse = true;
+    }
+  }
+
+  const missing: string[] = [];
+  if (!hasTrue) missing.push("true");
+  if (!hasFalse) missing.push("false");
+  return missing;
+};
+
+/** Check exhaustiveness for ADT types */
+const checkAdtExhaustiveness = (
+  ctx: CheckContext,
+  typeName: string,
+  patterns: readonly C.CPattern[],
+): string[] => {
+  const constructors = ctx.registry.get(typeName);
+  if (!constructors) {
+    // Unknown type - assume exhaustive
+    return [];
+  }
+
+  // Track which constructors are covered
+  const covered = new Map<string, C.CPattern[]>();
+  for (const con of constructors) {
+    covered.set(con, []);
+  }
+
+  // Helper to process a single pattern
+  const processPattern = (p: C.CPattern): boolean => {
+    if (p.kind === "CPWild" || p.kind === "CPVar") {
+      // Wildcard covers all constructors
+      return true;
+    }
+    if (p.kind === "CPCon") {
+      const existing = covered.get(p.name);
+      if (existing) {
+        existing.push(p);
+      }
+    }
+    if (p.kind === "CPAs") {
+      // As-pattern: check the inner pattern
+      return processPattern(p.pattern);
+    }
+    if (p.kind === "CPOr") {
+      // Flatten or-patterns (recursively collect all alternatives)
+      const alts = flattenOrPattern(p);
+      for (const alt of alts) {
+        if (processPattern(alt)) return true;
+      }
+    }
+    return false;
+  };
+
+  // Collect patterns for each constructor
+  for (const p of patterns) {
+    if (processPattern(p)) {
+      return []; // Exhaustive due to wildcard/variable
+    }
+  }
+
+  // Check each constructor
+  const missing: string[] = [];
+  for (const [conName, conPatterns] of covered) {
+    if (conPatterns.length === 0) {
+      missing.push(conName);
+    }
+    // TODO: For constructors with arguments, we could recursively check
+    // if all argument patterns are exhaustive, but this is complex
+  }
+
+  return missing;
+};
+
+/** Check exhaustiveness for tuple types */
+const checkTupleExhaustiveness = (
+  ctx: CheckContext,
+  elementTypes: readonly Type[],
+  patterns: readonly C.CPattern[],
+): string[] => {
+  // If any pattern is a wildcard or variable, the tuple match is exhaustive
+  if (patterns.some((p) => p.kind === "CPWild" || p.kind === "CPVar")) {
+    return [];
+  }
+
+  // Collect tuple patterns
+  const tuplePatterns = patterns.filter((p) => p.kind === "CPTuple") as C.CPTuple[];
+
+  if (tuplePatterns.length === 0) {
+    // No tuple patterns and no wildcards - not exhaustive
+    return [`(${elementTypes.map(() => "_").join(", ")})`];
+  }
+
+  // For each position, check if it's covered
+  // This is a simplified check - full exhaustiveness for tuples is complex
+  for (let i = 0; i < elementTypes.length; i++) {
+    const positionPatterns = tuplePatterns
+      .map((tp) => tp.elements[i])
+      .filter(Boolean) as C.CPattern[];
+    const missing = checkExhaustiveness(ctx, elementTypes[i]!, positionPatterns);
+    if (missing.length > 0) {
+      // Position not exhaustive
+      const parts = elementTypes.map((_, j) => (j === i ? missing[0] : "_"));
+      return [`(${parts.join(", ")})`];
+    }
+  }
+
+  return [];
+};
+
+/** Check exhaustiveness for record types */
+const checkRecordExhaustiveness = (
+  _ctx: CheckContext,
+  _type: Type & { kind: "TRecord" },
+  patterns: readonly C.CPattern[],
+): string[] => {
+  // Record patterns are typically not exhaustive unless there's a wildcard
+  if (patterns.some((p) => p.kind === "CPWild" || p.kind === "CPVar")) {
+    return [];
+  }
+  // Records with row variables are open, so we can't enumerate all possibilities
+  return [];
+};
+
+/** Add a warning for non-exhaustive patterns */
+const addExhaustivenessWarning = (
+  ctx: CheckContext,
+  missing: string[],
+  span?: C.CExpr["span"],
+): void => {
+  const missingStr = missing.slice(0, 3).join(", ") + (missing.length > 3 ? ", ..." : "");
+  const message = `Non-exhaustive patterns. Missing: ${missingStr}`;
+  const start = span?.start ?? 0;
+  const end = span?.end ?? 0;
+  ctx.diagnostics.push({
+    start,
+    end,
+    message,
+    severity: "warning",
+    kind: "non-exhaustive",
+  });
+};
+
+/** Flatten an or-pattern into a list of alternative patterns */
+const flattenOrPattern = (p: C.CPOr): C.CPattern[] => {
+  const result: C.CPattern[] = [];
+  const flatten = (pat: C.CPattern): void => {
+    if (pat.kind === "CPOr") {
+      flatten(pat.left);
+      flatten(pat.right);
+    } else {
+      result.push(pat);
+    }
+  };
+  flatten(p);
+  return result;
+};
+
+// =============================================================================
+// Or-Pattern Variable Binding Validation
+// =============================================================================
+
+/**
+ * Collect all variable names bound by a pattern.
+ */
+const collectPatternVars = (pattern: C.CPattern): Set<string> => {
+  const vars = new Set<string>();
+
+  const collect = (p: C.CPattern): void => {
+    switch (p.kind) {
+      case "CPWild":
+        break;
+      case "CPVar":
+        vars.add(p.name.original);
+        break;
+      case "CPLit":
+        break;
+      case "CPCon":
+        for (const arg of p.args) {
+          collect(arg);
+        }
+        break;
+      case "CPTuple":
+        for (const elem of p.elements) {
+          collect(elem);
+        }
+        break;
+      case "CPRecord":
+        for (const field of p.fields) {
+          collect(field.pattern);
+        }
+        break;
+      case "CPAs":
+        vars.add(p.name.original);
+        collect(p.pattern);
+        break;
+      case "CPOr":
+        // For or-patterns, collect from both sides (they should match)
+        collect(p.left);
+        collect(p.right);
+        break;
+    }
+  };
+
+  collect(pattern);
+  return vars;
+};
+
+/**
+ * Validate that an or-pattern binds the same variables in all alternatives.
+ * Returns an error message if validation fails, null otherwise.
+ */
+const validateOrPatternBindings = (ctx: CheckContext, pattern: C.CPattern): void => {
+  const validate = (p: C.CPattern): void => {
+    if (p.kind === "CPOr") {
+      const leftVars = collectPatternVars(p.left);
+      const rightVars = collectPatternVars(p.right);
+
+      // Check that both sides bind the same variables
+      const onlyLeft = [...leftVars].filter((v) => !rightVars.has(v));
+      const onlyRight = [...rightVars].filter((v) => !leftVars.has(v));
+
+      if (onlyLeft.length > 0 || onlyRight.length > 0) {
+        const missing: string[] = [];
+        if (onlyLeft.length > 0) {
+          missing.push(`'${onlyLeft.join("', '")}' only in left alternative`);
+        }
+        if (onlyRight.length > 0) {
+          missing.push(`'${onlyRight.join("', '")}' only in right alternative`);
+        }
+        addError(
+          ctx,
+          `Or-pattern alternatives must bind the same variables. ${missing.join("; ")}`,
+          p.span,
+        );
+      }
+
+      // Recursively validate nested patterns
+      validate(p.left);
+      validate(p.right);
+    } else if (p.kind === "CPCon") {
+      for (const arg of p.args) {
+        validate(arg);
+      }
+    } else if (p.kind === "CPTuple") {
+      for (const elem of p.elements) {
+        validate(elem);
+      }
+    } else if (p.kind === "CPRecord") {
+      for (const field of p.fields) {
+        validate(field.pattern);
+      }
+    } else if (p.kind === "CPAs") {
+      validate(p.pattern);
+    }
+  };
+
+  validate(pattern);
 };

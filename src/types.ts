@@ -246,7 +246,7 @@ export const resetTypeVarCounter = (): void => {
   _typeVarCounter = 0;
 };
 
-export const freshTypeVar = (): Type => {
+export const freshTypeVar = (): TVar => {
   return tvar(`t${_typeVarCounter++}`);
 };
 

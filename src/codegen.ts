@@ -493,6 +493,10 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
 
     case "IRBField": {
       const record = genAtom(ctx, binding.record);
+      // Use bracket notation for numeric fields (tuple access)
+      if (/^\d+$/.test(binding.field)) {
+        return `${record}[${binding.field}]`;
+      }
       return `${record}.${binding.field}`;
     }
 

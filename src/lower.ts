@@ -954,8 +954,8 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
         return [IR.irdecllet(decl.name, IR.irbatom(valueIR.atom))];
       }
 
-      if (valueIR.kind === "IRLet") {
-        // Extract all intermediate bindings - they all become top-level decls
+      // For expressions that are a chain of lets ending in an atom
+      if (canExtractBindings(valueIR)) {
         const { bindings, finalAtom } = extractBindings(valueIR);
         const decls: IR.IRDecl[] = [];
 
@@ -969,8 +969,31 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
         return decls;
       }
 
-      // For letrec or match, we need to wrap in a lambda
-      // This shouldn't happen in well-formed code
+      // Handle let chains ending in match
+      if (valueIR.kind === "IRLet" || valueIR.kind === "IRMatch") {
+        const { bindings, finalExpr } = extractBindingsUntilNonLet(valueIR);
+        const decls: IR.IRDecl[] = [];
+
+        // Emit all intermediate bindings as declarations
+        for (const b of bindings) {
+          decls.push(IR.irdecllet(b.name, b.binding));
+        }
+
+        if (finalExpr.kind === "IRMatch") {
+          // Create a match binding for the declared name
+          const binding = IR.irbmatch(finalExpr.scrutinee, finalExpr.cases, finalExpr.type);
+          decls.push(IR.irdecllet(decl.name, binding));
+          return decls;
+        }
+
+        // If it ended with an atom somehow
+        if (finalExpr.kind === "IRAtom") {
+          decls.push(IR.irdecllet(decl.name, IR.irbatom(finalExpr.atom)));
+          return decls;
+        }
+      }
+
+      // For letrec or other expressions
       throw new Error(`Unexpected IR kind in decl: ${valueIR.kind}`);
     }
 
