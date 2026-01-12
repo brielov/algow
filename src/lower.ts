@@ -933,6 +933,63 @@ const lowerPattern = (
 // Declaration Lowering
 // =============================================================================
 
+/**
+ * Helper to convert an IR expression body into declarations bound to a name.
+ */
+const lowerBodyToDecls = (body: IR.IRExpr, name: Name): IR.IRDecl[] => {
+  const decls: IR.IRDecl[] = [];
+
+  if (body.kind === "IRAtom") {
+    decls.push(IR.irdecllet(name, IR.irbatom(body.atom)));
+    return decls;
+  }
+
+  if (canExtractBindings(body)) {
+    const { bindings, finalAtom } = extractBindings(body);
+    for (const b of bindings) {
+      decls.push(IR.irdecllet(b.name, b.binding));
+    }
+    decls.push(IR.irdecllet(name, IR.irbatom(finalAtom)));
+    return decls;
+  }
+
+  if (body.kind === "IRLetRec") {
+    decls.push(IR.irdeclletrec(body.bindings));
+    decls.push(...lowerBodyToDecls(body.body, name));
+    return decls;
+  }
+
+  if (body.kind === "IRMatch") {
+    const binding = IR.irbmatch(body.scrutinee, body.cases, body.type);
+    decls.push(IR.irdecllet(name, binding));
+    return decls;
+  }
+
+  if (body.kind === "IRLet") {
+    const { bindings, finalExpr } = extractBindingsUntilNonLet(body);
+    for (const b of bindings) {
+      decls.push(IR.irdecllet(b.name, b.binding));
+    }
+    if (finalExpr.kind === "IRMatch") {
+      const binding = IR.irbmatch(finalExpr.scrutinee, finalExpr.cases, finalExpr.type);
+      decls.push(IR.irdecllet(name, binding));
+      return decls;
+    }
+    if (finalExpr.kind === "IRAtom") {
+      decls.push(IR.irdecllet(name, IR.irbatom(finalExpr.atom)));
+      return decls;
+    }
+    // Recursively handle nested letrec
+    if (finalExpr.kind === "IRLetRec") {
+      decls.push(IR.irdeclletrec(finalExpr.bindings));
+      decls.push(...lowerBodyToDecls(finalExpr.body, name));
+      return decls;
+    }
+  }
+
+  throw new Error(`Unexpected IR kind in body: ${body.kind}`);
+};
+
 const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
   switch (decl.kind) {
     case "CDeclType": {
@@ -993,7 +1050,17 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
         }
       }
 
-      // For letrec or other expressions
+      // Handle letrec expressions (e.g., let foo = let rec bar = ... in bar 5)
+      if (valueIR.kind === "IRLetRec") {
+        const decls: IR.IRDecl[] = [];
+        // Emit the letrec bindings as a CDeclLetRec
+        decls.push(IR.irdeclletrec(valueIR.bindings));
+        // Handle the body using the helper
+        decls.push(...lowerBodyToDecls(valueIR.body, decl.name));
+        return decls;
+      }
+
+      // For other expressions
       throw new Error(`Unexpected IR kind in decl: ${valueIR.kind}`);
     }
 

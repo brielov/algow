@@ -1067,71 +1067,92 @@ export const checkProgram = (
     }
   }
 
-  // Second pass: process bindings and foreign declarations
+  // Second pass: process foreign declarations first (they have explicit types)
   for (const decl of program.decls) {
-    switch (decl.kind) {
-      case "CDeclType":
-        // Already processed in first pass
-        break;
+    if (decl.kind === "CDeclForeign") {
+      const type = convertCoreType(decl.type);
+      const key = `${decl.name.id}:${decl.name.original}`;
+      env.set(key, mono(type));
+      // Also register with module.name key for lookup
+      env.set(`${decl.module}.${decl.jsName}`, mono(type));
+      recordType(ctx, decl.name, type);
+    }
+  }
 
-      case "CDeclLet": {
-        const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), decl.value);
+  // Third pass: collect all let bindings for SCC analysis
+  const allBindings: BindingInfo[] = [];
+  const bindingByName = new Map<string, BindingInfo>();
+
+  for (const decl of program.decls) {
+    if (decl.kind === "CDeclLet") {
+      const info: BindingInfo = { name: decl.name, value: decl.value, span: decl.span };
+      allBindings.push(info);
+      bindingByName.set(decl.name.original, info);
+    } else if (decl.kind === "CDeclLetRec") {
+      // Explicit let rec bindings are already known to be mutually recursive
+      // We'll handle them separately to preserve their grouping
+      for (const b of decl.bindings) {
+        const info: BindingInfo = { name: b.name, value: b.value, span: decl.span };
+        allBindings.push(info);
+        bindingByName.set(b.name.original, info);
+      }
+    }
+  }
+
+  // Build dependency graph and find SCCs
+  const depGraph = buildDependencyGraph(allBindings);
+  const sccs = findSCCs(depGraph);
+
+  // Process each SCC in topological order
+  for (const scc of sccs) {
+    if (scc.length === 1 && !isSelfRecursive(scc, depGraph)) {
+      // Single non-recursive binding: infer and generalize immediately
+      const binding = bindingByName.get(scc[0]!)!;
+      const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), binding.value);
+      subst = composeSubst(subst, s);
+      allConstraints.push(...c);
+
+      const key = `${binding.name.id}:${binding.name.original}`;
+      const generalizedScheme = generalize(applySubstEnv(subst, env), t);
+      env.set(key, generalizedScheme);
+      recordType(ctx, binding.name, applySubst(subst, t));
+    } else {
+      // Mutually recursive bindings: treat as letrec
+      const sccBindings = scc.map((name) => bindingByName.get(name)!);
+
+      // Create fresh type variables for all bindings in the SCC
+      const bindingTypes = new Map<string, Type>();
+      for (const b of sccBindings) {
+        const tv = freshTypeVar();
+        const key = `${b.name.id}:${b.name.original}`;
+        bindingTypes.set(key, tv);
+        env.set(key, mono(tv));
+      }
+
+      // Infer types for all bindings
+      for (const b of sccBindings) {
+        const key = `${b.name.id}:${b.name.original}`;
+        const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), b.value);
         subst = composeSubst(subst, s);
         allConstraints.push(...c);
 
-        const key = `${decl.name.id}:${decl.name.original}`;
-        const generalizedScheme = generalize(applySubstEnv(subst, env), t);
+        const expectedType = bindingTypes.get(key)!;
+        const s2 = unify(ctx, applySubst(subst, expectedType), t, b.span);
+        subst = composeSubst(subst, s2);
+      }
+
+      // Generalize: remove current bindings from env to allow proper generalization
+      const outerEnv = applySubstEnv(subst, env);
+      for (const b of sccBindings) {
+        const key = `${b.name.id}:${b.name.original}`;
+        outerEnv.delete(key);
+      }
+      for (const b of sccBindings) {
+        const key = `${b.name.id}:${b.name.original}`;
+        const t = applySubst(subst, bindingTypes.get(key)!);
+        const generalizedScheme = generalize(outerEnv, t);
         env.set(key, generalizedScheme);
-        recordType(ctx, decl.name, applySubst(subst, t));
-        break;
-      }
-
-      case "CDeclLetRec": {
-        // Create fresh type variables for all bindings
-        const bindingTypes = new Map<string, Type>();
-        for (const b of decl.bindings) {
-          const tv = freshTypeVar();
-          const key = `${b.name.id}:${b.name.original}`;
-          bindingTypes.set(key, tv);
-          env.set(key, mono(tv));
-        }
-
-        // Infer types for all bindings
-        for (const b of decl.bindings) {
-          const key = `${b.name.id}:${b.name.original}`;
-          const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), b.value);
-          subst = composeSubst(subst, s);
-          allConstraints.push(...c);
-
-          const expectedType = bindingTypes.get(key)!;
-          const s2 = unify(ctx, applySubst(subst, expectedType), t, b.value.span);
-          subst = composeSubst(subst, s2);
-        }
-
-        // Generalize: remove current bindings from env to allow proper generalization
-        const outerEnv = applySubstEnv(subst, env);
-        for (const b of decl.bindings) {
-          const key = `${b.name.id}:${b.name.original}`;
-          outerEnv.delete(key);
-        }
-        for (const b of decl.bindings) {
-          const key = `${b.name.id}:${b.name.original}`;
-          const t = applySubst(subst, bindingTypes.get(key)!);
-          const generalizedScheme = generalize(outerEnv, t);
-          env.set(key, generalizedScheme);
-          recordType(ctx, b.name, t);
-        }
-        break;
-      }
-
-      case "CDeclForeign": {
-        const type = convertCoreType(decl.type);
-        const key = `${decl.name.id}:${decl.name.original}`;
-        env.set(key, mono(type));
-        // Also register with module.name key for lookup
-        env.set(`${decl.module}.${decl.jsName}`, mono(type));
-        recordType(ctx, decl.name, type);
-        break;
+        recordType(ctx, b.name, t);
       }
     }
   }
@@ -1460,6 +1481,232 @@ const flattenOrPattern = (p: C.CPOr): C.CPattern[] => {
   };
   flatten(p);
   return result;
+};
+
+// =============================================================================
+// Dependency Analysis and SCC
+// =============================================================================
+
+type BindingInfo = {
+  name: Name;
+  value: C.CExpr;
+  span?: C.CExpr["span"];
+};
+
+/**
+ * Collect all free variables referenced in an expression.
+ * Returns the set of binding names (original names) that are referenced.
+ */
+const collectFreeVars = (expr: C.CExpr, bound: Set<string> = new Set()): Set<string> => {
+  const freeVars = new Set<string>();
+
+  const collect = (e: C.CExpr, localBound: Set<string>): void => {
+    switch (e.kind) {
+      case "CVar":
+        if (!localBound.has(e.name.original)) {
+          freeVars.add(e.name.original);
+        }
+        break;
+
+      case "CLit":
+        break;
+
+      case "CApp":
+        collect(e.func, localBound);
+        collect(e.arg, localBound);
+        break;
+
+      case "CAbs": {
+        const newBound = new Set(localBound);
+        newBound.add(e.param.original);
+        collect(e.body, newBound);
+        break;
+      }
+
+      case "CLet": {
+        collect(e.value, localBound);
+        const newBound = new Set(localBound);
+        newBound.add(e.name.original);
+        collect(e.body, newBound);
+        break;
+      }
+
+      case "CLetRec": {
+        const newBound = new Set(localBound);
+        for (const b of e.bindings) {
+          newBound.add(b.name.original);
+        }
+        for (const b of e.bindings) {
+          collect(b.value, newBound);
+        }
+        collect(e.body, newBound);
+        break;
+      }
+
+      case "CMatch":
+        collect(e.scrutinee, localBound);
+        for (const c of e.cases) {
+          const patBound = new Set(localBound);
+          collectPatternBindings(c.pattern, patBound);
+          if (c.guard) collect(c.guard, patBound);
+          collect(c.body, patBound);
+        }
+        break;
+
+      case "CCon":
+        break;
+
+      case "CTuple":
+        for (const elem of e.elements) {
+          collect(elem, localBound);
+        }
+        break;
+
+      case "CRecord":
+        for (const f of e.fields) {
+          collect(f.value, localBound);
+        }
+        break;
+
+      case "CRecordUpdate":
+        collect(e.record, localBound);
+        for (const f of e.fields) {
+          collect(f.value, localBound);
+        }
+        break;
+
+      case "CField":
+        collect(e.record, localBound);
+        break;
+
+      case "CForeign":
+        break;
+
+      case "CBinOp":
+        collect(e.left, localBound);
+        collect(e.right, localBound);
+        break;
+    }
+  };
+
+  collect(expr, bound);
+  return freeVars;
+};
+
+/** Collect variable names bound by a pattern into the given set */
+const collectPatternBindings = (pattern: C.CPattern, bound: Set<string>): void => {
+  switch (pattern.kind) {
+    case "CPWild":
+    case "CPLit":
+      break;
+    case "CPVar":
+      bound.add(pattern.name.original);
+      break;
+    case "CPCon":
+      for (const arg of pattern.args) {
+        collectPatternBindings(arg, bound);
+      }
+      break;
+    case "CPTuple":
+      for (const elem of pattern.elements) {
+        collectPatternBindings(elem, bound);
+      }
+      break;
+    case "CPRecord":
+      for (const f of pattern.fields) {
+        collectPatternBindings(f.pattern, bound);
+      }
+      break;
+    case "CPAs":
+      bound.add(pattern.name.original);
+      collectPatternBindings(pattern.pattern, bound);
+      break;
+    case "CPOr":
+      collectPatternBindings(pattern.left, bound);
+      break;
+  }
+};
+
+/**
+ * Build a dependency graph for a set of bindings.
+ * Returns a map from binding name to the set of binding names it depends on.
+ */
+const buildDependencyGraph = (bindings: readonly BindingInfo[]): Map<string, Set<string>> => {
+  const bindingNames = new Set(bindings.map((b) => b.name.original));
+  const graph = new Map<string, Set<string>>();
+
+  for (const binding of bindings) {
+    const freeVars = collectFreeVars(binding.value);
+    // Only include dependencies on other bindings in this group
+    const deps = new Set([...freeVars].filter((v) => bindingNames.has(v)));
+    graph.set(binding.name.original, deps);
+  }
+
+  return graph;
+};
+
+/**
+ * Tarjan's algorithm for finding strongly connected components.
+ * Returns SCCs in reverse topological order (dependencies come later).
+ */
+const findSCCs = (graph: Map<string, Set<string>>): string[][] => {
+  const index = new Map<string, number>();
+  const lowlink = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const sccs: string[][] = [];
+  let indexCounter = 0;
+
+  const strongconnect = (v: string): void => {
+    index.set(v, indexCounter);
+    lowlink.set(v, indexCounter);
+    indexCounter++;
+    stack.push(v);
+    onStack.add(v);
+
+    const successors = graph.get(v) ?? new Set();
+    for (const w of successors) {
+      if (!index.has(w)) {
+        strongconnect(w);
+        lowlink.set(v, Math.min(lowlink.get(v)!, lowlink.get(w)!));
+      } else if (onStack.has(w)) {
+        lowlink.set(v, Math.min(lowlink.get(v)!, index.get(w)!));
+      }
+    }
+
+    if (lowlink.get(v) === index.get(v)) {
+      const scc: string[] = [];
+      let w: string;
+      do {
+        w = stack.pop()!;
+        onStack.delete(w);
+        scc.push(w);
+      } while (w !== v);
+      sccs.push(scc);
+    }
+  };
+
+  for (const v of graph.keys()) {
+    if (!index.has(v)) {
+      strongconnect(v);
+    }
+  }
+
+  // Tarjan's algorithm produces SCCs in topological order:
+  // - When A depends on B, we recurse to B first
+  // - B's SCC is formed before A's SCC
+  // - So dependencies come before dependents in the output
+  return sccs;
+};
+
+/**
+ * Check if an SCC is self-recursive (single binding that references itself)
+ */
+const isSelfRecursive = (scc: string[], graph: Map<string, Set<string>>): boolean => {
+  if (scc.length !== 1) return false;
+  const name = scc[0]!;
+  const deps = graph.get(name) ?? new Set();
+  return deps.has(name);
 };
 
 // =============================================================================

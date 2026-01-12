@@ -290,81 +290,6 @@ const resolveCase = (ctx: ResolveContext, c: C.CCase): C.CCase => {
 };
 
 // =============================================================================
-// Declaration Resolution
-// =============================================================================
-
-const resolveDecl = (ctx: ResolveContext, decl: C.CDecl): [ResolveContext, C.CDecl] => {
-  switch (decl.kind) {
-    case "CDeclType": {
-      // Check for duplicate type definition
-      if (ctx.types.has(decl.name)) {
-        ctx.diagnostics.push(
-          diagError(
-            decl.span?.start ?? 0,
-            decl.span?.end ?? 0,
-            `Duplicate type definition: ${decl.name}`,
-          ),
-        );
-      }
-      // Check for duplicate constructor names
-      const newConstructors = new Set(ctx.constructors);
-      for (const con of decl.constructors) {
-        if (ctx.constructors.has(con.name)) {
-          ctx.diagnostics.push(
-            diagError(
-              decl.span?.start ?? 0,
-              decl.span?.end ?? 0,
-              `Duplicate constructor: ${con.name}`,
-            ),
-          );
-        }
-        newConstructors.add(con.name);
-      }
-      // Track type name
-      const newTypes = new Set(ctx.types);
-      newTypes.add(decl.name);
-      return [{ ...ctx, constructors: newConstructors, types: newTypes }, decl];
-    }
-
-    case "CDeclLet": {
-      const resolvedValue = resolveExpr(ctx, decl.value);
-      const [newCtx, name] = extendEnv(ctx, decl.name.original);
-
-      // If value is a constructor, add the binding name as a constructor alias
-      // This handles: use M (Constructor) → let Constructor = M.Constructor
-      let finalCtx = newCtx;
-      if (decl.value.kind === "CCon") {
-        const newConstructors = new Set(finalCtx.constructors);
-        newConstructors.add(decl.name.original);
-        const newAliases = new Map(finalCtx.constructorAliases);
-        newAliases.set(decl.name.original, decl.value.name);
-        finalCtx = { ...finalCtx, constructors: newConstructors, constructorAliases: newAliases };
-      }
-
-      return [finalCtx, C.cdecllet(name, resolvedValue, decl.span)];
-    }
-
-    case "CDeclLetRec": {
-      // Add all names first for mutual recursion
-      const originals = decl.bindings.map((b) => b.name.original);
-      const [newCtx, names] = extendEnvMany(ctx, originals);
-
-      const resolvedBindings = decl.bindings.map((b, i) => ({
-        name: names[i]!,
-        value: resolveExpr(newCtx, b.value),
-      }));
-
-      return [newCtx, C.cdeclletrec(resolvedBindings, decl.span)];
-    }
-
-    case "CDeclForeign": {
-      const [newCtx, name] = extendEnv(ctx, decl.name.original);
-      return [newCtx, C.cdeclforeign(name, decl.module, decl.jsName, decl.type, decl.span)];
-    }
-  }
-};
-
-// =============================================================================
 // Program Resolution
 // =============================================================================
 
@@ -386,12 +311,112 @@ export const resolveProgram = (
   // Add prelude bindings to initial environment
   ctx = { ...ctx, env: new Map([...ctx.env, ...preludeEnv]) };
 
+  // ==========================================================================
+  // First pass: collect all type declarations and binding names
+  // This allows bindings to reference each other regardless of declaration order
+  // ==========================================================================
+
+  const bindingNames = new Map<string, Name>();
+
+  for (const decl of program.decls) {
+    switch (decl.kind) {
+      case "CDeclType": {
+        // Register constructors and types
+        if (ctx.types.has(decl.name)) {
+          ctx.diagnostics.push(
+            diagError(
+              decl.span?.start ?? 0,
+              decl.span?.end ?? 0,
+              `Duplicate type definition: ${decl.name}`,
+            ),
+          );
+        }
+        const newConstructors = new Set(ctx.constructors);
+        for (const con of decl.constructors) {
+          if (ctx.constructors.has(con.name)) {
+            ctx.diagnostics.push(
+              diagError(
+                decl.span?.start ?? 0,
+                decl.span?.end ?? 0,
+                `Duplicate constructor: ${con.name}`,
+              ),
+            );
+          }
+          newConstructors.add(con.name);
+        }
+        const newTypes = new Set(ctx.types);
+        newTypes.add(decl.name);
+        ctx = { ...ctx, constructors: newConstructors, types: newTypes };
+        break;
+      }
+
+      case "CDeclLet":
+        bindingNames.set(decl.name.original, freshName(decl.name.original));
+        break;
+
+      case "CDeclLetRec":
+        for (const b of decl.bindings) {
+          bindingNames.set(b.name.original, freshName(b.name.original));
+        }
+        break;
+
+      case "CDeclForeign":
+        bindingNames.set(decl.name.original, freshName(decl.name.original));
+        break;
+    }
+  }
+
+  // Add all binding names to environment
+  const fullEnv = new Map(ctx.env);
+  for (const [original, name] of bindingNames) {
+    fullEnv.set(original, name);
+  }
+  ctx = { ...ctx, env: fullEnv };
+
+  // ==========================================================================
+  // Second pass: resolve all declarations with full environment
+  // ==========================================================================
+
   const resolvedDecls: C.CDecl[] = [];
 
   for (const decl of program.decls) {
-    const [newCtx, resolvedDecl] = resolveDecl(ctx, decl);
-    ctx = newCtx;
-    resolvedDecls.push(resolvedDecl);
+    switch (decl.kind) {
+      case "CDeclType":
+        resolvedDecls.push(decl);
+        break;
+
+      case "CDeclLet": {
+        const name = bindingNames.get(decl.name.original)!;
+        const resolvedValue = resolveExpr(ctx, decl.value);
+
+        // Track constructor aliases for use declarations
+        if (decl.value.kind === "CCon") {
+          const newConstructors = new Set(ctx.constructors);
+          newConstructors.add(decl.name.original);
+          const newAliases = new Map(ctx.constructorAliases);
+          newAliases.set(decl.name.original, decl.value.name);
+          ctx = { ...ctx, constructors: newConstructors, constructorAliases: newAliases };
+        }
+
+        resolvedDecls.push(C.cdecllet(name, resolvedValue, decl.span));
+        break;
+      }
+
+      case "CDeclLetRec": {
+        const resolvedBindings = decl.bindings.map((b) => ({
+          name: bindingNames.get(b.name.original)!,
+          value: resolveExpr(ctx, b.value),
+        }));
+        resolvedDecls.push(C.cdeclletrec(resolvedBindings, decl.span));
+        break;
+      }
+
+      case "CDeclForeign": {
+        const name = bindingNames.get(decl.name.original)!;
+        resolvedDecls.push(C.cdeclforeign(name, decl.module, decl.jsName, decl.type, decl.span));
+        break;
+      }
+    }
   }
 
   const resolvedExpr = program.expr ? resolveExpr(ctx, program.expr) : null;
