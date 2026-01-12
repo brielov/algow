@@ -72,7 +72,9 @@ export const typeMismatch = (
 ): Diagnostic => ({
   start,
   end,
-  message: context ? `Type mismatch in ${context}` : "Type mismatch",
+  message: context
+    ? `Type mismatch in ${context}: expected '${expected}', got '${actual}'`
+    : `Type mismatch: expected '${expected}', got '${actual}'`,
   severity: "error",
   kind: "type-mismatch",
   expected,

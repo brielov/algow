@@ -69,12 +69,12 @@ describe("Diagnostics", () => {
       expect(diag.kind).toBe("type-mismatch");
       expect(diag.expected).toBe("Int");
       expect(diag.actual).toBe("String");
-      expect(diag.message).toBe("Type mismatch");
+      expect(diag.message).toBe("Type mismatch: expected 'Int', got 'String'");
     });
 
     it("includes context in message when provided", () => {
       const diag = typeMismatch(0, 10, "Int", "String", "function argument");
-      expect(diag.message).toBe("Type mismatch in function argument");
+      expect(diag.message).toBe("Type mismatch in function argument: expected 'Int', got 'String'");
     });
   });
 
