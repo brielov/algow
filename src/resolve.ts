@@ -21,12 +21,18 @@ type ResolveContext = {
   readonly diagnostics: Diagnostic[];
   // Constructors are always in scope (from type declarations)
   readonly constructors: Set<string>;
+  // Track defined type names to detect duplicates
+  readonly types: Set<string>;
 };
 
-const createContext = (constructors: Set<string> = new Set()): ResolveContext => ({
+const createContext = (
+  constructors: Set<string> = new Set(),
+  types: Set<string> = new Set(),
+): ResolveContext => ({
   env: new Map(),
   diagnostics: [],
   constructors,
+  types,
 });
 
 const extendEnv = (ctx: ResolveContext, original: string): [ResolveContext, Name] => {
@@ -276,12 +282,26 @@ const resolveCase = (ctx: ResolveContext, c: C.CCase): C.CCase => {
 const resolveDecl = (ctx: ResolveContext, decl: C.CDecl): [ResolveContext, C.CDecl] => {
   switch (decl.kind) {
     case "CDeclType": {
-      // Add constructors to the set
+      // Check for duplicate type definition
+      if (ctx.types.has(decl.name)) {
+        ctx.diagnostics.push(
+          diagError(decl.span?.start ?? 0, decl.span?.end ?? 0, `Duplicate type definition: ${decl.name}`),
+        );
+      }
+      // Check for duplicate constructor names
       const newConstructors = new Set(ctx.constructors);
       for (const con of decl.constructors) {
+        if (ctx.constructors.has(con.name)) {
+          ctx.diagnostics.push(
+            diagError(decl.span?.start ?? 0, decl.span?.end ?? 0, `Duplicate constructor: ${con.name}`),
+          );
+        }
         newConstructors.add(con.name);
       }
-      return [{ ...ctx, constructors: newConstructors }, decl];
+      // Track type name
+      const newTypes = new Set(ctx.types);
+      newTypes.add(decl.name);
+      return [{ ...ctx, constructors: newConstructors, types: newTypes }, decl];
     }
 
     case "CDeclLet": {
@@ -323,10 +343,11 @@ export const resolveProgram = (
   program: C.CProgram,
   preludeEnv: Map<string, Name> = new Map(),
   preludeConstructors: Set<string> = new Set(),
+  preludeTypes: Set<string> = new Set(),
 ): ResolveResult => {
   resetNameCounter();
 
-  let ctx = createContext(preludeConstructors);
+  let ctx = createContext(preludeConstructors, preludeTypes);
 
   // Add prelude bindings to initial environment
   ctx = { ...ctx, env: new Map([...ctx.env, ...preludeEnv]) };
