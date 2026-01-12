@@ -1137,8 +1137,12 @@ if (x[0] === 0) {
 
 // Or with switch for many cases:
 switch (x[0]) {
-  case 0: /* Nil */ break;
-  case 1: /* Cons */ const h = x[1]; const t = x[2]; break;
+  case 0:
+    /* Nil */ break;
+  case 1:
+    /* Cons */ const h = x[1];
+    const t = x[2];
+    break;
 }
 ```
 
@@ -1285,7 +1289,7 @@ const _t348 = double(5);
 ```javascript
 // WRONG
 const _t502 = sumList(rest);
-const _t503 = (x + _t502);
+const _t503 = x + _t502;
 return _t503;
 
 // CORRECT
@@ -1325,8 +1329,12 @@ const result = m[0] === 0 ? def : m[1];
 // OR with switch for many branches
 let result;
 switch (m[0]) {
-  case 0: result = def; break;    // Nothing
-  case 1: result = m[1]; break;   // Just
+  case 0:
+    result = def;
+    break; // Nothing
+  case 1:
+    result = m[1];
+    break; // Just
 }
 ```
 
@@ -1388,12 +1396,13 @@ const total = sumList(nums);
 ```javascript
 sumList = (xs) => {
   const _t504 = ((_s) => {
-    if (_s === null) { return 0; }
-    else {
+    if (_s === null) {
+      return 0;
+    } else {
       const x = _s.h;
       const rest = _s.t;
       const _t502 = $apply(sumList, rest);
-      const _t503 = (x + _t502);
+      const _t503 = x + _t502;
       return _t503;
     }
   })(xs);

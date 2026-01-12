@@ -1474,17 +1474,17 @@ use List (List(..))
 
 ```typescript
 type Token = {
-  tag: TokenTag
-  value?: string | number
-  loc: SourceLocation
-}
+  tag: TokenTag;
+  value?: string | number;
+  loc: SourceLocation;
+};
 
 type SourceLocation = {
-  file: string
-  line: number
-  column: number
-  offset: number
-}
+  file: string;
+  line: number;
+  column: number;
+  offset: number;
+};
 ```
 
 #### Surface AST
@@ -1505,7 +1505,7 @@ type SurfaceExpr =
   | { tag: "Tuple"; elements: SurfaceExpr[]; loc: Loc }
   | { tag: "Record"; fields: Field[]; loc: Loc }
   | { tag: "FieldAccess"; record: SurfaceExpr; field: string; loc: Loc }
-  | { tag: "List"; elements: SurfaceExpr[]; loc: Loc }
+  | { tag: "List"; elements: SurfaceExpr[]; loc: Loc };
 ```
 
 #### Bound AST
@@ -1514,10 +1514,10 @@ Same structure as Surface AST, but identifiers are replaced with symbols:
 
 ```typescript
 type Symbol = {
-  id: number           // unique identifier
-  name: string         // original name (for error messages)
-  kind: SymbolKind     // Value | Type | Constructor | Module
-}
+  id: number; // unique identifier
+  name: string; // original name (for error messages)
+  kind: SymbolKind; // Value | Type | Constructor | Module
+};
 ```
 
 #### Core AST
@@ -1533,13 +1533,13 @@ type CoreExpr =
   | { tag: "FieldAccess"; record: CoreExpr; field: string; type: Type }
   | { tag: "Constructor"; name: string; type: Type }
   | { tag: "Literal"; value: Literal; type: Type }
-  | { tag: "Foreign"; module: string; name: string; type: Type }
+  | { tag: "Foreign"; module: string; name: string; type: Type };
 
 type CoreBranch = {
-  constructor: string
-  bindings: Symbol[]
-  body: CoreExpr
-}
+  constructor: string;
+  bindings: Symbol[];
+  body: CoreExpr;
+};
 ```
 
 #### Types
@@ -1549,17 +1549,17 @@ type Type =
   | { tag: "Var"; id: number }
   | { tag: "Arrow"; param: Type; result: Type }
   | { tag: "Constructor"; name: string; args: Type[] }
-  | { tag: "Record"; row: Row }
+  | { tag: "Record"; row: Row };
 
 type Row =
   | { tag: "Empty" }
   | { tag: "Extend"; label: string; type: Type; rest: Row }
-  | { tag: "RowVar"; id: number }
+  | { tag: "RowVar"; id: number };
 
 type TypeScheme = {
-  quantified: number[]    // bound type variable IDs
-  body: Type
-}
+  quantified: number[]; // bound type variable IDs
+  body: Type;
+};
 ```
 
 ---

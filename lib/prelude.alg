@@ -7,8 +7,6 @@
 -- Data Types
 -- =============================================================================
 
-type Unit = Unit
-
 type Maybe a = Nothing | Just a
 
 type Either a b = Left a | Right b
@@ -19,48 +17,10 @@ type IOError
   = FileNotFound string
   | PermissionDenied string
   | IsDirectory string
+  | NotDirectory string
   | AlreadyExists string
+  | NotEmpty string
   | UnknownError string
-
--- =============================================================================
--- Operators (foreign)
--- =============================================================================
-
-module Operators
-  foreign (+) : int -> int -> int
-  foreign (-) : int -> int -> int
-  foreign (*) : int -> int -> int
-  foreign (/) : int -> int -> int
-  foreign (==) : a -> a -> bool
-  foreign (!=) : a -> a -> bool
-  foreign (<) : a -> a -> bool
-  foreign (<=) : a -> a -> bool
-  foreign (>) : a -> a -> bool
-  foreign (>=) : a -> a -> bool
-end
-
--- =============================================================================
--- Bool Functions
--- =============================================================================
-
-module Bool
-  let not = b -> if b then false else true
-  let eq = a b -> if a then b else not b
-end
-
--- Top-level re-exports for convenience
-let not = Bool.not
-
--- =============================================================================
--- Core Functions
--- =============================================================================
-
-module Core
-  let id = x -> x
-  let const = x y -> x
-  let compose = f g x -> f (g x)
-  let flip = f a b -> f b a
-end
 
 -- =============================================================================
 -- Maybe Functions
@@ -443,14 +403,6 @@ end
 module IO
   foreign print : string -> unit
   foreign printLine : string -> unit
-  foreign readLine : unit -> Either IOError string
-  foreign readFile : string -> Either IOError string
-  foreign writeFile : string -> string -> Either IOError unit
-  foreign appendFile : string -> string -> Either IOError unit
-  foreign fileExists : string -> bool
-  foreign deleteFile : string -> Either IOError unit
-  foreign isDirectory : string -> bool
-  foreign readDir : string -> Either IOError (List string)
   foreign args : unit -> List string
   foreign exit : int -> unit
   foreign getEnv : string -> Maybe string
@@ -500,4 +452,43 @@ module Set
   foreign union : Set -> Set -> Set
   foreign intersect : Set -> Set -> Set
   foreign difference : Set -> Set -> Set
+end
+
+-- =============================================================================
+-- File Functions (foreign)
+-- =============================================================================
+
+module File
+  foreign read   : string -> Either IOError string
+  foreign write  : string -> string -> Either IOError unit
+  foreign append : string -> string -> Either IOError unit
+  foreign remove : string -> Either IOError unit
+  foreign copy   : string -> string -> Either IOError unit
+  foreign rename : string -> string -> Either IOError unit
+  foreign touch  : string -> Either IOError unit
+  foreign exists : string -> bool
+  foreign size   : string -> Either IOError int
+end
+
+-- =============================================================================
+-- Dir Functions (foreign)
+-- =============================================================================
+
+module Dir
+  foreign create : string -> Either IOError unit
+  foreign remove : string -> Either IOError unit
+  foreign list   : string -> Either IOError (List string)
+  foreign exists : string -> bool
+end
+
+-- =============================================================================
+-- Path Functions (foreign)
+-- =============================================================================
+
+module Path
+  foreign join       : string -> string -> string
+  foreign dirname    : string -> string
+  foreign basename   : string -> string
+  foreign extension  : string -> Maybe string
+  foreign isAbsolute : string -> bool
 end
