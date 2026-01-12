@@ -380,6 +380,12 @@ const nameToJs = (name: Name): string => {
   return JS_RESERVED.has(result) ? `$${result}` : result;
 };
 
+/** Convert a constructor name (which may contain dots) to a valid JS identifier */
+const conNameToJs = (name: string): string => {
+  const result = name.replace(/[^a-zA-Z0-9_$]/g, "_");
+  return JS_RESERVED.has(result) ? `$${result}` : result;
+};
+
 /** Get the tag for a constructor */
 const getConstructorTag = (ctx: CodeGenContext, typeName: string, conName: string): number => {
   const typeMap = ctx.tagMap.get(typeName);
@@ -424,8 +430,8 @@ const genAtom = (ctx: CodeGenContext, atom: IR.Atom): string => {
         return "((h) => (t) => ({ h, t }))";
       }
       // Other constructors are declared as variables during type declaration
-      // processing, so just reference them by name
-      return atom.name;
+      // processing, so just reference them by sanitized name
+      return conNameToJs(atom.name);
     }
   }
 };
@@ -541,7 +547,9 @@ const genLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
   ctx.indent--;
 
   if (bodyLines.length === 0) {
-    return `(${param}) => ${bodyResult}`;
+    // Wrap object literals in parentheses to avoid ambiguity with function body
+    const result = bodyResult.startsWith("{") ? `(${bodyResult})` : bodyResult;
+    return `(${param}) => ${result}`;
   }
 
   const indentation = "  ".repeat(ctx.indent + 1);
@@ -659,6 +667,10 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   const scrutineeVar = isSimpleVar ? nameToJs(match.scrutinee.name) : freshScrutinee(ctx);
   const scrutineeExpr = isSimpleVar ? null : genAtom(ctx, match.scrutinee);
 
+  // Check if any case has a guard - if so, we need separate if blocks (not else-if)
+  // to allow fallthrough when guards fail
+  const hasGuards = match.cases.some((c) => c.guard !== null);
+
   const lines: string[] = [];
   if (isSimpleVar) {
     lines.push("(() => {");
@@ -671,14 +683,47 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
     const { condition, bindings } = genPatternMatch(ctx, scrutineeVar, case_.pattern);
     const isLast = i === match.cases.length - 1;
 
-    // Use plain 'else' for last case (type checker ensures exhaustiveness)
+    // Generate guard code first to determine combined condition
+    let guardCode: string | null = null;
+    const guardLines: string[] = [];
+    if (case_.guard) {
+      ctx.indent += 2;
+      const savedLines = ctx.lines;
+      ctx.lines = guardLines;
+      guardCode = genExpr(ctx, case_.guard);
+      ctx.lines = savedLines;
+      ctx.indent -= 2;
+    }
+
+    // When there are guards, use separate if blocks to allow fallthrough
+    // When no guards, use if/else-if chain for efficiency
     let prefix: string;
-    if (i === 0) {
-      prefix = `if (${condition})`;
-    } else if (isLast) {
-      prefix = "} else";
+    let combineGuard = false;
+    if (hasGuards) {
+      // With guards: use separate if blocks (no else) to allow fallthrough
+      // Only combine guard with condition if:
+      // 1. No intermediate guard computations needed
+      // 2. No bindings needed (bindings must be available before guard check)
+      if (guardCode && guardLines.length === 0 && bindings.length === 0) {
+        // Simple guard with no bindings - combine with pattern condition
+        if (condition === "true") {
+          prefix = `if (${guardCode})`;
+        } else {
+          prefix = `if ((${condition}) && (${guardCode}))`;
+        }
+        combineGuard = true;
+      } else {
+        prefix = `if (${condition})`;
+      }
     } else {
-      prefix = `} else if (${condition})`;
+      // No guards: use if/else-if chain
+      if (i === 0) {
+        prefix = `if (${condition})`;
+      } else if (isLast) {
+        prefix = "} else";
+      } else {
+        prefix = `} else if (${condition})`;
+      }
     }
     lines.push(`  ${prefix} {`);
 
@@ -687,19 +732,9 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
       lines.push(`    const ${name} = ${expr};`);
     }
 
-    // Generate guard if present
-    let guardCode: string | null = null;
-    if (case_.guard) {
-      ctx.indent += 2;
-      const guardLines: string[] = [];
-      const savedLines = ctx.lines;
-      ctx.lines = guardLines;
-      guardCode = genExpr(ctx, case_.guard);
-      ctx.lines = savedLines;
-      ctx.indent -= 2;
-      for (const line of guardLines) {
-        lines.push("    " + line.trimStart());
-      }
+    // Emit guard computation lines if any
+    for (const line of guardLines) {
+      lines.push("    " + line.trimStart());
     }
 
     // Generate body
@@ -717,14 +752,22 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
       lines.push("    " + line.trimStart());
     }
 
-    if (guardCode) {
+    if (guardCode && !combineGuard) {
+      // Guard wasn't combined - need nested if for guard check
       lines.push(`    if (${guardCode}) return ${bodyResult};`);
     } else {
       lines.push(`    return ${bodyResult};`);
     }
+
+    // Close the if block
+    if (hasGuards) {
+      lines.push("  }");
+    }
   }
 
-  lines.push("  }");
+  if (!hasGuards) {
+    lines.push("  }");
+  }
   if (isSimpleVar) {
     lines.push("})()");
   } else {
@@ -888,9 +931,14 @@ const genDecl = (ctx: CodeGenContext, decl: IR.IRDecl): void => {
       // Generate constructor functions for non-List types
       if (decl.name !== "List") {
         for (const con of decl.constructors) {
+          const jsConName = conNameToJs(con.name);
+          // Skip if already declared (avoid duplicates from multi-file compilation)
+          if (ctx.declaredNames.has(jsConName)) {
+            continue;
+          }
           if (con.arity === 0) {
             // Nullary constructor
-            emit(ctx, `const ${con.name} = [${con.tag}];`);
+            emit(ctx, `const ${jsConName} = [${con.tag}];`);
           } else {
             // Constructor with args - generate curried function
             const params = Array.from({ length: con.arity }, (_, i) => `_${i}`);
@@ -904,9 +952,9 @@ const genDecl = (ctx: CodeGenContext, decl: IR.IRDecl): void => {
             for (let i = con.arity - 1; i >= 0; i--) {
               func = `(${params[i]}) => ${func}`;
             }
-            emit(ctx, `const ${con.name} = ${func};`);
+            emit(ctx, `const ${jsConName} = ${func};`);
           }
-          ctx.declaredNames.add(con.name);
+          ctx.declaredNames.add(jsConName);
         }
       }
       break;

@@ -42,6 +42,8 @@ type LowerContext = {
   subst: Subst;
   /** Map from Name.id to type */
   typeMap: ReadonlyMap<number, Type>;
+  /** Map from span.start to instantiated type for expressions */
+  exprTypeMap: ReadonlyMap<number, Type>;
   /** Type environment - used to lookup constructor types */
   typeEnv: TypeEnv;
 };
@@ -50,6 +52,7 @@ const createContext = (checkOutput: CheckOutput): LowerContext => ({
   varCounter: 0,
   subst: checkOutput.subst,
   typeMap: checkOutput.typeMap,
+  exprTypeMap: checkOutput.exprTypeMap,
   typeEnv: checkOutput.typeEnv,
 });
 
@@ -78,16 +81,26 @@ const lookupType = (ctx: LowerContext, name: Name): Type => {
   return { kind: "TVar", name: `?${name.original}` };
 };
 
-/** Get the return type of a function type */
-const getReturnType = (type: Type): Type => {
-  if (type.kind === "TFun") {
-    return type.ret;
+/** Look up the instantiated type of an expression by its span */
+const lookupExprType = (ctx: LowerContext, span: C.CExpr["span"]): Type | undefined => {
+  if (!span) return undefined;
+  const type = ctx.exprTypeMap.get(span.start);
+  if (type) {
+    return applySubst(ctx.subst, type);
   }
-  return { kind: "TVar", name: "_ret" };
+  return undefined;
 };
 
-/** Get constructor argument types from the type environment */
-const getConstructorArgTypes = (ctx: LowerContext, conName: string): Type[] => {
+/**
+ * Get constructor argument types, specialized to the scrutinee type.
+ * E.g., for Just matching against Maybe (Maybe int), returns [Maybe int]
+ * instead of the generic [a].
+ */
+const getConstructorArgTypes = (
+  ctx: LowerContext,
+  conName: string,
+  scrutineeType: Type,
+): Type[] => {
   // Look up constructor scheme in typeEnv
   const scheme = ctx.typeEnv.get(conName);
   if (!scheme) return [];
@@ -102,7 +115,50 @@ const getConstructorArgTypes = (ctx: LowerContext, conName: string): Type[] => {
     current = current.ret;
   }
 
-  return argTypes;
+  // current is now the return type of the constructor (e.g., Maybe a)
+  // Build a substitution by matching current against scrutineeType
+  const subst = matchTypes(current, scrutineeType);
+
+  // Apply substitution to specialize argument types
+  return argTypes.map((t) => applySubst(subst, t));
+};
+
+/**
+ * Match a pattern type against a concrete type to build a substitution.
+ * This is a simple one-way pattern match (not full unification).
+ */
+const matchTypes = (pattern: Type, concrete: Type): Map<string, Type> => {
+  const subst = new Map<string, Type>();
+
+  const match = (p: Type, c: Type): void => {
+    if (p.kind === "TVar") {
+      // Type variable matches anything
+      subst.set(p.name, c);
+    } else if (p.kind === "TCon" && c.kind === "TCon" && p.name === c.name) {
+      // Same type constructor
+    } else if (p.kind === "TApp" && c.kind === "TApp") {
+      // Match type application
+      match(p.con, c.con);
+      match(p.arg, c.arg);
+    } else if (p.kind === "TFun" && c.kind === "TFun") {
+      // Match function types
+      match(p.param, c.param);
+      match(p.ret, c.ret);
+    } else if (
+      p.kind === "TTuple" &&
+      c.kind === "TTuple" &&
+      p.elements.length === c.elements.length
+    ) {
+      // Match tuple types
+      for (let i = 0; i < p.elements.length; i++) {
+        match(p.elements[i]!, c.elements[i]!);
+      }
+    }
+    // Other cases: no match, skip
+  };
+
+  match(pattern, concrete);
+  return subst;
 };
 
 /** Get literal type */
@@ -340,9 +396,13 @@ const lowerApp = (ctx: LowerContext, expr: C.CApp): IR.IRExpr => {
   const funcResult = normalize(ctx, expr.func);
   const argResult = normalize(ctx, expr.arg);
 
-  // Get return type from function type
-  const funcType = funcResult.atom.type;
-  const returnType = getReturnType(funcType);
+  // Get return type - prefer span-based lookup for polymorphic instantiation
+  let returnType = lookupExprType(ctx, expr.span);
+  if (!returnType) {
+    // Fall back to deriving from function type
+    const funcType = funcResult.atom.type;
+    returnType = funcType.kind === "TFun" ? funcType.ret : tvar("_ret");
+  }
 
   // Create application binding
   const binding = IR.irbapp(funcResult.atom, argResult.atom, returnType);
@@ -815,10 +875,14 @@ const lowerPattern = (
       return IR.irplit(pattern.value);
 
     case "CPCon": {
-      // Get constructor argument types
-      const argTypes = getConstructorArgTypes(ctx, pattern.name);
+      // Get constructor argument types, specialized to the scrutinee type
+      const argTypes = getConstructorArgTypes(ctx, pattern.name, scrutineeType);
       const args = pattern.args.map((arg, i) => {
-        const argType = argTypes[i] ?? { kind: "TVar" as const, name: `_arg${i}` };
+        // Apply substitution to resolve nested type variables
+        const argType = applySubst(
+          ctx.subst,
+          argTypes[i] ?? { kind: "TVar" as const, name: `_arg${i}` },
+        );
         return lowerPattern(ctx, arg, argType);
       });
       return IR.irpcon(pattern.name, args, scrutineeType);

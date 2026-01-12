@@ -320,6 +320,52 @@ const desugarDo = (stmts: readonly S.SDoStmt[], span?: S.Span): C.CExpr => {
 // Pattern Desugaring (Section 6.3)
 // =============================================================================
 
+/**
+ * Collect all variable names bound by a pattern.
+ * Used for shadowing module names in guard and body expressions.
+ */
+const collectPatternBindings = (pattern: S.SPattern): Set<string> => {
+  const bindings = new Set<string>();
+
+  const collect = (p: S.SPattern): void => {
+    switch (p.kind) {
+      case "SPWild":
+      case "SPLit":
+        break;
+      case "SPVar":
+        bindings.add(p.name);
+        break;
+      case "SPCon":
+        for (const arg of p.args) collect(arg);
+        break;
+      case "SPTuple":
+        for (const elem of p.elements) collect(elem);
+        break;
+      case "SPRecord":
+        for (const f of p.fields) collect(f.pattern);
+        break;
+      case "SPAs":
+        bindings.add(p.name);
+        collect(p.pattern);
+        break;
+      case "SPOr":
+        // For or-patterns, both branches bind the same variables
+        collect(p.left);
+        break;
+      case "SPCons":
+        collect(p.head);
+        collect(p.tail);
+        break;
+      case "SPList":
+        for (const elem of p.elements) collect(elem);
+        break;
+    }
+  };
+
+  collect(pattern);
+  return bindings;
+};
+
 const desugarPattern = (pattern: S.SPattern): C.CPattern => {
   switch (pattern.kind) {
     case "SPWild":
@@ -630,23 +676,44 @@ const desugarExprInModuleWithImports = (
         expr.span,
       );
 
-    case "SLet":
+    case "SLet": {
+      // The bound name shadows module names in the body
+      const shadowedModuleNames = new Set(moduleNames);
+      const shadowedImportedNames = new Map(importedNames);
+      shadowedModuleNames.delete(expr.name);
+      shadowedImportedNames.delete(expr.name);
       return C.clet(
         { id: -1, original: expr.name },
         recurse(expr.value),
-        recurse(expr.body),
+        desugarExprInModuleWithImports(
+          expr.body,
+          moduleName,
+          shadowedModuleNames,
+          shadowedImportedNames,
+        ),
         expr.span,
       );
+    }
 
-    case "SLetRec":
+    case "SLetRec": {
+      // All bound names shadow in all values and body
+      const shadowedModuleNames = new Set(moduleNames);
+      const shadowedImportedNames = new Map(importedNames);
+      for (const b of expr.bindings) {
+        shadowedModuleNames.delete(b.name);
+        shadowedImportedNames.delete(b.name);
+      }
+      const recurseWithShadow = (e: S.SExpr): C.CExpr =>
+        desugarExprInModuleWithImports(e, moduleName, shadowedModuleNames, shadowedImportedNames);
       return C.cletrec(
         expr.bindings.map((b) => ({
           name: { id: -1, original: b.name },
-          value: recurse(b.value),
+          value: recurseWithShadow(b.value),
         })),
-        recurse(expr.body),
+        recurseWithShadow(expr.body),
         expr.span,
       );
+    }
 
     case "SIf":
       return C.cmatch(
@@ -669,16 +736,33 @@ const desugarExprInModuleWithImports = (
     case "SMatch":
       return C.cmatch(
         recurse(expr.scrutinee),
-        expr.cases.map((c) => ({
-          pattern: desugarPatternInModuleWithImports(
-            c.pattern,
-            moduleName,
-            moduleNames,
-            importedNames,
-          ),
-          guard: c.guard ? recurse(c.guard) : null,
-          body: recurse(c.body),
-        })),
+        expr.cases.map((c) => {
+          // Pattern bindings shadow module names in guard and body
+          const patternBindings = collectPatternBindings(c.pattern);
+          const shadowedModuleNames = new Set(moduleNames);
+          const shadowedImportedNames = new Map(importedNames);
+          for (const name of patternBindings) {
+            shadowedModuleNames.delete(name);
+            shadowedImportedNames.delete(name);
+          }
+          const recurseWithShadow = (e: S.SExpr): C.CExpr =>
+            desugarExprInModuleWithImports(
+              e,
+              moduleName,
+              shadowedModuleNames,
+              shadowedImportedNames,
+            );
+          return {
+            pattern: desugarPatternInModuleWithImports(
+              c.pattern,
+              moduleName,
+              moduleNames,
+              importedNames,
+            ),
+            guard: c.guard ? recurseWithShadow(c.guard) : null,
+            body: recurseWithShadow(c.body),
+          };
+        }),
         expr.span,
       );
 
@@ -804,7 +888,20 @@ const desugarAbsInModuleWithImports = (
     return desugarExprInModuleWithImports(body, moduleName, moduleNames, importedNames);
   }
 
-  let result = desugarExprInModuleWithImports(body, moduleName, moduleNames, importedNames);
+  // Parameters shadow module-level names, so remove them from moduleNames
+  const shadowedModuleNames = new Set(moduleNames);
+  const shadowedImportedNames = new Map(importedNames);
+  for (const param of params) {
+    shadowedModuleNames.delete(param);
+    shadowedImportedNames.delete(param);
+  }
+
+  let result = desugarExprInModuleWithImports(
+    body,
+    moduleName,
+    shadowedModuleNames,
+    shadowedImportedNames,
+  );
   for (let i = params.length - 1; i >= 0; i--) {
     result = C.cabs({ id: -1, original: params[i]! }, result, i === 0 ? span : undefined);
   }

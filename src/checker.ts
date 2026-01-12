@@ -53,6 +53,8 @@ type CheckContext = {
   readonly aliasRegistry: AliasRegistry;
   // Map from Name.id to inferred type (for LSP/lowering)
   readonly typeMap: Map<number, Type>;
+  // Map from span.start to instantiated type (for polymorphic expressions)
+  readonly exprTypeMap: Map<number, Type>;
 };
 
 const createContext = (
@@ -63,6 +65,7 @@ const createContext = (
   registry,
   aliasRegistry,
   typeMap: new Map(),
+  exprTypeMap: new Map(),
 });
 
 const addError = (ctx: CheckContext, message: string, span?: C.CExpr["span"]): void => {
@@ -73,6 +76,13 @@ const addError = (ctx: CheckContext, message: string, span?: C.CExpr["span"]): v
 
 const recordType = (ctx: CheckContext, name: Name, type: Type): void => {
   ctx.typeMap.set(name.id, type);
+};
+
+/** Record the instantiated type of an expression by its span position */
+const recordExprType = (ctx: CheckContext, span: C.CExpr["span"], type: Type): void => {
+  if (span) {
+    ctx.exprTypeMap.set(span.start, type);
+  }
 };
 
 // =============================================================================
@@ -251,6 +261,8 @@ const inferVar = (ctx: CheckContext, env: TypeEnv, expr: C.CVar): InferResult =>
   }
 
   const type = instantiate(s);
+  // Record the instantiated type for polymorphic resolution during lowering
+  recordExprType(ctx, expr.span, type);
   return [new Map(), type, [...s.constraints]];
 };
 
@@ -277,7 +289,10 @@ const inferApp = (ctx: CheckContext, env: TypeEnv, expr: C.CApp): InferResult =>
   const funcType = tfun(t2, resultType);
   const s3 = unify(ctx, applySubst(s2, t1), funcType, expr.span);
 
-  return [composeSubst(composeSubst(s1, s2), s3), applySubst(s3, resultType), [...c1, ...c2]];
+  const finalResultType = applySubst(s3, resultType);
+  // Record the result type of the application for polymorphic resolution during lowering
+  recordExprType(ctx, expr.span, finalResultType);
+  return [composeSubst(composeSubst(s1, s2), s3), finalResultType, [...c1, ...c2]];
 };
 
 const inferAbs = (ctx: CheckContext, env: TypeEnv, expr: C.CAbs): InferResult => {
@@ -730,6 +745,8 @@ export type CheckOutput = {
   readonly typeEnv: TypeEnv;
   readonly constructorRegistry: ConstructorRegistry;
   readonly typeMap: ReadonlyMap<number, Type>;
+  // Map from span.start to instantiated type (for polymorphic expressions)
+  readonly exprTypeMap: ReadonlyMap<number, Type>;
 };
 
 export const checkProgram = (
@@ -856,6 +873,7 @@ export const checkProgram = (
     typeEnv: env,
     constructorRegistry: ctx.registry,
     typeMap: ctx.typeMap,
+    exprTypeMap: ctx.exprTypeMap,
   };
 };
 
