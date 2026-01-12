@@ -13,12 +13,11 @@
 
 import type * as IR from "./ir";
 import type { Name } from "./core";
+import { getRuntime, type Target, DEFAULT_TARGET } from "./runtime";
 
-// =============================================================================
-// Runtime (imported from external file)
-// =============================================================================
-
-const RUNTIME = await Bun.file(new URL("./runtime.js", import.meta.url)).text();
+// Re-export Target type for external use
+export type { Target } from "./runtime";
+export { TARGETS, DEFAULT_TARGET, isValidTarget } from "./runtime";
 
 // =============================================================================
 // Code Generation Context
@@ -736,6 +735,11 @@ const genDecl = (ctx: CodeGenContext, decl: IR.IRDecl): void => {
 // Program Generation
 // =============================================================================
 
+export type CodeGenOptions = {
+  /** Target platform (default: "node") */
+  readonly target?: Target;
+};
+
 export type CodeGenOutput = {
   readonly code: string;
 };
@@ -743,7 +747,8 @@ export type CodeGenOutput = {
 /**
  * Generate JavaScript from IR program.
  */
-export const generateJS = (program: IR.IRProgram): CodeGenOutput => {
+export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}): CodeGenOutput => {
+  const { target = DEFAULT_TARGET } = options;
   const ctx = createContext();
 
   // Generate declarations
@@ -758,8 +763,9 @@ export const generateJS = (program: IR.IRProgram): CodeGenOutput => {
   }
 
   // Combine runtime + generated code
+  const runtime = getRuntime(target);
   const code = [
-    RUNTIME,
+    runtime,
     "// Generated code",
     ...ctx.lines,
     program.main ? `const $result = ${mainCode};` : "",
@@ -774,7 +780,12 @@ export const generateJS = (program: IR.IRProgram): CodeGenOutput => {
 /**
  * Generate JavaScript from a single IR expression (for testing).
  */
-export const generateExprJS = (expr: IR.IRExpr, typeDecls: IR.IRDeclType[] = []): CodeGenOutput => {
+export const generateExprJS = (
+  expr: IR.IRExpr,
+  typeDecls: IR.IRDeclType[] = [],
+  options: CodeGenOptions = {},
+): CodeGenOutput => {
+  const { target = DEFAULT_TARGET } = options;
   const ctx = createContext();
 
   // Process type declarations for tag assignments
@@ -788,8 +799,9 @@ export const generateExprJS = (expr: IR.IRExpr, typeDecls: IR.IRDeclType[] = [])
 
   const result = genExpr(ctx, expr);
 
+  const runtime = getRuntime(target);
   const code = [
-    RUNTIME,
+    runtime,
     "// Generated code",
     ...ctx.lines,
     `const $result = ${result};`,

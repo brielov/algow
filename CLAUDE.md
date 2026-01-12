@@ -36,6 +36,7 @@ Top-down operator precedence parser producing Surface AST. Collects diagnostics 
 ### `src/desugar.ts` — Desugaring
 
 Transforms Surface AST to Core AST. Removes all sugar:
+
 - Multi-param lambdas → nested single-param lambdas
 - Pipe `x |> f` → `f x`
 - Cons `x :: xs` → `Cons x xs`
@@ -49,6 +50,7 @@ Minimal canonical representation: `CExpr`, `CPattern`. Names have unique IDs (`N
 ### `src/resolve.ts` — Name Resolution
 
 Assigns unique `Name.id` values to all bindings. Handles:
+
 - Scope tracking and shadowing
 - Constructor resolution from type declarations
 - SCC analysis for mutual recursion (order-independent top-level bindings)
@@ -61,6 +63,7 @@ Internal types for inference: `TVar`, `TCon`, `TApp`, `TFun`, `TTuple`, `TRecord
 ### `src/checker.ts` — Type Inference (Algorithm W)
 
 Core type checker operating on resolved Core AST. Key concepts:
+
 - **Unification**: `unify(ctx, t1, t2)` finds substitution making types equal
 - **Generalization**: Creates polymorphic schemes at let-bindings
 - **Row polymorphism**: `{ x: t | ρ }` for extensible records
@@ -84,6 +87,7 @@ Constant folding, dead code elimination, simple inlining.
 ### `src/codegen.ts` — JavaScript Backend
 
 Generates JS from IR. Runtime representations:
+
 - Lists: `Nil` → `null`, `Cons h t` → `{ h, t }`
 - Other ADTs: `[tag, arg1, arg2, ...]` with numeric tags
 - Tuples: Arrays

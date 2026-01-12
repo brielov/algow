@@ -10,7 +10,14 @@
 
 import { Command } from "commander";
 import { Glob } from "bun";
-import { compile, type SourceFile } from "./compile";
+import {
+  compile,
+  type SourceFile,
+  type Target,
+  TARGETS,
+  isValidTarget,
+  DEFAULT_TARGET,
+} from "./compile";
 import { format } from "./format";
 import type { Diagnostic } from "./diagnostics";
 
@@ -149,7 +156,10 @@ const loadSources = async (patterns: string[]): Promise<SourceFile[]> => {
 };
 
 /** Run compilation and handle diagnostics/exit. */
-const run = async (patterns: string[], options: { typeCheckOnly: boolean }): Promise<void> => {
+const run = async (
+  patterns: string[],
+  options: { typeCheckOnly: boolean; target?: Target },
+): Promise<void> => {
   const sources = await loadSources(patterns);
   const result = compile(sources, options);
 
@@ -174,13 +184,30 @@ const run = async (patterns: string[], options: { typeCheckOnly: boolean }): Pro
 
 const program = new Command();
 
-program.name("algow").description("The Algow programming language compiler").version("0.1.0");
+program
+  .name("algow")
+  .description("The Algow programming language compiler")
+  .version("0.1.0")
+  .enablePositionalOptions();
 
 program
   .command("compile")
   .description("Compile source files to JavaScript")
   .argument("<files...>", "Source files or glob patterns")
-  .action((files) => run(files, { typeCheckOnly: false }));
+  .option(
+    `-t, --target <target>`,
+    `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
+  )
+  .action((files, options: { target?: string }) => {
+    const target = options.target;
+    if (target && !isValidTarget(target)) {
+      console.error(
+        `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
+      );
+      process.exit(1);
+    }
+    run(files, { typeCheckOnly: false, target: target as Target | undefined });
+  });
 
 program
   .command("check")
@@ -250,13 +277,24 @@ program
 program
   .argument("[file]", "Source file to compile")
   .option("-c, --compile", "Compile to JavaScript (default)")
-  .option("-t, --typecheck", "Type check only")
-  .action(async (file, options) => {
+  .option("-T, --typecheck", "Type check only")
+  .option(
+    `--target <target>`,
+    `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
+  )
+  .action(async (file, options: { compile?: boolean; typecheck?: boolean; target?: string }) => {
     if (!file) {
       program.help();
       return;
     }
-    await run([file], { typeCheckOnly: !!options.typecheck });
+    const target = options.target;
+    if (target && !isValidTarget(target)) {
+      console.error(
+        `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
+      );
+      process.exit(1);
+    }
+    await run([file], { typeCheckOnly: !!options.typecheck, target: target as Target | undefined });
   });
 
 program.parse();

@@ -11,10 +11,14 @@ import { resolveProgram } from "./resolve";
 import { checkProgram, typeToString } from "./checker";
 import { lowerProgram } from "./lower";
 import { optimize } from "./optimize";
-import { generateJS } from "./codegen";
+import { generateJS, type Target, DEFAULT_TARGET } from "./codegen";
 import type { Diagnostic } from "./diagnostics";
 import type { SDecl, SProgram } from "./surface";
 import type { Type } from "./types";
+
+// Re-export Target type and helpers
+export type { Target } from "./codegen";
+export { TARGETS, DEFAULT_TARGET, isValidTarget } from "./codegen";
 
 // =============================================================================
 // Types
@@ -30,6 +34,8 @@ export type CompileOptions = {
   readonly typeCheckOnly?: boolean;
   /** Enable optimizations (default: true) */
   readonly optimize?: boolean;
+  /** Target platform for code generation (default: "node") */
+  readonly target?: Target;
 };
 
 export type CompileResult = {
@@ -70,7 +76,11 @@ export const compile = (
   sources: readonly SourceFile[],
   options: CompileOptions = {},
 ): CompileResult => {
-  const { typeCheckOnly = false, optimize: shouldOptimize = true } = options;
+  const {
+    typeCheckOnly = false,
+    optimize: shouldOptimize = true,
+    target = DEFAULT_TARGET,
+  } = options;
   const allDiagnostics: Diagnostic[] = [];
 
   // 1. Parse all sources
@@ -143,7 +153,7 @@ export const compile = (
   const irProgram = shouldOptimize ? optimize(lowerResult.program) : lowerResult.program;
 
   // 8. Generate JavaScript
-  const output = generateJS(irProgram);
+  const output = generateJS(irProgram, { target });
 
   return {
     code: output.code,
