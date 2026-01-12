@@ -651,58 +651,132 @@ const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResul
     addError(ctx, "Division by zero", expr.span);
   }
 
-  // Determine result type and constraints based on operator
-  let operandType: Type;
-  let resultType: Type;
+  // Resolve operand types
+  const leftType = applySubst(s2, t1);
+  const rightType = t2;
   const constraints: Constraint[] = [...c1, ...c2];
+  let subst = composeSubst(s1, s2);
+
+  // Helper to check if type is numeric
+  const isInt = (t: Type) => t.kind === "TCon" && t.name === "int";
+  const isFloat = (t: Type) => t.kind === "TCon" && t.name === "float";
+  const isString = (t: Type) => t.kind === "TCon" && t.name === "string";
+  const isNumeric = (t: Type) => isInt(t) || isFloat(t);
+
+  let resultType: Type;
 
   switch (expr.op) {
-    case "+":
-      // Addition: requires Add constraint (int, float, string)
-      operandType = freshTypeVar();
-      resultType = operandType;
-      constraints.push({ className: "Add", type: operandType });
+    case "+": {
+      // String concatenation
+      if (isString(leftType) && isString(rightType)) {
+        resultType = tStr;
+        break;
+      }
+      if (isString(leftType) || isString(rightType)) {
+        // One is string, other must be too
+        const s3 = unify(ctx, leftType, tStr, expr.span);
+        subst = composeSubst(subst, s3);
+        const s4 = unify(ctx, applySubst(s3, rightType), tStr, expr.span);
+        subst = composeSubst(subst, s4);
+        resultType = tStr;
+        break;
+      }
+      // Numeric addition with widening
+      if (isNumeric(leftType) && isNumeric(rightType)) {
+        // Both are concrete numeric types - widen if either is float
+        resultType = isFloat(leftType) || isFloat(rightType) ? tFloat : tInt;
+      } else if (isNumeric(leftType) || isNumeric(rightType)) {
+        // One is concrete numeric, other is type var - constrain the var
+        const concreteType = isNumeric(leftType) ? leftType : rightType;
+        const varType = isNumeric(leftType) ? rightType : leftType;
+        constraints.push({ className: "Num", type: varType });
+        // Result depends on concrete type (may widen when var is resolved)
+        resultType = isFloat(concreteType) ? tFloat : freshTypeVar();
+        if (resultType.kind === "TVar") {
+          constraints.push({ className: "Num", type: resultType });
+        }
+      } else {
+        // Both are type variables - use Num constraint
+        constraints.push({ className: "Num", type: leftType });
+        constraints.push({ className: "Num", type: rightType });
+        const s3 = unify(ctx, leftType, rightType, expr.span);
+        subst = composeSubst(subst, s3);
+        resultType = applySubst(subst, leftType);
+      }
       break;
+    }
     case "-":
-    case "*":
-    case "/":
-      // Arithmetic operators: int -> int -> int
-      operandType = tInt;
-      resultType = tInt;
+    case "*": {
+      // Numeric with widening
+      if (isNumeric(leftType) && isNumeric(rightType)) {
+        resultType = isFloat(leftType) || isFloat(rightType) ? tFloat : tInt;
+      } else if (isNumeric(leftType) || isNumeric(rightType)) {
+        const concreteType = isNumeric(leftType) ? leftType : rightType;
+        const varType = isNumeric(leftType) ? rightType : leftType;
+        constraints.push({ className: "Num", type: varType });
+        resultType = isFloat(concreteType) ? tFloat : freshTypeVar();
+        if (resultType.kind === "TVar") {
+          constraints.push({ className: "Num", type: resultType });
+        }
+      } else if (leftType.kind === "TVar" || rightType.kind === "TVar") {
+        constraints.push({ className: "Num", type: leftType });
+        constraints.push({ className: "Num", type: rightType });
+        const s3 = unify(ctx, leftType, rightType, expr.span);
+        subst = composeSubst(subst, s3);
+        resultType = applySubst(subst, leftType);
+      } else {
+        addError(ctx, `Cannot perform arithmetic on '${typeToString(leftType)}' and '${typeToString(rightType)}'`, expr.span);
+        resultType = tInt;
+      }
       break;
+    }
+    case "/": {
+      // Division always returns float
+      if (!isNumeric(leftType) && leftType.kind !== "TVar") {
+        addError(ctx, `Cannot divide type '${typeToString(leftType)}'`, expr.span);
+      }
+      if (!isNumeric(rightType) && rightType.kind !== "TVar") {
+        addError(ctx, `Cannot divide type '${typeToString(rightType)}'`, expr.span);
+      }
+      // If type vars, add Num constraint
+      if (leftType.kind === "TVar") {
+        constraints.push({ className: "Num", type: leftType });
+      }
+      if (rightType.kind === "TVar") {
+        constraints.push({ className: "Num", type: rightType });
+      }
+      resultType = tFloat;
+      break;
+    }
     case "==":
-    case "!=":
+    case "!=": {
       // Equality: requires Eq constraint
-      operandType = applySubst(s2, t1);
-      resultType = tBool;
+      const operandType = leftType;
       constraints.push({ className: "Eq", type: operandType });
+      const s3 = unify(ctx, rightType, operandType, expr.span);
+      subst = composeSubst(subst, s3);
+      resultType = tBool;
       break;
+    }
     case "<":
     case "<=":
     case ">":
-    case ">=":
+    case ">=": {
       // Comparison: requires Ord constraint
-      operandType = applySubst(s2, t1);
-      resultType = tBool;
+      const operandType = leftType;
       constraints.push({ className: "Ord", type: operandType });
+      const s3 = unify(ctx, rightType, operandType, expr.span);
+      subst = composeSubst(subst, s3);
+      resultType = tBool;
       break;
+    }
     default:
-      // Unknown operator - use fresh type variables
-      operandType = freshTypeVar();
+      // Unknown operator
+      addError(ctx, `Unknown operator: ${expr.op}`, expr.span);
       resultType = freshTypeVar();
   }
 
-  // Unify operands with expected type
-  const s3 = unify(ctx, applySubst(s2, t1), operandType, expr.span);
-  const s4 = unify(
-    ctx,
-    applySubst(composeSubst(s2, s3), t2),
-    applySubst(s3, operandType),
-    expr.span,
-  );
-
-  const finalSubst = composeSubst(composeSubst(composeSubst(s1, s2), s3), s4);
-  return [finalSubst, applySubst(finalSubst, resultType), constraints];
+  return [subst, resultType, constraints];
 };
 
 // =============================================================================
