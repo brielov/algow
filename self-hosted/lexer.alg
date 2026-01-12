@@ -11,7 +11,16 @@ module Lexer
   -- Whitespace and Comment Handling
   -- ===========================================================================
 
-  -- Skip whitespace characters
+  -- Skip whitespace characters, tracking if newline encountered
+  -- Returns (remaining string, sawNewline)
+  let rec skipWhitespaceWithNewline sawNewline s =
+    match String.head s
+      when Just '\n' -> skipWhitespaceWithNewline true (String.tail s)
+      when Just c if Char.isSpace c -> skipWhitespaceWithNewline sawNewline (String.tail s)
+      when _ -> (s, sawNewline)
+    end
+
+  -- Skip whitespace characters (backwards compatible)
   let rec skipWhitespace s =
     match String.head s
       when Just c if Char.isSpace c -> skipWhitespace (String.tail s)
@@ -55,6 +64,23 @@ module Lexer
         when _ -> s2
       end
     else s2
+
+  -- Skip all whitespace and comments, tracking newlines
+  -- Returns (remaining string, sawNewline)
+  let rec skipTriviaWithNewline sawNewline s =
+    let (s2, newNewline) = skipWhitespaceWithNewline sawNewline s in
+    if String.length s2 >= 2 then
+      let c1 = String.charAt 0 s2 in
+      let c2 = String.charAt 1 s2 in
+      match (c1, c2)
+        when (Just '-', Just '-') ->
+          -- Line comment implies newline after
+          skipTriviaWithNewline true (skipLineComment (String.drop 2 s2))
+        when (Just '{', Just '-') ->
+          skipTriviaWithNewline newNewline (skipBlockComment 1 (String.drop 2 s2))
+        when _ -> (s2, newNewline)
+      end
+    else (s2, newNewline)
 
   -- ===========================================================================
   -- Character Classification
@@ -337,5 +363,135 @@ module Lexer
     end
 
   let tokenize s = tokenizeAcc Nil s 0
+
+  -- ===========================================================================
+  -- Tokenization with Line Start Tracking
+  -- Returns List (Token, bool) where bool indicates if token is at line start
+  -- ===========================================================================
+
+  -- Lex a single token, tracking if it's at line start
+  -- Returns (token, remaining source, new position, atLineStart)
+  let rec lexTokenWithLineInfo atLineStart s pos =
+    let (s2, sawNewline) = skipTriviaWithNewline false s in
+    let isAtLineStart = atLineStart || sawNewline in
+    let skipped = String.length s - String.length s2 in
+    let pos2 = pos + skipped in
+    match String.head s2
+      when Nothing -> (TokEof, s2, pos2, isAtLineStart)
+      when Just c ->
+        let rest = String.tail s2 in
+
+        -- Lowercase identifier or keyword
+        if isIdentStart c then
+          match collectIdent "" s2
+            when (ident, rest2) ->
+              (identToToken ident, rest2, pos2 + String.length ident, isAtLineStart)
+          end
+
+        -- Uppercase identifier (constructor/type)
+        else if Char.isUpper c then
+          match collectIdent "" s2
+            when (ident, rest2) ->
+              (TokUpper ident, rest2, pos2 + String.length ident, isAtLineStart)
+          end
+
+        -- Number
+        else if Char.isDigit c then
+          match lexNumber s2 pos2
+            when LexResult tok rest2 newPos -> (tok, rest2, newPos, isAtLineStart)
+          end
+
+        -- String
+        else if c == '"' then
+          match collectString "" rest
+            when (Just str, rest2) ->
+              (TokString str, rest2, pos2 + String.length str + 2, isAtLineStart)
+            when (Nothing, rest2) ->
+              (TokError "Unterminated string", rest2, pos2, isAtLineStart)
+          end
+
+        -- Character
+        else if c == '\'' then
+          match lexChar rest (pos2 + 1)
+            when LexResult tok rest2 newPos -> (tok, rest2, newPos, isAtLineStart)
+          end
+
+        -- Two-character operators
+        else if c == '-' then
+          match String.head rest
+            when Just '>' -> (TokArrow, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokMinus, rest, pos2 + 1, isAtLineStart)
+          end
+
+        else if c == '<' then
+          match String.head rest
+            when Just '-' -> (TokLeftArrow, String.tail rest, pos2 + 2, isAtLineStart)
+            when Just '=' -> (TokLe, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokLt, rest, pos2 + 1, isAtLineStart)
+          end
+
+        else if c == '>' then
+          match String.head rest
+            when Just '=' -> (TokGe, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokGt, rest, pos2 + 1, isAtLineStart)
+          end
+
+        else if c == '=' then
+          match String.head rest
+            when Just '=' -> (TokEqEq, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokEq, rest, pos2 + 1, isAtLineStart)
+          end
+
+        else if c == '!' then
+          match String.head rest
+            when Just '=' -> (TokNe, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokError "Unexpected '!'", rest, pos2 + 1, isAtLineStart)
+          end
+
+        else if c == '|' then
+          match String.head rest
+            when Just '>' -> (TokPipe, String.tail rest, pos2 + 2, isAtLineStart)
+            when Just '|' -> (TokOr2, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokBar, rest, pos2 + 1, isAtLineStart)
+          end
+
+        else if c == '&' then
+          match String.head rest
+            when Just '&' -> (TokAnd2, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokError "Unexpected '&'", rest, pos2 + 1, isAtLineStart)
+          end
+
+        else if c == ':' then
+          match String.head rest
+            when Just ':' -> (TokColon2, String.tail rest, pos2 + 2, isAtLineStart)
+            when _ -> (TokColon, rest, pos2 + 1, isAtLineStart)
+          end
+
+        -- Single-character tokens
+        else if c == '+' then (TokPlus, rest, pos2 + 1, isAtLineStart)
+        else if c == '*' then (TokStar, rest, pos2 + 1, isAtLineStart)
+        else if c == '/' then (TokSlash, rest, pos2 + 1, isAtLineStart)
+        else if c == ',' then (TokComma, rest, pos2 + 1, isAtLineStart)
+        else if c == '.' then (TokDot, rest, pos2 + 1, isAtLineStart)
+        else if c == '(' then (TokLParen, rest, pos2 + 1, isAtLineStart)
+        else if c == ')' then (TokRParen, rest, pos2 + 1, isAtLineStart)
+        else if c == '[' then (TokLBracket, rest, pos2 + 1, isAtLineStart)
+        else if c == ']' then (TokRBracket, rest, pos2 + 1, isAtLineStart)
+        else if c == '{' then (TokLBrace, rest, pos2 + 1, isAtLineStart)
+        else if c == '}' then (TokRBrace, rest, pos2 + 1, isAtLineStart)
+
+        else (TokError ("Unexpected: " + Char.toString c), rest, pos2 + 1, isAtLineStart)
+    end
+
+  -- Tokenize with line start info
+  let rec tokenizeWithLineInfoAcc acc s pos =
+    match lexTokenWithLineInfo true s pos
+      when (TokEof, _, _, atLine) ->
+        List.reverse ((TokEof, atLine) :: acc)
+      when (tok, rest, newPos, atLine) ->
+        tokenizeWithLineInfoAcc ((tok, atLine) :: acc) rest newPos
+    end
+
+  let tokenizeWithLineInfo s = tokenizeWithLineInfoAcc Nil s 0
 
 end

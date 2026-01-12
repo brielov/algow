@@ -50,11 +50,6 @@ module Parser
   let getPos state =
     match state when PState _ pos -> pos end
 
-  let expect tok state =
-    if peek state == tok
-    then POk tok (advance state)
-    else PErr ("Expected " + tokenName tok) (getPos state)
-
   let tokenName tok = match tok
     when TokLet -> "'let'"
     when TokRec -> "'rec'"
@@ -90,6 +85,11 @@ module Parser
     when TokEof -> "end of input"
     when _ -> "token"
   end
+
+  let expect tok state =
+    if peek state == tok
+    then POk tok (advance state)
+    else PErr ("Expected " + tokenName tok) (getPos state)
 
   -- ===========================================================================
   -- Operator Precedence (for Pratt parsing)
@@ -1071,7 +1071,17 @@ module Parser
           when POk params s2 ->
             match expect TokEq s2
               when PErr e p -> PErr e p
-              when POk _ s3 -> parseConstructors name params Nil s3
+              when POk _ s3 ->
+                -- Check if this is an ADT (starts with constructor) or type alias
+                match peek s3
+                  when TokUpper _ -> parseConstructors name params Nil s3
+                  when _ ->
+                    -- Type alias: parse a type expression
+                    match parseType s3
+                      when PErr e p -> PErr e p
+                      when POk ty s4 -> POk (SDeclTypeAlias name params ty) s4
+                    end
+                end
             end
         end
       when _ -> PErr "Expected type name" (getPos state)

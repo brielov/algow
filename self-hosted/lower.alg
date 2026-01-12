@@ -49,14 +49,6 @@ module Lower
         TagRegistry (Cons (name, tag) entries)
     end
 
-  -- Build registry from type declarations
-  let buildRegistry decls =
-    List.foldl (acc d -> match d
-      when CDeclType _ _ constructors ->
-        addConstructors acc 0 constructors
-      when _ -> acc
-    end) emptyRegistry decls
-
   let rec addConstructors registry tag constructors =
     match constructors
       when Nil -> registry
@@ -64,6 +56,19 @@ module Lower
         let registry2 = addTag name tag registry in
         addConstructors registry2 (tag + 1) rest
     end
+
+  -- Build registry from type declarations (with initial registry)
+  let rec buildRegistryFrom initial decls =
+    List.foldl (acc d -> match d
+      when CDeclType _ _ constructors ->
+        addConstructors acc 0 constructors
+      when CDeclTypeAlias _ _ _ -> acc
+      when CDeclModule _ innerDecls -> buildRegistryFrom acc innerDecls
+      when _ -> acc
+    end) initial decls
+
+  -- Build registry starting fresh
+  let buildRegistry decls = buildRegistryFrom emptyRegistry decls
 
   -- ===========================================================================
   -- Lowering Context
@@ -316,12 +321,7 @@ module Lower
 
   -- Extract binding from an IR expression
   and exprToBinding expr = match expr
-    when IRAtom atom ->
-      match atom
-        when AVar name -> IRBApp (AVar name) (ALit (LInt 0))
-        when ALit lit -> IRBTuple [ALit lit]
-        when ACon name tag -> IRBCon name tag []
-      end
+    when IRAtom atom -> IRBAtom atom
     when IRLet _ binding _ -> binding
     when IRLetRec bindings body ->
       match bindings
@@ -398,40 +398,47 @@ module Lower
   -- Lower Declarations
   -- ===========================================================================
 
-  let lowerDecl ctx decl = match decl
-    when CDeclType _ _ _ ->
-      -- Type declarations don't generate IR
-      (ctx, Nothing)
-
-    when CDeclLet name expr ->
-      let (ctx2, irExpr) = lower ctx expr in
-      let binding = exprToBinding irExpr in
-      (ctx2, Just (IRDeclLet name binding))
-
-    when CDeclLetRec bindings ->
-      let (ctx2, irBindings) = lowerRecBindings ctx bindings in
-      (ctx2, Just (IRDeclLetRec irBindings))
-
-    when CDeclForeign name mod jsName ty ->
-      let binding = IRBForeign mod jsName [] in
-      (ctx, Just (IRDeclLet name binding))
-
-    when CDeclUse _ ->
-      -- Use statements don't generate IR
-      (ctx, Nothing)
-  end
-
+  -- lowerDecl now returns a list of IRDecl to allow modules to be flattened
   let rec lowerDecls ctx decls =
     match decls
       when Nil -> (ctx, Nil)
       when Cons d rest ->
-        let (ctx2, maybeDecl) = lowerDecl ctx d in
+        let (ctx2, irDecls) = lowerDecl ctx d in
         let (ctx3, restDecls) = lowerDecls ctx2 rest in
-        match maybeDecl
-          when Nothing -> (ctx3, restDecls)
-          when Just irDecl -> (ctx3, Cons irDecl restDecls)
-        end
+        (ctx3, List.append irDecls restDecls)
     end
+
+  and lowerDecl ctx decl = match decl
+    when CDeclType _ _ _ ->
+      -- Type declarations don't generate IR
+      (ctx, Nil)
+
+    when CDeclTypeAlias _ _ _ ->
+      -- Type aliases don't generate IR
+      (ctx, Nil)
+
+    when CDeclModule modName innerDecls ->
+      -- Lower module contents and flatten them into parent scope
+      let (ctx2, irDecls) = lowerDecls ctx innerDecls in
+      (ctx2, irDecls)
+
+    when CDeclLet name expr ->
+      let (ctx2, irExpr) = lower ctx expr in
+      let binding = exprToBinding irExpr in
+      (ctx2, [IRDeclLet name binding])
+
+    when CDeclLetRec bindings ->
+      let (ctx2, irBindings) = lowerRecBindings ctx bindings in
+      (ctx2, [IRDeclLetRec irBindings])
+
+    when CDeclForeign name mod jsName ty ->
+      let binding = IRBForeign mod jsName [] in
+      (ctx, [IRDeclLet name binding])
+
+    when CDeclUse _ ->
+      -- Use statements don't generate IR
+      (ctx, Nil)
+  end
 
   -- ===========================================================================
   -- Entry Points

@@ -11,6 +11,7 @@
     "playground:serve": "bun run playground/server.ts"
   },
   "dependencies": {
+    "commander": "^14.0.2",
     "vscode-languageserver-types": "^3.17.5"
   },
   "devDependencies": {

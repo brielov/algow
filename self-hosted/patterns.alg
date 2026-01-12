@@ -71,15 +71,6 @@ module Patterns
       end
   end
 
-  -- Get the head constructor of a pattern (if any)
-  let headConstructor pat = match pat
-    when CPCon name _ -> Just name
-    when CPLit l -> Just (litTag l)
-    when CPTuple _ -> Just "$tuple"
-    when CPRecord _ -> Just "$record"
-    when _ -> Nothing
-  end
-
   -- Convert literal to a tag string for matching
   let litTag l = match l
     when LInt n -> "$int:" + Int.toString n
@@ -89,17 +80,47 @@ module Patterns
     when LBool b -> if b then "$true" else "$false"
   end
 
+  -- Get the head constructor of a pattern (if any)
+  let headConstructor pat = match pat
+    when CPCon name _ -> Just name
+    when CPLit l -> Just (litTag l)
+    when CPTuple _ -> Just "$tuple"
+    when CPRecord _ -> Just "$record"
+    when _ -> Nothing
+  end
+
   -- ===========================================================================
   -- Specialization
   -- ===========================================================================
 
-  -- Specialize the matrix for constructor c
-  -- Filter rows that match c and expand patterns
-  let specialize c arity matrix =
-    match matrix
-      when PatternMatrix rows ->
-        PatternMatrix (flatMap (specializeRow c arity) rows)
-    end
+  -- Generate a range [start, end)
+  let rec range start stop =
+    if start >= stop then Nil
+    else Cons start (range (start + 1) stop)
+
+  -- Expand a pattern to its subpatterns (for specialization)
+  let rec expandPattern pat arity = match pat
+    when CPWild -> List.map (n -> CPWild) (range 0 arity)
+    when CPVar _ -> List.map (n -> CPWild) (range 0 arity)
+    when CPCon _ pats -> pats
+    when CPLit _ -> []
+    when CPTuple pats -> pats
+    when CPRecord fields -> List.map (f -> match f when CPatternField _ p -> p end) fields
+    when CPAs _ p -> expandPattern p arity
+    when CPOr p1 _ -> expandPattern p1 arity
+  end
+
+  -- Check if pattern matches the given constructor
+  let rec matchesConstructor c pat = match pat
+    when CPWild -> true
+    when CPVar _ -> true
+    when CPCon name _ -> name == c
+    when CPLit l -> litTag l == c
+    when CPTuple _ -> c == "$tuple"
+    when CPRecord _ -> c == "$record"
+    when CPAs _ p -> matchesConstructor c p
+    when CPOr p1 p2 -> matchesConstructor c p1 || matchesConstructor c p2
+  end
 
   let specializeRow c arity row = match row
     when PatternRow pats body ->
@@ -112,45 +133,17 @@ module Patterns
       end
   end
 
-  -- Check if pattern matches the given constructor
-  let matchesConstructor c pat = match pat
-    when CPWild -> true
-    when CPVar _ -> true
-    when CPCon name _ -> name == c
-    when CPLit l -> litTag l == c
-    when CPTuple _ -> c == "$tuple"
-    when CPRecord _ -> c == "$record"
-    when CPAs _ p -> matchesConstructor c p
-    when CPOr p1 p2 -> matchesConstructor c p1 || matchesConstructor c p2
-  end
-
-  -- Expand a pattern to its subpatterns (for specialization)
-  let expandPattern pat arity = match pat
-    when CPWild -> List.map (n -> CPWild) (range 0 arity)
-    when CPVar _ -> List.map (n -> CPWild) (range 0 arity)
-    when CPCon _ pats -> pats
-    when CPLit _ -> []
-    when CPTuple pats -> pats
-    when CPRecord fields -> List.map (f -> match f when CPatternField _ p -> p end) fields
-    when CPAs _ p -> expandPattern p arity
-    when CPOr p1 _ -> expandPattern p1 arity
-  end
-
-  -- Generate a range [start, end)
-  let rec range start stop =
-    if start >= stop then Nil
-    else Cons start (range (start + 1) stop)
+  -- Specialize the matrix for constructor c
+  -- Filter rows that match c and expand patterns
+  let specialize c arity matrix =
+    match matrix
+      when PatternMatrix rows ->
+        PatternMatrix (flatMap (specializeRow c arity) rows)
+    end
 
   -- ===========================================================================
   -- Default Matrix
   -- ===========================================================================
-
-  -- Default matrix: rows where first pattern is a wildcard
-  let defaultMatrix matrix =
-    match matrix
-      when PatternMatrix rows ->
-        PatternMatrix (flatMap defaultRow rows)
-    end
 
   let defaultRow row = match row
     when PatternRow pats body ->
@@ -170,9 +163,25 @@ module Patterns
       end
   end
 
+  -- Default matrix: rows where first pattern is a wildcard
+  let defaultMatrix matrix =
+    match matrix
+      when PatternMatrix rows ->
+        PatternMatrix (flatMap defaultRow rows)
+    end
+
   -- ===========================================================================
   -- Constructor Collection
   -- ===========================================================================
+
+  -- Remove duplicates from a list
+  let rec unique xs = match xs
+    when Nil -> Nil
+    when Cons x rest ->
+      if List.any (y -> y == x) rest
+      then unique rest
+      else Cons x (unique rest)
+  end
 
   -- Collect all head constructors from first column
   let collectConstructors matrix =
@@ -191,15 +200,6 @@ module Patterns
         end) rows in
         unique heads
     end
-
-  -- Remove duplicates from a list
-  let rec unique xs = match xs
-    when Nil -> Nil
-    when Cons x rest ->
-      if List.any (y -> y == x) rest
-      then unique rest
-      else Cons x (unique rest)
-  end
 
   -- Get arity of constructor
   let constructorArity c pat = match pat
@@ -231,18 +231,26 @@ module Patterns
   -- Main Compilation Algorithm
   -- ===========================================================================
 
-  -- Compile a match expression to a decision tree
-  let compile scrutinee cases =
-    let (tree, _) = compileMatrix initCompileState [scrutinee] (casesToMatrix cases) in
-    tree
+  let caseToRow c = match c
+    when CCase pat _ body -> PatternRow [pat] body
+  end
 
   -- Convert match cases to pattern matrix
   let casesToMatrix cases =
     PatternMatrix (List.map caseToRow cases)
 
-  let caseToRow c = match c
-    when CCase pat _ body -> PatternRow [pat] body
-  end
+  -- Remove first column from matrix
+  let removeFirstColumn matrix =
+    match matrix
+      when PatternMatrix rows ->
+        PatternMatrix (List.map (r -> match r
+          when PatternRow pats body ->
+            match pats
+              when Nil -> PatternRow Nil body
+              when Cons _ rest -> PatternRow rest body
+            end
+        end) rows)
+    end
 
   -- Main compilation function (Maranget algorithm)
   let rec compileMatrix state scrutinees matrix = match (scrutinees, matrix)
@@ -268,19 +276,6 @@ module Patterns
         let (defaultTree, state3) = compileDefault state2 rest defMatrix in
         (DSwitch v branches defaultTree, state3)
   end
-
-  -- Remove first column from matrix
-  let removeFirstColumn matrix =
-    match matrix
-      when PatternMatrix rows ->
-        PatternMatrix (List.map (r -> match r
-          when PatternRow pats body ->
-            match pats
-              when Nil -> PatternRow Nil body
-              when Cons _ rest -> PatternRow rest body
-            end
-        end) rows)
-    end
 
   -- Bind variables from first column
   and bindFirstColumn scrutinee matrix state =
@@ -345,41 +340,14 @@ module Patterns
         (Just tree, state2)
     end
 
+  -- Compile a match expression to a decision tree
+  let compile scrutinee cases =
+    let (tree, _) = compileMatrix initCompileState [scrutinee] (casesToMatrix cases) in
+    tree
+
   -- ===========================================================================
   -- Convert Decision Tree Back to Core Expression
   -- ===========================================================================
-
-  -- Convert decision tree to Core match expressions
-  let decisionToExpr scrutinee tree =
-    match tree
-      when DFail ->
-        -- Should not happen if exhaustive, but emit error for safety
-        CApp (CVar (Name 0 "error")) (CLit (LString "Pattern match failure"))
-
-      when DLeaf body -> body
-
-      when DSwitch var branches defaultCase ->
-        -- Build match expression from branches
-        let cases = List.map branchToCase branches in
-        let allCases = match defaultCase
-          when Nothing -> cases
-          when Just defTree ->
-            let defBody = decisionToExpr scrutinee defTree in
-            List.append cases [CCase CPWild Nothing defBody]
-        end in
-        CMatch (CVar var) allCases
-    end
-
-  let branchToCase branch = match branch
-    when Branch conName argNames subtree ->
-      let pat = if String.head conName == Just '$' then
-        -- Handle special cases (literals, tuples, records)
-        parseSpecialPattern conName argNames
-      else
-        CPCon conName (List.map (n -> CPVar n) argNames)
-      in
-      CCase pat Nothing (decisionToExpr (Name 0 "scrutinee") subtree)
-  end
 
   -- Parse special pattern tags back to patterns
   let parseSpecialPattern tag argNames =
@@ -415,6 +383,38 @@ module Patterns
     else
       CPWild
 
+  -- Convert decision tree to Core match expressions (mutually recursive with branchToCase)
+  let rec decisionToExpr scrutinee tree =
+    match tree
+      when DFail ->
+        -- Should not happen if exhaustive, but emit error for safety
+        CApp (CVar (Name 0 "error")) (CLit (LString "Pattern match failure"))
+
+      when DLeaf body -> body
+
+      when DSwitch var branches defaultCase ->
+        -- Build match expression from branches
+        let cases = List.map branchToCase branches in
+        let allCases = match defaultCase
+          when Nothing -> cases
+          when Just defTree ->
+            let defBody = decisionToExpr scrutinee defTree in
+            List.append cases [CCase CPWild Nothing defBody]
+        end in
+        CMatch (CVar var) allCases
+    end
+
+  and branchToCase branch = match branch
+    when Branch conName argNames subtree ->
+      let pat = if String.head conName == Just '$' then
+        -- Handle special cases (literals, tuples, records)
+        parseSpecialPattern conName argNames
+      else
+        CPCon conName (List.map (n -> CPVar n) argNames)
+      in
+      CCase pat Nothing (decisionToExpr (Name 0 "scrutinee") subtree)
+  end
+
   -- ===========================================================================
   -- Entry Points
   -- ===========================================================================
@@ -425,8 +425,20 @@ module Patterns
     let tree = compile scrutinee cases in
     decisionToExpr scrutinee tree
 
-  -- Compile all matches in an expression
-  let rec compilePatterns expr = match expr
+  -- Compile all matches in an expression (mutually recursive group)
+  let rec compilePatternsFields fields = match fields
+    when Nil -> Nil
+    when Cons (CField name e) rest ->
+      Cons (CField name (compilePatterns e)) (compilePatternsFields rest)
+  end
+
+  and compilePatternsBindings bindings = match bindings
+    when Nil -> Nil
+    when Cons (CBinding n e) rest ->
+      Cons (CBinding n (compilePatterns e)) (compilePatternsBindings rest)
+  end
+
+  and compilePatterns expr = match expr
     when CVar _ -> expr
     when CLit _ -> expr
     when CCon _ -> expr
@@ -477,27 +489,17 @@ module Patterns
       CFieldAccess (compilePatterns e) field
   end
 
-  let rec compilePatternsFields fields = match fields
-    when Nil -> Nil
-    when Cons (CField name e) rest ->
-      Cons (CField name (compilePatterns e)) (compilePatternsFields rest)
-  end
-
   -- Compile patterns in declarations
-  let compilePatternsDecl decl = match decl
+  and compilePatternsDecl decl = match decl
     when CDeclType name params cons -> decl
+    when CDeclTypeAlias name params ty -> decl
+    when CDeclModule modName decls -> CDeclModule modName (List.map compilePatternsDecl decls)
     when CDeclLet name expr -> CDeclLet name (compilePatterns expr)
     when CDeclLetRec bindings ->
       let newBindings = compilePatternsBindings bindings in
       CDeclLetRec newBindings
     when CDeclForeign name mod jsName ty -> decl
     when CDeclUse u -> decl
-  end
-
-  let rec compilePatternsBindings bindings = match bindings
-    when Nil -> Nil
-    when Cons (CBinding n e) rest ->
-      Cons (CBinding n (compilePatterns e)) (compilePatternsBindings rest)
   end
 
   let compilePatternsProgram decls maybeExpr =

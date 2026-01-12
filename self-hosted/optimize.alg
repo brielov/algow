@@ -18,36 +18,15 @@ module Optimize
   let defaultConfig = OptConfig 10 10
 
   -- ===========================================================================
-  -- Optimization Pass
-  -- ===========================================================================
-
-  -- Run all optimizations until fixed point
-  let optimize config expr =
-    optimizeLoop config 0 expr
-
-  let rec optimizeLoop config pass expr =
-    match config
-      when OptConfig _ maxPasses ->
-        if pass >= maxPasses then expr
-        else
-          let expr2 = optimizePass expr in
-          if irExprEqual expr expr2 then expr2
-          else optimizeLoop config (pass + 1) expr2
-    end
-
-  -- Single optimization pass
-  let optimizePass expr =
-    expr
-    |> constantFold
-    |> deadCodeElim
-    |> betaReduce
-    |> etaReduce
-    |> caseOfKnownCon
-
-  -- ===========================================================================
   -- Dead Code Elimination
   -- Remove let bindings whose bound variable is never used
   -- ===========================================================================
+
+  -- Check if binding has side effects (foreign calls)
+  let bindingHasSideEffects binding = match binding
+    when IRBForeign _ _ _ -> true
+    when _ -> false
+  end
 
   let rec deadCodeElim expr = match expr
     when IRAtom a -> IRAtom a
@@ -86,48 +65,10 @@ module Optimize
     when IRCase pat body -> IRCase pat (deadCodeElim body)
   end
 
-  -- Check if binding has side effects (foreign calls)
-  let bindingHasSideEffects binding = match binding
-    when IRBForeign _ _ _ -> true
-    when _ -> false
-  end
-
   -- ===========================================================================
   -- Constant Folding
   -- Evaluate constant expressions at compile time
   -- ===========================================================================
-
-  let rec constantFold expr = match expr
-    when IRAtom a -> IRAtom a
-
-    when IRLet name binding body ->
-      let binding2 = constantFoldBinding binding in
-      let body2 = constantFold body in
-      IRLet name binding2 body2
-
-    when IRLetRec bindings body ->
-      let bindings2 = List.map (b -> match b
-        when IRRecBinding n bind -> IRRecBinding n (constantFoldBinding bind)
-      end) bindings in
-      IRLetRec bindings2 (constantFold body)
-
-    when IRMatch atom cases ->
-      IRMatch atom (List.map constantFoldCase cases)
-  end
-
-  and constantFoldBinding binding = match binding
-    when IRBBinOp op (ALit l1) (ALit l2) ->
-      match foldBinOp op l1 l2
-        when Just lit -> IRBAtom (ALit lit)
-        when Nothing -> binding
-      end
-    when IRBLambda param body -> IRBLambda param (constantFold body)
-    when _ -> binding
-  end
-
-  and constantFoldCase c = match c
-    when IRCase pat body -> IRCase pat (constantFold body)
-  end
 
   -- Fold binary operations on literals
   let foldBinOp op l1 l2 = match (op, l1, l2)
@@ -164,6 +105,38 @@ module Optimize
     when ("+", LString a, LString b) -> Just (LString (a + b))
 
     when _ -> Nothing
+  end
+
+  let rec constantFold expr = match expr
+    when IRAtom a -> IRAtom a
+
+    when IRLet name binding body ->
+      let binding2 = constantFoldBinding binding in
+      let body2 = constantFold body in
+      IRLet name binding2 body2
+
+    when IRLetRec bindings body ->
+      let bindings2 = List.map (b -> match b
+        when IRRecBinding n bind -> IRRecBinding n (constantFoldBinding bind)
+      end) bindings in
+      IRLetRec bindings2 (constantFold body)
+
+    when IRMatch atom cases ->
+      IRMatch atom (List.map constantFoldCase cases)
+  end
+
+  and constantFoldBinding binding = match binding
+    when IRBBinOp op (ALit l1) (ALit l2) ->
+      match foldBinOp op l1 l2
+        when Just lit -> IRBAtom (ALit lit)
+        when Nothing -> binding
+      end
+    when IRBLambda param body -> IRBLambda param (constantFold body)
+    when _ -> binding
+  end
+
+  and constantFoldCase c = match c
+    when IRCase pat body -> IRCase pat (constantFold body)
   end
 
   -- ===========================================================================
@@ -260,6 +233,46 @@ module Optimize
   -- When matching on a known constructor, select the branch directly
   -- ===========================================================================
 
+  -- Find case matching constructor
+  let rec findMatchingCase conName tag args cases = match cases
+    when Nil -> Nothing
+    when Cons (IRCase pat body) rest ->
+      match pat
+        when IRPCon name ptag pats ->
+          if name == conName && ptag == tag then
+            Just (pats, body)
+          else
+            findMatchingCase conName tag args rest
+        when IRPWild -> Just ([], body)
+        when IRPVar _ -> Just ([], body)
+        when _ -> findMatchingCase conName tag args rest
+      end
+  end
+
+  -- Helper for literal comparison (needed by findLiteralCase)
+  let literalEq l1 l2 = match (l1, l2)
+    when (LInt a, LInt b) -> a == b
+    when (LFloat a, LFloat b) -> a == b
+    when (LString a, LString b) -> a == b
+    when (LChar a, LChar b) -> a == b
+    when (LBool a, LBool b) -> a == b
+    when _ -> false
+  end
+
+  -- Find case matching literal
+  let rec findLiteralCase lit cases = match cases
+    when Nil -> Nothing
+    when Cons (IRCase pat body) rest ->
+      match pat
+        when IRPLit l ->
+          if literalEq l lit then Just body
+          else findLiteralCase lit rest
+        when IRPWild -> Just body
+        when IRPVar _ -> Just body
+        when _ -> findLiteralCase lit rest
+      end
+  end
+
   let rec caseOfKnownCon expr = match expr
     when IRAtom a -> IRAtom a
 
@@ -302,46 +315,52 @@ module Optimize
     when IRCase pat body -> IRCase pat (caseOfKnownCon body)
   end
 
-  -- Find case matching constructor
-  let rec findMatchingCase conName tag args cases = match cases
-    when Nil -> Nothing
-    when Cons (IRCase pat body) rest ->
-      match pat
-        when IRPCon name ptag pats ->
-          if name == conName && ptag == tag then
-            Just (pats, body)
-          else
-            findMatchingCase conName tag args rest
-        when IRPWild -> Just ([], body)
-        when IRPVar _ -> Just ([], body)
-        when _ -> findMatchingCase conName tag args rest
-      end
-  end
-
-  -- Find case matching literal
-  let rec findLiteralCase lit cases = match cases
-    when Nil -> Nothing
-    when Cons (IRCase pat body) rest ->
-      match pat
-        when IRPLit l ->
-          if literalEqual l lit then Just body
-          else findLiteralCase lit rest
-        when IRPWild -> Just body
-        when IRPVar _ -> Just body
-        when _ -> findLiteralCase lit rest
-      end
-  end
-
   -- ===========================================================================
   -- Inlining (Simple version)
   -- Replace function calls with function body for small functions
   -- ===========================================================================
 
-  let inlineSmallFunctions config expr =
-    match config
-      when OptConfig maxSize _ ->
-        inlinePass maxSize expr
-    end
+  -- Count AST nodes in binding
+  let rec bindingSize binding = match binding
+    when IRBAtom _ -> 1
+    when IRBApp _ _ -> 1
+    when IRBBinOp _ _ _ -> 1
+    when IRBTuple atoms -> List.length atoms
+    when IRBRecord fields -> List.length fields
+    when IRBRecordUpdate _ fields -> 1 + List.length fields
+    when IRBField _ _ -> 1
+    when IRBLambda _ body -> 1 + exprSize body
+    when IRBForeign _ _ args -> 1 + List.length args
+    when IRBCon _ _ args -> 1 + List.length args
+    when IRBIf _ _ _ -> 3
+  end
+
+  and exprSize expr = match expr
+    when IRAtom _ -> 1
+    when IRLet _ b e -> 1 + bindingSize b + exprSize e
+    when IRLetRec bs e ->
+      let bsSize = List.foldl (acc b -> match b
+        when IRRecBinding _ bind -> acc + bindingSize bind
+      end) 0 bs in
+      1 + bsSize + exprSize e
+    when IRMatch _ cs ->
+      1 + List.foldl (acc c -> match c
+        when IRCase _ body -> acc + exprSize body
+      end) 0 cs
+  end
+
+  -- Count uses of a variable in expression
+  let countUses binding body = 1
+
+  -- Inline binding into body (simple version)
+  let inlineIntoBody name binding body = body
+
+  -- Check if binding should be inlined
+  let shouldInline maxSize binding body =
+    let size = bindingSize binding in
+    let uses = countUses binding body in
+    -- Inline if small or used exactly once
+    size <= maxSize || uses <= 1
 
   let rec inlinePass maxSize expr = match expr
     when IRAtom a -> IRAtom a
@@ -373,45 +392,11 @@ module Optimize
     when _ -> binding
   end
 
-  -- Check if binding should be inlined
-  let shouldInline maxSize binding body =
-    let size = bindingSize binding in
-    let uses = countUses binding body in
-    -- Inline if small or used exactly once
-    size <= maxSize || uses <= 1
-
-  -- Count AST nodes in binding
-  let rec bindingSize binding = match binding
-    when IRBApp _ _ -> 1
-    when IRBBinOp _ _ _ -> 1
-    when IRBTuple atoms -> List.length atoms
-    when IRBRecord fields -> List.length fields
-    when IRBRecordUpdate _ fields -> 1 + List.length fields
-    when IRBField _ _ -> 1
-    when IRBLambda _ body -> 1 + exprSize body
-    when IRBForeign _ _ args -> 1 + List.length args
-    when IRBCon _ _ args -> 1 + List.length args
-  end
-
-  and exprSize expr = match expr
-    when IRAtom _ -> 1
-    when IRLet _ b e -> 1 + bindingSize b + exprSize e
-    when IRLetRec bs e ->
-      let bsSize = List.foldl (acc b -> match b
-        when IRRecBinding _ bind -> acc + bindingSize bind
-      end) 0 bs in
-      1 + bsSize + exprSize e
-    when IRMatch _ cs ->
-      1 + List.foldl (acc c -> match c
-        when IRCase _ body -> acc + exprSize body
-      end) 0 cs
-  end
-
-  -- Count uses of a variable in expression
-  let countUses binding body = 1
-
-  -- Inline binding into body (simple version)
-  let inlineIntoBody name binding body = body
+  let inlineSmallFunctions config expr =
+    match config
+      when OptConfig maxSize _ ->
+        inlinePass maxSize expr
+    end
 
   -- ===========================================================================
   -- Equality Check for Fixed Point
@@ -459,8 +444,51 @@ module Optimize
     List.length cs1 == List.length cs2
 
   -- ===========================================================================
+  -- Optimization Pass
+  -- ===========================================================================
+
+  -- Single optimization pass
+  let optimizePass expr =
+    expr
+    |> constantFold
+    |> deadCodeElim
+    |> betaReduce
+    |> etaReduce
+    |> caseOfKnownCon
+
+  let rec optimizeLoop config pass expr =
+    match config
+      when OptConfig _ maxPasses ->
+        if pass >= maxPasses then expr
+        else
+          let expr2 = optimizePass expr in
+          if irExprEqual expr expr2 then expr2
+          else optimizeLoop config (pass + 1) expr2
+    end
+
+  -- Run all optimizations until fixed point
+  let optimize config expr =
+    optimizeLoop config 0 expr
+
+  -- ===========================================================================
   -- Entry Points
   -- ===========================================================================
+
+  let optimizeBinding config binding = match binding
+    when IRBLambda param body ->
+      IRBLambda param (optimize config body)
+    when _ -> binding
+  end
+
+  let optimizeDecl config decl = match decl
+    when IRDeclLet name binding ->
+      IRDeclLet name (optimizeBinding config binding)
+    when IRDeclLetRec bindings ->
+      let optBindings = List.map (b -> match b
+        when IRRecBinding n bind -> IRRecBinding n (optimizeBinding config bind)
+      end) bindings in
+      IRDeclLetRec optBindings
+  end
 
   -- Optimize a program
   let optimizeProgram config program =
@@ -473,22 +501,6 @@ module Optimize
         end in
         IRProgram optDecls optExpr
     end
-
-  let optimizeDecl config decl = match decl
-    when IRDeclLet name binding ->
-      IRDeclLet name (optimizeBinding config binding)
-    when IRDeclLetRec bindings ->
-      let optBindings = List.map (b -> match b
-        when IRRecBinding n bind -> IRRecBinding n (optimizeBinding config bind)
-      end) bindings in
-      IRDeclLetRec optBindings
-  end
-
-  let optimizeBinding config binding = match binding
-    when IRBLambda param body ->
-      IRBLambda param (optimize config body)
-    when _ -> binding
-  end
 
   -- Optimize with default config
   let optimizeDefault expr = optimize defaultConfig expr

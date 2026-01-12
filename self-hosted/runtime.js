@@ -154,20 +154,15 @@ const $foreign = {
     lt: (a) => (b) => a < b,
     isDigit: (c) => c >= "0" && c <= "9",
     isAlpha: (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z"),
-    isAlphaNum: (c) =>
-      (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9"),
+    isAlphaNum: (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9"),
     isSpace: (c) => c === " " || c === "\t" || c === "\n" || c === "\r",
     isUpper: (c) => c >= "A" && c <= "Z",
     isLower: (c) => c >= "a" && c <= "z",
     toUpper: (c) => c.toUpperCase(),
     toLower: (c) => c.toLowerCase(),
-    isIdentStart: (c) =>
-      (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c === "_",
+    isIdentStart: (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c === "_",
     isIdentChar: (c) =>
-      (c >= "a" && c <= "z") ||
-      (c >= "A" && c <= "Z") ||
-      (c >= "0" && c <= "9") ||
-      c === "_",
+      (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c === "_",
   },
 
   // ==========================================================================
@@ -235,8 +230,7 @@ const $foreign = {
     _toIOError: (err, path) => {
       const code = err.code;
       if (code === "ENOENT") return $con("FileNotFound", path);
-      if (code === "EACCES" || code === "EPERM")
-        return $con("PermissionDenied", path);
+      if (code === "EACCES" || code === "EPERM") return $con("PermissionDenied", path);
       if (code === "EISDIR") return $con("IsDirectory", path);
       if (code === "EEXIST") return $con("AlreadyExists", path);
       return $con("UnknownError", err.message || String(err));
@@ -294,7 +288,7 @@ const $foreign = {
       try {
         const fs = require("fs");
         return fs.statSync(path).isDirectory();
-      } catch (err) {
+      } catch {
         return false;
       }
     },

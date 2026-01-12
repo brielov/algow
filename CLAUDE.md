@@ -160,17 +160,14 @@ Web-based playground with Monaco editor and LSP integration:
 type Maybe a = Nothing | Just a
 type List a = Nil | Cons a (List a)
 
--- Functions (curried, single parameter)
-let add x y = x + y
-let rec fact n = if n == 0 then 1 else n * fact (n - 1)
-
--- Lambdas
+-- Functions (lambda syntax only)
 let double = x -> x * 2
 let add = x y -> x + y  -- multi-param, desugars to x -> y -> x + y
+let rec fact = n -> if n == 0 then 1 else n * fact (n - 1)
 
 -- Mutual recursion (use 'and' to chain recursive bindings)
-let rec isEven n = if n == 0 then true else isOdd (n - 1)
-and isOdd n = if n == 0 then false else isEven (n - 1)
+let rec isEven = n -> if n == 0 then true else isOdd (n - 1)
+and isOdd = n -> if n == 0 then false else isEven (n - 1)
 
 -- Pattern matching
 match xs
@@ -198,7 +195,7 @@ end
 
 -- Type annotations
 let add : number -> number -> number = x y -> x + y
-let apply (f : number -> number) (x : number) = f x
+let apply = (f : number -> number) -> (x : number) -> f x
 
 -- Operators: +, -, *, /, <, <=, >, >=, ==, !=
 -- Pipe operator: x |> f  (desugars to f x)

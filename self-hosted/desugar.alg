@@ -1,394 +1,433 @@
 -- =============================================================================
--- DESUGARING
--- =============================================================================
---
--- Transforms Surface AST to Core AST via structural recursion.
--- All syntactic sugar is removed, producing a minimal canonical form.
---
+-- Desugar Module
+-- Surface AST to Core AST transformation
 -- Reference: SPEC.md Section 6
---
 -- =============================================================================
 
 module Desugar
+  use Types (..)
 
-  use Common (..)
-  use Parser (
-    Expr, Pattern, Case, DoStmt, Type, ConDecl, Decl, Program, UseImport,
-    -- Expression constructors
-    EVar, ELit, EApp, EAbs, ELet, ELetRec, EIf, EMatch, ECon, ETuple,
-    ERecord, ERecordUpdate, EField, EList, EPipe, ECons, EBinOp, EDo, EAnnot,
-    -- Pattern constructors
-    PWild, PVar, PLit, PCon, PTuple, PRecord, PAs, POr, PCons, PList,
-    -- DoStmt constructors
-    DoBindPattern, DoLet, DoExpr,
-    -- Decl constructors
-    DeclType, DeclLet, DeclLetRec, DeclForeign, DeclUse, DeclModule
-  )
+  -- ===========================================================================
+  -- Fresh Variable Generation
+  -- ===========================================================================
 
-  -- =========================================================================
-  -- CORE AST TYPES
-  -- =========================================================================
-  --
-  -- The Core language is minimal: single-param lambdas, no syntactic sugar.
-  -- Names are still strings here; unique IDs are assigned during name resolution.
-  --
-  -- =========================================================================
+  -- State for fresh variable generation
+  type FreshState = FreshState int
 
-  -- Core expressions
-  type CoreExpr
-    = CVar string
-    | CLit Literal
-    | CApp CoreExpr CoreExpr
-    | CAbs string CoreExpr                    -- Single parameter only
-    | CLet string CoreExpr CoreExpr
-    | CLetRec (List (string, CoreExpr)) CoreExpr
-    | CMatch CoreExpr (List CoreCase)
-    | CCon string
-    | CTuple (List CoreExpr)
-    | CRecord (List (string, CoreExpr))
-    | CRecordUpdate CoreExpr (List (string, CoreExpr))
-    | CField CoreExpr string
+  let initFresh = FreshState 0
 
-  -- Core patterns
-  type CorePattern
-    = CPWild
-    | CPVar string
-    | CPLit Literal
-    | CPCon string (List CorePattern)
-    | CPTuple (List CorePattern)
-    | CPRecord (List (string, CorePattern))
-    | CPAs string CorePattern
-    | CPOr CorePattern CorePattern
+  let fresh state =
+    match state
+      when FreshState n ->
+        let name = "$tmp" + Int.toString n in
+        (name, FreshState (n + 1))
+    end
 
-  -- Core case
-  type CoreCase = { pattern : CorePattern, guard : Maybe CoreExpr, body : CoreExpr }
-
-  -- Core types (for foreign declarations)
-  type CoreType
-    = CTVar string
-    | CTCon string
-    | CTApp CoreType CoreType
-    | CTFun CoreType CoreType
-    | CTTuple (List CoreType)
-    | CTRecord (List (string, CoreType))
-
-  -- Core use import
-  type CoreUseImport
-    = CUseAll                         -- use Module (..)
-    | CUseNames (List string)         -- use Module (x, y, z)
-
-  -- Core declarations
-  type CoreDecl
-    = CDeclType string (List string) (List CoreConDecl)
-    | CDeclLet string CoreExpr
-    | CDeclLetRec (List (string, CoreExpr))
-    | CDeclForeign string CoreType
-    | CDeclUse string CoreUseImport   -- use Module (imports)
-    | CDeclModule string (List CoreDecl)
-
-  type CoreConDecl = { name : string, fields : List CoreType }
-
-  -- Core program
-  type CoreProgram = { decls : List CoreDecl, expr : Maybe CoreExpr }
-
-  -- =========================================================================
-  -- FRESH NAME GENERATION
-  -- =========================================================================
-  --
-  -- For do-notation desugaring, we need fresh variable names.
-  -- Simple counter-based approach.
-  --
-  -- =========================================================================
-
-  type FreshState = int
-
-  let freshName = prefix n -> (String.concat prefix (Int.toString n), n + 1)
-
-  -- =========================================================================
-  -- EXPRESSION DESUGARING
-  -- =========================================================================
-  --
+  -- ===========================================================================
+  -- Expression Desugaring
   -- D⟦_⟧ : Surface.Expr -> Core.Expr
-  --
-  -- =========================================================================
+  -- ===========================================================================
 
-  let rec desugarExpr = expr -> match expr
-    -- Direct translations
-    when EVar x -> CVar x
-    when ELit l -> CLit l
-    when ECon c -> CCon c
+  let rec desugarExpr state expr = match expr
+    -- Variables pass through (names resolved later)
+    when SVar x -> (CVar (Name 0 x), state)
 
-    -- Application
-    when EApp e1 e2 -> CApp (desugarExpr e1) (desugarExpr e2)
+    -- Literals pass through
+    when SLit l -> (CLit l, state)
 
-    -- Multi-param lambda → nested single-param lambdas
+    -- Application: D⟦ e1 e2 ⟧ = CApp (D⟦e1⟧) (D⟦e2⟧)
+    when SApp e1 e2 ->
+      let (c1, s1) = desugarExpr state e1 in
+      let (c2, s2) = desugarExpr s1 e2 in
+      (CApp c1 c2, s2)
+
+    -- Multi-param lambda -> nested single-param lambdas
     -- D⟦ SAbs [] e ⟧ = D⟦e⟧
     -- D⟦ SAbs (x:xs) e ⟧ = CAbs x (D⟦ SAbs xs e ⟧)
-    when EAbs params body -> desugarAbs params body
+    when SAbs params body ->
+      desugarLambda state params body
 
-    -- Let and let rec
-    when ELet x e1 e2 -> CLet x (desugarExpr e1) (desugarExpr e2)
-    when ELetRec bindings body ->
-      CLetRec (List.map desugarBinding bindings) (desugarExpr body)
+    -- Let: D⟦ SLet x e1 e2 ⟧ = CLet x (D⟦e1⟧) (D⟦e2⟧)
+    when SLet x e1 e2 ->
+      let (c1, s1) = desugarExpr state e1 in
+      let (c2, s2) = desugarExpr s1 e2 in
+      (CLet (Name 0 x) c1 c2, s2)
 
-    -- If → match on boolean
+    -- Let rec: D⟦ SLetRec bs e ⟧ = CLetRec (map desugar bs) (D⟦e⟧)
+    when SLetRec bindings body ->
+      let (cBindings, s1) = desugarBindings state bindings in
+      let (cBody, s2) = desugarExpr s1 body in
+      (CLetRec cBindings cBody, s2)
+
+    -- If -> match on boolean
     -- D⟦ SIf c t f ⟧ = CMatch (D⟦c⟧) [Case true t, Case false f]
-    when EIf cond thenBr elseBr ->
-      CMatch (desugarExpr cond) [
-        { pattern = CPLit (LBool true), guard = Nothing, body = desugarExpr thenBr },
-        { pattern = CPLit (LBool false), guard = Nothing, body = desugarExpr elseBr }
-      ]
+    when SIf cond thenBr elseBr ->
+      let (cCond, s1) = desugarExpr state cond in
+      let (cThen, s2) = desugarExpr s1 thenBr in
+      let (cElse, s3) = desugarExpr s2 elseBr in
+      let trueCase = CCase (CPLit (LBool true)) Nothing cThen in
+      let falseCase = CCase (CPLit (LBool false)) Nothing cElse in
+      (CMatch cCond [trueCase, falseCase], s3)
 
-    -- Match
-    when EMatch scrutinee cases ->
-      CMatch (desugarExpr scrutinee) (List.map desugarCase cases)
+    -- Match: D⟦ SMatch e cases ⟧ = CMatch (D⟦e⟧) (map desugar cases)
+    when SMatch scrutinee cases ->
+      let (cScrutinee, s1) = desugarExpr state scrutinee in
+      let (cCases, s2) = desugarCases s1 cases in
+      (CMatch cScrutinee cCases, s2)
 
-    -- Tuple
-    when ETuple elems -> CTuple (List.map desugarExpr elems)
+    -- Constructor: D⟦ SCon c ⟧ = CCon c
+    when SCon c -> (CCon c, state)
 
-    -- Record
-    when ERecord fields ->
-      CRecord (List.map desugarField fields)
+    -- Tuple: D⟦ STuple es ⟧ = CTuple (map D es)
+    when STuple exprs ->
+      let (cExprs, s1) = desugarExprs state exprs in
+      (CTuple cExprs, s1)
 
-    -- Record update
-    when ERecordUpdate base fields ->
-      CRecordUpdate (desugarExpr base) (List.map desugarField fields)
+    -- Record: D⟦ SRecord fs ⟧ = CRecord (map desugar fs)
+    when SRecord fields ->
+      let (cFields, s1) = desugarFields state fields in
+      (CRecord cFields, s1)
 
-    -- Field access
-    when EField e field -> CField (desugarExpr e) field
+    -- Record update: D⟦ SRecordUpdate r fs ⟧ = CRecordUpdate (D⟦r⟧) (map desugar fs)
+    when SRecordUpdate base fields ->
+      let (cBase, s1) = desugarExpr state base in
+      let (cFields, s2) = desugarFields s1 fields in
+      (CRecordUpdate cBase cFields, s2)
 
-    -- List literal → nested Cons
+    -- Field access: D⟦ SFieldAccess e f ⟧ = CFieldAccess (D⟦e⟧) f
+    when SFieldAccess e field ->
+      let (cE, s1) = desugarExpr state e in
+      (CFieldAccess cE field, s1)
+
+    -- List literal -> nested Cons
     -- D⟦ SList [] ⟧ = CCon "Nil"
     -- D⟦ SList (e:es) ⟧ = CApp (CApp (CCon "Cons") (D⟦e⟧)) (D⟦ SList es ⟧)
-    when EList elems -> desugarList elems
+    when SList exprs ->
+      desugarList state exprs
 
-    -- Pipe → application (flip)
-    -- D⟦ SPipe e1 e2 ⟧ = CApp (D⟦e2⟧) (D⟦e1⟧)
-    when EPipe e1 e2 -> CApp (desugarExpr e2) (desugarExpr e1)
+    -- Pipe -> application (flip)
+    -- D⟦ SPipeOp e1 e2 ⟧ = CApp (D⟦e2⟧) (D⟦e1⟧)
+    when SPipeOp e1 e2 ->
+      let (c1, s1) = desugarExpr state e1 in
+      let (c2, s2) = desugarExpr s1 e2 in
+      (CApp c2 c1, s2)
 
-    -- Cons → Cons constructor application
-    -- D⟦ SCons e1 e2 ⟧ = CApp (CApp (CCon "Cons") (D⟦e1⟧)) (D⟦e2⟧)
-    when ECons e1 e2 ->
-      CApp (CApp (CCon "Cons") (desugarExpr e1)) (desugarExpr e2)
+    -- Cons operator -> Cons constructor application
+    -- D⟦ SConsOp e1 e2 ⟧ = CApp (CApp (CCon "Cons") (D⟦e1⟧)) (D⟦e2⟧)
+    when SConsOp e1 e2 ->
+      let (c1, s1) = desugarExpr state e1 in
+      let (c2, s2) = desugarExpr s1 e2 in
+      (CApp (CApp (CCon "Cons") c1) c2, s2)
 
-    -- Binary operators → function application
+    -- Binary operators -> function application
     -- D⟦ SBinOp op e1 e2 ⟧ = CApp (CApp (CVar op) (D⟦e1⟧)) (D⟦e2⟧)
-    -- Special cases for && and || (short-circuit)
-    when EBinOp op e1 e2 -> desugarBinOp op e1 e2
+    when SBinOp op e1 e2 ->
+      let (c1, s1) = desugarExpr state e1 in
+      let (c2, s2) = desugarExpr s1 e2 in
+      (CApp (CApp (CVar (Name 0 op)) c1) c2, s2)
 
-    -- Do-notation → flatMap
-    when EDo stmts -> desugarDo stmts 0 |> fst
+    -- Unary minus -> application of negate or subtraction from 0
+    when SUnaryMinus e ->
+      let (cE, s1) = desugarExpr state e in
+      -- Desugar to (0 - e) which becomes CApp (CApp (CVar "-") (CLit 0)) cE
+      (CApp (CApp (CVar (Name 0 "-")) (CLit (LInt 0))) cE, s1)
 
-    -- Type annotation is erased
+    -- Do notation -> flatMap chain
+    when SDo stmts ->
+      desugarDo state stmts
+
+    -- Type annotation -> erased (used only during type checking)
     -- D⟦ SAnnot e t ⟧ = D⟦e⟧
-    when EAnnot e _ -> desugarExpr e
+    when SAnnot e _ ->
+      desugarExpr state e
   end
 
-  -- Desugar multi-param lambda to nested single-param lambdas
-  and desugarAbs = params body -> match params
-    when Nil -> desugarExpr body
-    when Cons x rest -> CAbs x (desugarAbs rest body)
-  end
+  -- ===========================================================================
+  -- Lambda Desugaring
+  -- ===========================================================================
 
-  -- Desugar a binding pair
-  and desugarBinding = pair -> match pair
-    when (name, expr) -> (name, desugarExpr expr)
-  end
+  and desugarLambda state params body =
+    match params
+      when Nil -> desugarExpr state body
+      when Cons x rest ->
+        let (cBody, s1) = desugarLambda state rest body in
+        (CAbs (Name 0 x) cBody, s1)
+    end
 
-  -- Desugar a field pair
-  and desugarField = pair -> match pair
-    when (name, expr) -> (name, desugarExpr expr)
-  end
+  -- ===========================================================================
+  -- List Desugaring
+  -- ===========================================================================
 
-  -- Desugar list literal to nested Cons
-  and desugarList = elems -> match elems
-    when Nil -> CCon "Nil"
-    when Cons e rest ->
-      CApp (CApp (CCon "Cons") (desugarExpr e)) (desugarList rest)
-  end
+  and desugarList state exprs =
+    match exprs
+      when Nil -> (CCon "Nil", state)
+      when Cons e rest ->
+        let (cE, s1) = desugarExpr state e in
+        let (cRest, s2) = desugarList s1 rest in
+        (CApp (CApp (CCon "Cons") cE) cRest, s2)
+    end
 
-  -- Desugar binary operator
-  -- && and || need special handling for short-circuit evaluation
-  and desugarBinOp = op e1 e2 -> match op
-    -- a && b → if a then b else false
-    when "&&" ->
-      CMatch (desugarExpr e1) [
-        { pattern = CPLit (LBool true), guard = Nothing, body = desugarExpr e2 },
-        { pattern = CPLit (LBool false), guard = Nothing, body = CLit (LBool false) }
-      ]
-    -- a || b → if a then true else b
-    when "||" ->
-      CMatch (desugarExpr e1) [
-        { pattern = CPLit (LBool true), guard = Nothing, body = CLit (LBool true) },
-        { pattern = CPLit (LBool false), guard = Nothing, body = desugarExpr e2 }
-      ]
-    -- Regular binary operators → function application
-    when _ -> CApp (CApp (CVar op) (desugarExpr e1)) (desugarExpr e2)
-  end
+  -- ===========================================================================
+  -- Do-Notation Desugaring
+  -- ===========================================================================
 
-  -- =========================================================================
-  -- DO-NOTATION DESUGARING
-  -- =========================================================================
-  --
-  -- D_do⟦_⟧ : List Surface.DoStmt -> Core.Expr
-  --
-  -- Do-notation desugars to flatMap calls:
-  --   do { x <- e; rest } → flatMap (λx. rest) e
-  --   do { let x = e; rest } → let x = e in rest
-  --   do { e; rest } → flatMap (λ_. rest) e
-  --   do { e } → e
-  --
-  -- =========================================================================
+  -- D_do⟦ [DoExpr e] ⟧ = D⟦e⟧
+  -- D_do⟦ DoBindPattern (SPVar x) e : rest ⟧ = flatMap (λx. D_do⟦rest⟧) (D⟦e⟧)
+  -- D_do⟦ DoBindPattern p e : rest ⟧ = flatMap (λ$tmp. match $tmp when p -> D_do⟦rest⟧) (D⟦e⟧)
+  -- D_do⟦ DoLet (SPVar x) e : rest ⟧ = let x = D⟦e⟧ in D_do⟦rest⟧
+  -- D_do⟦ DoLet p e : rest ⟧ = match D⟦e⟧ when p -> D_do⟦rest⟧
+  -- D_do⟦ DoExpr e : rest ⟧ = flatMap (λ_. D_do⟦rest⟧) (D⟦e⟧)
 
-  and desugarDo = stmts freshN -> match stmts
-    -- Final expression
-    when Cons (DoExpr e) Nil -> (desugarExpr e, freshN)
+  and desugarDo state stmts =
+    match stmts
+      -- Final expression
+      when Cons (DoExpr e) Nil -> desugarExpr state e
 
-    -- Bind with pattern: p <- e; rest
-    -- → flatMap (λ$tmp -> match $tmp when p -> rest) e
-    when Cons (DoBindPattern pat e) rest ->
-      let (tmp, freshN2) = freshName "$do" freshN in
-      let (restExpr, freshN3) = desugarDo rest freshN2 in
-      let body = match pat
-        -- Simple variable: no need for intermediate match
-        when PVar x -> CAbs x restExpr
-        -- Complex pattern: need match
-        when _ ->
-          CAbs tmp (CMatch (CVar tmp) [
-            { pattern = desugarPattern pat, guard = Nothing, body = restExpr }
-          ])
-      end in
-      (CApp (CApp (CVar "flatMap") body) (desugarExpr e), freshN3)
+      -- Bind with simple variable
+      when Cons (DoBindPattern (SPVar x) e) rest ->
+        let (cE, s1) = desugarExpr state e in
+        let (cRest, s2) = desugarDo s1 rest in
+        let lambda = CAbs (Name 0 x) cRest in
+        let flatMapApp = CApp (CApp (CVar (Name 0 "flatMap")) lambda) cE in
+        (flatMapApp, s2)
 
-    -- Let with pattern: let p = e; rest
-    -- Simple var → CLet, complex pattern → match
-    when Cons (DoLet pat e) rest ->
-      let (restExpr, freshN2) = desugarDo rest freshN in
-      let result = match pat
-        when PVar x -> CLet x (desugarExpr e) restExpr
-        when _ ->
-          CMatch (desugarExpr e) [
-            { pattern = desugarPattern pat, guard = Nothing, body = restExpr }
-          ]
-      end in
-      (result, freshN2)
+      -- Bind with pattern
+      when Cons (DoBindPattern pat e) rest ->
+        let (tmpName, s1) = fresh state in
+        let (cE, s2) = desugarExpr s1 e in
+        let (cPat, s3) = desugarPattern s2 pat in
+        let (cRest, s4) = desugarDo s3 rest in
+        let matchExpr = CMatch (CVar (Name 0 tmpName)) [CCase cPat Nothing cRest] in
+        let lambda = CAbs (Name 0 tmpName) matchExpr in
+        let flatMapApp = CApp (CApp (CVar (Name 0 "flatMap")) lambda) cE in
+        (flatMapApp, s4)
 
-    -- Expression statement (discard result): e; rest
-    -- → flatMap (λ_. rest) e
-    when Cons (DoExpr e) rest ->
-      let (restExpr, freshN2) = desugarDo rest freshN in
-      let body = CAbs "_" restExpr in
-      (CApp (CApp (CVar "flatMap") body) (desugarExpr e), freshN2)
+      -- Let with simple variable
+      when Cons (DoLet (SPVar x) e) rest ->
+        let (cE, s1) = desugarExpr state e in
+        let (cRest, s2) = desugarDo s1 rest in
+        (CLet (Name 0 x) cE cRest, s2)
 
-    -- Empty (shouldn't happen in valid code)
-    when Nil -> (CCon "Unit", freshN)
-  end
+      -- Let with pattern
+      when Cons (DoLet pat e) rest ->
+        let (cE, s1) = desugarExpr state e in
+        let (cPat, s2) = desugarPattern s1 pat in
+        let (cRest, s3) = desugarDo s2 rest in
+        (CMatch cE [CCase cPat Nothing cRest], s3)
 
-  -- =========================================================================
-  -- PATTERN DESUGARING
-  -- =========================================================================
-  --
+      -- Expression statement (discard result)
+      when Cons (DoExpr e) rest ->
+        let (cE, s1) = desugarExpr state e in
+        let (cRest, s2) = desugarDo s1 rest in
+        let lambda = CAbs (Name 0 "_") cRest in
+        let flatMapApp = CApp (CApp (CVar (Name 0 "flatMap")) lambda) cE in
+        (flatMapApp, s2)
+
+      -- Empty do block (shouldn't happen in valid programs)
+      when Nil -> (CTuple Nil, state)
+    end
+
+  -- ===========================================================================
+  -- Pattern Desugaring
   -- D_pat⟦_⟧ : Surface.Pattern -> Core.Pattern
-  --
-  -- =========================================================================
+  -- ===========================================================================
 
-  and desugarPattern = pat -> match pat
-    when PWild -> CPWild
-    when PVar x -> CPVar x
-    when PLit l -> CPLit l
-    when PCon c pats -> CPCon c (List.map desugarPattern pats)
-    when PTuple pats -> CPTuple (List.map desugarPattern pats)
-    when PRecord fields -> CPRecord (List.map desugarPatternField fields)
-    when PAs x p -> CPAs x (desugarPattern p)
-    when POr p1 p2 -> CPOr (desugarPattern p1) (desugarPattern p2)
-
-    -- Cons pattern → CPCon "Cons" [p1, p2]
-    when PCons p1 p2 ->
-      CPCon "Cons" [desugarPattern p1, desugarPattern p2]
-
-    -- List pattern → nested Cons pattern
-    when PList pats -> desugarListPattern pats
+  and desugarPattern state pat = match pat
+    when SPWild -> (CPWild, state)
+    when SPVar x -> (CPVar (Name 0 x), state)
+    when SPLit l -> (CPLit l, state)
+    when SPCon c pats ->
+      let (cPats, s1) = desugarPatterns state pats in
+      (CPCon c cPats, s1)
+    when SPTuple pats ->
+      let (cPats, s1) = desugarPatterns state pats in
+      (CPTuple cPats, s1)
+    when SPRecord fields ->
+      let (cFields, s1) = desugarPatternFields state fields in
+      (CPRecord cFields, s1)
+    when SPAs x p ->
+      let (cP, s1) = desugarPattern state p in
+      (CPAs (Name 0 x) cP, s1)
+    when SPOr p1 p2 ->
+      let (cP1, s1) = desugarPattern state p1 in
+      let (cP2, s2) = desugarPattern s1 p2 in
+      (CPOr cP1 cP2, s2)
+    -- Cons pattern -> Cons constructor pattern
+    when SPCons p1 p2 ->
+      let (cP1, s1) = desugarPattern state p1 in
+      let (cP2, s2) = desugarPattern s1 p2 in
+      (CPCon "Cons" [cP1, cP2], s2)
+    -- List pattern -> nested Cons patterns
+    when SPList pats ->
+      desugarListPattern state pats
   end
 
-  and desugarPatternField = pair -> match pair
-    when (name, pat) -> (name, desugarPattern pat)
+  and desugarListPattern state pats =
+    match pats
+      when Nil -> (CPCon "Nil" Nil, state)
+      when Cons p rest ->
+        let (cP, s1) = desugarPattern state p in
+        let (cRest, s2) = desugarListPattern s1 rest in
+        (CPCon "Cons" [cP, cRest], s2)
+    end
+
+  -- ===========================================================================
+  -- Helper Functions
+  -- ===========================================================================
+
+  and desugarExprs state exprs =
+    match exprs
+      when Nil -> (Nil, state)
+      when Cons e rest ->
+        let (cE, s1) = desugarExpr state e in
+        let (cRest, s2) = desugarExprs s1 rest in
+        (Cons cE cRest, s2)
+    end
+
+  and desugarBindings state bindings =
+    match bindings
+      when Nil -> (Nil, state)
+      when Cons (SBinding name expr) rest ->
+        let (cExpr, s1) = desugarExpr state expr in
+        let (cRest, s2) = desugarBindings s1 rest in
+        (Cons (CBinding (Name 0 name) cExpr) cRest, s2)
+    end
+
+  and desugarFields state fields =
+    match fields
+      when Nil -> (Nil, state)
+      when Cons (SField name expr) rest ->
+        let (cExpr, s1) = desugarExpr state expr in
+        let (cRest, s2) = desugarFields s1 rest in
+        (Cons (CField name cExpr) cRest, s2)
+    end
+
+  and desugarCases state cases =
+    match cases
+      when Nil -> (Nil, state)
+      when Cons (SCase pat guard body) rest ->
+        let (cPat, s1) = desugarPattern state pat in
+        let (cGuard, s2) = desugarMaybeExpr s1 guard in
+        let (cBody, s3) = desugarExpr s2 body in
+        let (cRest, s4) = desugarCases s3 rest in
+        (Cons (CCase cPat cGuard cBody) cRest, s4)
+    end
+
+  and desugarMaybeExpr state maybeExpr =
+    match maybeExpr
+      when Nothing -> (Nothing, state)
+      when Just e ->
+        let (cE, s1) = desugarExpr state e in
+        (Just cE, s1)
+    end
+
+  and desugarPatterns state pats =
+    match pats
+      when Nil -> (Nil, state)
+      when Cons p rest ->
+        let (cP, s1) = desugarPattern state p in
+        let (cRest, s2) = desugarPatterns s1 rest in
+        (Cons cP cRest, s2)
+    end
+
+  and desugarPatternFields state fields =
+    match fields
+      when Nil -> (Nil, state)
+      when Cons (SPatternField name pat) rest ->
+        let (cPat, s1) = desugarPattern state pat in
+        let (cRest, s2) = desugarPatternFields s1 rest in
+        (Cons (CPatternField name cPat) cRest, s2)
+    end
+
+  -- ===========================================================================
+  -- Type Desugaring (for annotations)
+  -- ===========================================================================
+
+  let rec desugarType ty = match ty
+    when STVar x -> CTVar x
+    when STCon c -> CTCon c
+    when STApp t1 t2 -> CTApp (desugarType t1) (desugarType t2)
+    when STFun t1 t2 -> CTFun (desugarType t1) (desugarType t2)
+    when STTuple tys -> CTTuple (List.map desugarType tys)
+    when STRecord fields ->
+      CTRecord (List.map (f -> match f when STypeField name ty -> CTypeField name (desugarType ty) end) fields)
   end
 
-  -- Desugar list pattern to nested Cons
-  -- D_pat⟦ SPList [] ⟧ = CPCon "Nil" []
-  -- D_pat⟦ SPList (p:ps) ⟧ = CPCon "Cons" [D_pat⟦p⟧, D_pat⟦ SPList ps ⟧]
-  and desugarListPattern = pats -> match pats
-    when Nil -> CPCon "Nil" Nil
-    when Cons p rest ->
-      CPCon "Cons" [desugarPattern p, desugarListPattern rest]
+  -- ===========================================================================
+  -- Declaration Desugaring
+  -- ===========================================================================
+
+  -- desugarDeclInModule takes a module context (empty string for top-level)
+  let rec desugarDeclInModule modCtx state decl = match decl
+    when SDeclType name params cons ->
+      let cCons = List.map (c -> match c
+        when SConDecl cname tys -> CConDecl cname (List.map desugarType tys)
+      end) cons in
+      (CDeclType name params cCons, state)
+
+    when SDeclTypeAlias name params ty ->
+      (CDeclTypeAlias name params (desugarType ty), state)
+
+    when SDeclLet name expr ->
+      let (cExpr, s1) = desugarExpr state expr in
+      (CDeclLet (Name 0 name) cExpr, s1)
+
+    when SDeclLetRec bindings ->
+      let (cBindings, s1) = desugarBindings state bindings in
+      (CDeclLetRec cBindings, s1)
+
+    when SDeclForeign name ty ->
+      -- Foreign declarations use the enclosing module name
+      let foreignMod = if modCtx == "" then "foreign" else modCtx in
+      (CDeclForeign (Name 0 name) foreignMod name (desugarType ty), state)
+
+    when SDeclModule name uses decls ->
+      -- Desugar module contents with module name as context
+      let (cDecls, s1) = desugarDeclsInModule name state decls in
+      (CDeclModule name cDecls, s1)
+
+    when SDeclUse u ->
+      -- Top-level use statements pass through for name resolution
+      (CDeclUse u, state)
   end
 
-  -- =========================================================================
-  -- CASE DESUGARING
-  -- =========================================================================
+  and desugarDeclsInModule modCtx state decls =
+    match decls
+      when Nil -> (Nil, state)
+      when Cons d rest ->
+        let (cD, s1) = desugarDeclInModule modCtx state d in
+        let (cRest, s2) = desugarDeclsInModule modCtx s1 rest in
+        (Cons cD cRest, s2)
+    end
 
-  and desugarCase = c ->
-    { pattern = desugarPattern c.pattern
-    , guard = Maybe.map desugarExpr c.guard
-    , body = desugarExpr c.body
-    }
+  -- Top-level versions for backwards compatibility
+  let desugarDecl state decl = desugarDeclInModule "" state decl
 
-  -- =========================================================================
-  -- TYPE DESUGARING
-  -- =========================================================================
+  and desugarDecls state decls = desugarDeclsInModule "" state decls
 
-  let rec desugarType = t -> match t
-    when TVar x -> CTVar x
-    when TCon c -> CTCon c
-    when TApp t1 t2 -> CTApp (desugarType t1) (desugarType t2)
-    when TFun t1 t2 -> CTFun (desugarType t1) (desugarType t2)
-    when TTuple ts -> CTTuple (List.map desugarType ts)
-    when TRecord fields -> CTRecord (List.map desugarTypeField fields)
-  end
+  -- ===========================================================================
+  -- Program Desugaring
+  -- ===========================================================================
 
-  and desugarTypeField = pair -> match pair
-    when (name, t) -> (name, desugarType t)
-  end
+  let desugarProgram program =
+    match program
+      when SProgram decls maybeExpr ->
+        let (cDecls, s1) = desugarDecls initFresh decls in
+        let (cExpr, _) = match maybeExpr
+          when Nothing -> (Nothing, s1)
+          when Just e ->
+            let (ce, s2) = desugarExpr s1 e in
+            (Just ce, s2)
+        end in
+        (cDecls, cExpr)
+    end
 
-  -- =========================================================================
-  -- DECLARATION DESUGARING
-  -- =========================================================================
+  -- ===========================================================================
+  -- Entry Point
+  -- ===========================================================================
 
-  let rec desugarDecl = decl -> match decl
-    when DeclType name params cons ->
-      CDeclType name params (List.map desugarConDecl cons)
-
-    when DeclLet name expr ->
-      CDeclLet name (desugarExpr expr)
-
-    when DeclLetRec bindings ->
-      CDeclLetRec (List.map desugarBinding bindings)
-
-    when DeclForeign name typ ->
-      CDeclForeign name (desugarType typ)
-
-    when DeclUse modName import ->
-      -- Preserve use declarations for name resolution
-      let coreImport = match import
-        when UseAll -> CUseAll
-        when UseNames names -> CUseNames names
-      end in
-      CDeclUse modName coreImport
-
-    when DeclModule name decls ->
-      CDeclModule name (List.map desugarDecl decls)
-  end
-
-  and desugarConDecl = con ->
-    { name = con.name, fields = List.map desugarType con.fields }
-
-  -- =========================================================================
-  -- PROGRAM DESUGARING
-  -- =========================================================================
-
-  let desugarProgram = program ->
-    let decls = List.map desugarDecl program.decls in
-    let expr = Maybe.map desugarExpr program.expr in
-    { decls = decls, expr = expr }
+  let desugar expr =
+    let (cExpr, _) = desugarExpr initFresh expr in
+    cExpr
 
 end

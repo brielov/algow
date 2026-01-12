@@ -178,7 +178,8 @@ module Types
   -- ===========================================================================
 
   type SDecl
-    = SDeclType string (List string) (List SConDecl) -- type Maybe a = ...
+    = SDeclType string (List string) (List SConDecl) -- type Maybe a = Just a | Nothing
+    | SDeclTypeAlias string (List string) SType      -- type Span = { start : int, stop : int }
     | SDeclLet string SExpr                          -- let x = e
     | SDeclLetRec (List SBinding)                    -- let rec f = ... and g = ...
     | SDeclForeign string SType                      -- foreign foo : Int -> Int
@@ -250,7 +251,9 @@ module Types
   -- ===========================================================================
 
   type CDecl
-    = CDeclType string (List string) (List CConDecl) -- type declaration
+    = CDeclType string (List string) (List CConDecl) -- type declaration (ADT)
+    | CDeclTypeAlias string (List string) CType      -- type alias
+    | CDeclModule string (List CDecl)                -- module (name, declarations)
     | CDeclLet Name CExpr                            -- let binding
     | CDeclLetRec (List CBinding)                    -- recursive bindings
     | CDeclForeign Name string string CType          -- foreign (name, module, jsName, type)

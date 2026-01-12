@@ -1,19 +1,13 @@
 /**
  * Pratt Parser for the Algow language.
  *
- * Uses top-down operator precedence parsing (Pratt parsing) which elegantly
- * handles operator precedence and associativity. The parser collects diagnostics
- * instead of throwing errors, enabling better error recovery and future LSP support.
- *
- * Key concepts:
- * - Binding power: Determines operator precedence (higher = binds tighter)
- * - Prefix parselets: Handle tokens that start an expression (literals, identifiers, prefix ops)
- * - Infix parselets: Handle tokens that appear between expressions (binary ops, field access)
+ * Produces Surface AST with all syntactic sugar preserved.
+ * Desugaring happens in a separate phase (desugar.ts).
  */
 
-import * as ast from "./ast";
 import type { Diagnostic } from "./diagnostics";
 import { createLexer, type LexerState, nextToken, slice, type Token, TokenKind } from "./lexer";
+import * as S from "./surface";
 
 export type { Diagnostic, DiagnosticSeverity } from "./diagnostics";
 
@@ -22,25 +16,8 @@ export type { Diagnostic, DiagnosticSeverity } from "./diagnostics";
 // =============================================================================
 
 export type ParseResult = {
-  readonly program: Program;
+  readonly program: S.SProgram;
   readonly diagnostics: readonly Diagnostic[];
-};
-
-export type Program = {
-  readonly modules: readonly ast.ModuleDecl[];
-  readonly uses: readonly ast.UseDecl[];
-  readonly declarations: readonly ast.TypeDecl[];
-  readonly bindings: readonly TopLevelBinding[];
-  readonly expr: ast.Expr | null;
-};
-
-export type TopLevelBinding = {
-  readonly name: string;
-  readonly nameSpan: ast.Span;
-  readonly params: readonly { name: string; span: ast.Span; type?: ast.TypeExpr }[];
-  readonly returnType?: ast.TypeExpr;
-  readonly body: ast.Expr;
-  readonly recursive: boolean;
 };
 
 // =============================================================================
@@ -114,71 +91,10 @@ const error = (state: ParserState, message: string): void => {
   });
 };
 
-/** Create a span from token positions */
-const span = (start: number, end: number): ast.Span => ({ start, end });
-
-/** Create a span from a token */
-const tokenSpan = (token: Token): ast.Span => span(token[1], token[2]);
-
+const span = (start: number, end: number): S.Span => ({ start, end });
+const tokenSpan = (token: Token): S.Span => span(token[1], token[2]);
 const atNewStatement = (state: ParserState): boolean =>
   state.lexer.atLineStart && !at(state, TokenKind.Bar);
-
-// =============================================================================
-// LAMBDA DETECTION AND PARSING
-// =============================================================================
-
-/**
- * Check if we're at the start of a lambda: lowercase+ ->
- * Uses lookahead without consuming tokens.
- */
-const isLambdaStart = (state: ParserState): boolean => {
-  // Save lexer state
-  const savedPos = state.lexer.pos;
-  const savedCurrent = state.current;
-
-  // Skip lowercase identifiers
-  while (at(state, TokenKind.Lower)) {
-    advance(state);
-  }
-
-  // Check if we hit an arrow
-  const isLambda = at(state, TokenKind.Arrow);
-
-  // Restore lexer state
-  state.lexer.pos = savedPos;
-  state.current = savedCurrent;
-
-  return isLambda;
-};
-
-/**
- * Parse a lambda: x y z -> body
- * Produces nested Abs nodes for currying.
- */
-const parseLambda = (state: ParserState): ast.Expr => {
-  const start = state.current[1];
-  const params: { name: string; span: ast.Span }[] = [];
-
-  // Collect all parameters
-  while (at(state, TokenKind.Lower) && !at(state, TokenKind.Arrow)) {
-    const token = advance(state);
-    params.push({ name: text(state, token), span: tokenSpan(token) });
-  }
-
-  expect(state, TokenKind.Arrow, "expected '->'");
-  const body = parseExpr(state);
-  const end = body.span?.end ?? state.current[1];
-
-  // Build curried lambdas from right to left
-  let result: ast.Expr = body;
-  for (let i = params.length - 1; i >= 0; i--) {
-    const p = params[i]!;
-    const absStart = i === 0 ? start : p.span.start;
-    result = ast.abs(p.name, result, span(absStart, end), p.span);
-  }
-
-  return result;
-};
 
 // =============================================================================
 // ERROR RECOVERY
@@ -204,52 +120,39 @@ const synchronize = (state: ParserState): void => {
 };
 
 // =============================================================================
-// PARAMETER PARSING
+// LAMBDA DETECTION AND PARSING
 // =============================================================================
 
-type Param = { name: string; span: ast.Span; type?: ast.TypeExpr };
+const isLambdaStart = (state: ParserState): boolean => {
+  const savedPos = state.lexer.pos;
+  const savedCurrent = state.current;
 
-/**
- * Parse function parameters: name | (name : type)
- * Returns array of parameters with optional type annotations.
- */
-const parseParams = (state: ParserState): Param[] => {
-  const params: Param[] = [];
-
-  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
-    if (at(state, TokenKind.LParen)) {
-      advance(state); // (
-      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-      if (!paramToken) break;
-      const paramName = text(state, paramToken);
-      let paramType: ast.TypeExpr | undefined;
-
-      if (at(state, TokenKind.Colon)) {
-        advance(state); // :
-        paramType = parseType(state) ?? undefined;
-      }
-
-      expect(state, TokenKind.RParen, "expected ')' after parameter");
-      params.push({ name: paramName, span: tokenSpan(paramToken), type: paramType });
-    } else {
-      const paramToken = advance(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
-    }
+  while (at(state, TokenKind.Lower)) {
+    advance(state);
   }
 
-  return params;
+  const isLambda = at(state, TokenKind.Arrow);
+
+  state.lexer.pos = savedPos;
+  state.current = savedCurrent;
+
+  return isLambda;
 };
 
-/**
- * Wrap body in nested lambdas for currying.
- */
-const wrapInLambdas = (params: readonly Param[], body: ast.Expr): ast.Expr => {
-  let result = body;
-  for (let i = params.length - 1; i >= 0; i--) {
-    const p = params[i]!;
-    result = ast.abs(p.name, result, undefined, p.span, p.type);
+const parseLambda = (state: ParserState): S.SAbs => {
+  const start = state.current[1];
+  const params: string[] = [];
+
+  while (at(state, TokenKind.Lower) && !at(state, TokenKind.Arrow)) {
+    const token = advance(state);
+    params.push(text(state, token));
   }
-  return result;
+
+  expect(state, TokenKind.Arrow, "expected '->'");
+  const body = parseExpr(state);
+  const end = body.span?.end ?? state.current[1];
+
+  return S.sabs(params, body, span(start, end));
 };
 
 // =============================================================================
@@ -258,37 +161,40 @@ const wrapInLambdas = (params: readonly Param[], body: ast.Expr): ast.Expr => {
 
 export const parse = (source: string): ParseResult => {
   const state = createParser(source);
-  const modules: ast.ModuleDecl[] = [];
-  const uses: ast.UseDecl[] = [];
-  const declarations: ast.TypeDecl[] = [];
-  const bindings: TopLevelBinding[] = [];
-  let expr: ast.Expr | null = null;
+  const decls: S.SDecl[] = [];
+  let expr: S.SExpr | null = null;
 
   // Parse module declarations first
   while (at(state, TokenKind.Module)) {
     const mod = parseModuleDecl(state);
-    if (mod) modules.push(mod);
+    if (mod) decls.push(mod);
   }
 
-  // Parse use statements
+  // Parse use statements (convert to module imports for now)
   while (at(state, TokenKind.Use)) {
-    const use = parseUseDecl(state);
-    if (use) uses.push(use);
+    // Skip use declarations for now - they'll be handled in name resolution
+    parseUseDecl(state);
   }
 
-  // Parse data declarations, bindings, and expression
+  // Parse declarations and final expression
   while (!at(state, TokenKind.Eof)) {
     if (at(state, TokenKind.Type)) {
       const decl = parseTypeDecl(state);
-      if (decl) declarations.push(decl);
+      if (decl) decls.push(decl);
+    } else if (at(state, TokenKind.Module)) {
+      const mod = parseModuleDecl(state);
+      if (mod) decls.push(mod);
     } else if (at(state, TokenKind.Let)) {
-      const result = parseLetBindingOrExpr(state);
-      if (result.kind === "binding") {
-        bindings.push(result.binding);
+      const result = parseLetDeclOrExpr(state);
+      if (result.kind === "decl") {
+        decls.push(result.decl);
       } else {
         expr = result.expr;
         break;
       }
+    } else if (at(state, TokenKind.Foreign)) {
+      const decl = parseForeignDecl(state);
+      if (decl) decls.push(decl);
     } else {
       expr = parseExpr(state);
       break;
@@ -296,260 +202,16 @@ export const parse = (source: string): ParseResult => {
   }
 
   return {
-    program: { modules, uses, declarations, bindings, expr },
+    program: { decls, expr },
     diagnostics: state.diagnostics,
   };
 };
 
 // =============================================================================
-// LET BINDING OR EXPRESSION
+// DECLARATIONS
 // =============================================================================
 
-type LetResult = { kind: "binding"; binding: TopLevelBinding } | { kind: "expr"; expr: ast.Expr };
-
-const parseLetBindingOrExpr = (state: ParserState): LetResult => {
-  const start = state.current[1];
-  advance(state); // 'let'
-
-  const recursive = at(state, TokenKind.Rec);
-  if (recursive) advance(state);
-
-  // Check for destructuring pattern (tuple, record, wildcard, or constructor)
-  // Only allowed for non-recursive let, and always produces an expression (not a binding)
-  if (
-    !recursive &&
-    atAny(state, TokenKind.LParen, TokenKind.LBrace, TokenKind.Underscore, TokenKind.Upper)
-  ) {
-    const pattern = parsePattern(state);
-
-    expect(state, TokenKind.Eq, "expected '=' after pattern");
-    const value = parseExpr(state);
-    expect(state, TokenKind.In, "expected 'in' after let value");
-    const body = parseExpr(state);
-    const end = body.span?.end ?? state.current[1];
-
-    // Desugar to: match value when pattern -> body end
-    return { kind: "expr", expr: ast.match(value, [ast.case_(pattern, body)], span(start, end)) };
-  }
-
-  // Accept either lowercase identifier or underscore for binding name
-  let nameToken: Token | null = null;
-  let name: string;
-  if (at(state, TokenKind.Underscore)) {
-    nameToken = state.current;
-    advance(state);
-    name = "_";
-  } else {
-    nameToken = expect(state, TokenKind.Lower, "expected binding name");
-    if (!nameToken) {
-      synchronize(state);
-      return { kind: "expr", expr: ast.int(0) };
-    }
-    name = text(state, nameToken);
-  }
-  const nameSpan = tokenSpan(nameToken);
-  const params = parseParams(state);
-
-  // Check for return type: let f x y : number = ...
-  let returnType: ast.TypeExpr | undefined;
-  if (at(state, TokenKind.Colon)) {
-    advance(state); // :
-    returnType = parseType(state) ?? undefined;
-  }
-
-  if (!expect(state, TokenKind.Eq, "expected '=' after parameters")) {
-    synchronize(state);
-    return { kind: "expr", expr: ast.int(0) };
-  }
-
-  const body = parseExpr(state);
-
-  if (at(state, TokenKind.In) || (recursive && at(state, TokenKind.AndKw))) {
-    const value = wrapInLambdas(params, body);
-
-    if (recursive) {
-      // Parse additional bindings with 'and'
-      const bindings: ast.RecBinding[] = [ast.recBinding(name, value, nameSpan, returnType)];
-      while (at(state, TokenKind.AndKw)) {
-        advance(state); // 'and'
-        bindings.push(parseRecBinding(state));
-      }
-
-      expect(state, TokenKind.In, "expected 'in' after let rec bindings");
-      const continuation = parseExpr(state);
-      return { kind: "expr", expr: ast.letRec(bindings, continuation) };
-    }
-
-    advance(state); // 'in'
-    const continuation = parseExpr(state);
-    return {
-      kind: "expr",
-      expr: ast.let_(name, value, continuation, undefined, nameSpan, returnType),
-    };
-  }
-
-  return { kind: "binding", binding: { name, nameSpan, params, returnType, body, recursive } };
-};
-
-// =============================================================================
-// TYPE DECLARATIONS
-// =============================================================================
-
-/**
- * Parse a type declaration - either an ADT (data declaration) or a type alias.
- *
- * ADT syntax: type Name params = Constructor1 fields | Constructor2 fields
- * Alias syntax: type Name params = TypeExpr
- *
- * Disambiguation:
- * - If RHS contains `->` (function type), it's a type alias
- * - If RHS starts with uppercase and has `|`, it's an ADT
- * - If RHS starts with uppercase followed by type arguments, it's an ADT
- * - Otherwise (single type name), it's a type alias
- */
-const parseTypeDecl = (state: ParserState): ast.DataDecl | ast.AliasDecl | null => {
-  advance(state); // 'type'
-
-  const nameToken = expect(state, TokenKind.Upper, "expected type name");
-  if (!nameToken) {
-    synchronize(state);
-    return null;
-  }
-  const name = text(state, nameToken);
-
-  const typeParams: string[] = [];
-  while (at(state, TokenKind.Lower)) {
-    typeParams.push(text(state, advance(state)));
-  }
-
-  if (!expect(state, TokenKind.Eq, "expected '=' after type parameters")) {
-    synchronize(state);
-    return null;
-  }
-
-  // Determine if this is an ADT or type alias
-  // Key heuristics:
-  // - Function types (`->`) indicate alias
-  // - Tuple types (starting with `(` followed by comma) indicate alias
-  // - Lowercase identifiers indicate alias (type variables in type expressions)
-  // - Otherwise, try parsing as ADT constructors
-
-  // If RHS starts with `(` or lowercase, it's definitely a type alias
-  if (at(state, TokenKind.LParen) || at(state, TokenKind.Lower)) {
-    const aliasType = parseType(state);
-    if (!aliasType) {
-      error(state, "expected type expression in type alias");
-      return null;
-    }
-    return ast.aliasDecl(name, typeParams, aliasType);
-  }
-
-  // Save position for potential backtrack
-  const savedPos = state.lexer.pos;
-  const savedCurrent = state.current;
-
-  // Parse as type expression to check for function types
-  const type = parseType(state);
-  const hasArrow = type && containsArrow(type);
-
-  // Backtrack to re-parse
-  state.lexer.pos = savedPos;
-  state.current = savedCurrent;
-
-  if (hasArrow) {
-    // Contains `->`, definitely a type alias
-    const aliasType = parseType(state);
-    if (!aliasType) {
-      error(state, "expected type expression in type alias");
-      return null;
-    }
-    return ast.aliasDecl(name, typeParams, aliasType);
-  }
-
-  // No arrow - check if it looks like constructor(s)
-  // Parse as ADT: Constructor Fields | Constructor Fields | ...
-  const constructors: ast.ConDecl[] = [];
-  const first = parseConstructor(state);
-  if (first) constructors.push(first);
-
-  while (at(state, TokenKind.Bar)) {
-    advance(state);
-    const con = parseConstructor(state);
-    if (con) constructors.push(con);
-  }
-
-  // Check if we only got a single constructor with no fields - could be alias to existing type
-  if (
-    constructors.length === 1 &&
-    constructors[0]!.fields.length === 0 &&
-    isKnownTypeName(constructors[0]!.name)
-  ) {
-    // Single uppercase name that's a known type - treat as alias
-    return ast.aliasDecl(name, typeParams, ast.tycon(constructors[0]!.name));
-  }
-
-  return ast.dataDecl(name, typeParams, constructors);
-};
-
-/** Check if a type expression contains an arrow (function type) */
-const containsArrow = (type: ast.TypeExpr): boolean => {
-  switch (type.kind) {
-    case "TyCon":
-    case "TyVar":
-    case "TyQual":
-      return false;
-    case "TyFun":
-      return true;
-    case "TyApp":
-      return containsArrow(type.con) || containsArrow(type.arg);
-    case "TyTuple":
-      return type.elements.some(containsArrow);
-  }
-};
-
-/** Known type names that are likely aliases, not constructors */
-const isKnownTypeName = (name: string): boolean => {
-  const knownTypes = new Set([
-    "Int",
-    "Bool",
-    "String",
-    "Float",
-    "Char",
-    "Unit",
-    "Maybe",
-    "Either",
-    "List",
-    "Option",
-    "Result",
-  ]);
-  return knownTypes.has(name);
-};
-
-const parseConstructor = (state: ParserState): ast.ConDecl | null => {
-  const nameToken = expect(state, TokenKind.Upper, "expected constructor name");
-  if (!nameToken) return null;
-  const name = text(state, nameToken);
-
-  const fields: ast.TypeExpr[] = [];
-  while (
-    atAny(state, TokenKind.Lower, TokenKind.Upper, TokenKind.LParen) &&
-    !atNewStatement(state)
-  ) {
-    // Use parseTypeAtomSimple to get individual types without type application
-    // This ensures `Bin Expr Expr` is parsed as two Expr fields, not one `Expr Expr` field
-    const field = parseTypeAtomSimple(state);
-    if (field) fields.push(field);
-    else break;
-  }
-
-  return ast.conDecl(name, fields);
-};
-
-// =============================================================================
-// MODULE DECLARATIONS
-// =============================================================================
-
-const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
+const parseModuleDecl = (state: ParserState): S.SDeclModule | null => {
   const start = state.current[1];
   advance(state); // 'module'
 
@@ -559,34 +221,30 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
     return null;
   }
   const name = text(state, nameToken);
-  const nameSpan = tokenSpan(nameToken);
 
-  const uses: ast.UseDecl[] = [];
-  const declarations: ast.TypeDecl[] = [];
-  const bindings: ast.RecBinding[] = [];
-  const foreignBindings: ast.ForeignBinding[] = [];
+  const uses: string[] = [];
+  const innerDecls: S.SDecl[] = [];
+
+  // Parse use statements
+  while (at(state, TokenKind.Use)) {
+    const use = parseUseDecl(state);
+    if (use) uses.push(use);
+  }
 
   while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
-    if (at(state, TokenKind.Use)) {
-      const use = parseUseDecl(state);
-      if (use) uses.push(use);
-    } else if (at(state, TokenKind.Type)) {
+    if (at(state, TokenKind.Type)) {
       const decl = parseTypeDecl(state);
-      if (decl) declarations.push(decl);
+      if (decl) innerDecls.push(decl);
     } else if (at(state, TokenKind.Let)) {
-      const binding = parseModuleBinding(state);
-      if (binding) bindings.push(binding);
-      // Handle 'and' for mutually recursive bindings
-      while (at(state, TokenKind.AndKw)) {
-        advance(state); // consume 'and'
-        const andBinding = parseModuleBindingAfterAnd(state);
-        if (andBinding) bindings.push(andBinding);
+      const result = parseLetDeclOrExpr(state);
+      if (result.kind === "decl") {
+        innerDecls.push(result.decl);
       }
     } else if (at(state, TokenKind.Foreign)) {
-      const foreign = parseForeignBinding(state);
-      if (foreign) foreignBindings.push(foreign);
+      const decl = parseForeignDecl(state);
+      if (decl) innerDecls.push(decl);
     } else {
-      error(state, "expected 'use', 'type', 'let', or 'foreign' declaration in module");
+      error(state, "expected declaration in module");
       advance(state);
     }
   }
@@ -594,31 +252,179 @@ const parseModuleDecl = (state: ParserState): ast.ModuleDecl | null => {
   const endToken = expect(state, TokenKind.End, "expected 'end' after module body");
   const end = endToken ? endToken[2] : state.current[1];
 
-  return ast.moduleDecl(
-    name,
-    uses,
-    declarations,
-    bindings,
-    foreignBindings,
-    span(start, end),
-    nameSpan,
-  );
+  return S.sdeclmodule(name, uses, innerDecls, span(start, end));
 };
 
-/**
- * Parse a foreign declaration: foreign name : type
- */
-const parseForeignBinding = (state: ParserState): ast.ForeignBinding | null => {
-  const start = state.current[1];
-  advance(state); // 'foreign'
+const parseUseDecl = (state: ParserState): string | null => {
+  advance(state); // 'use'
 
-  const nameToken = expect(state, TokenKind.Lower, "expected foreign function name");
+  const moduleToken = expect(state, TokenKind.Upper, "expected module name");
+  if (!moduleToken) {
+    synchronize(state);
+    return null;
+  }
+
+  // Skip import specs and aliases for now
+  if (at(state, TokenKind.LParen)) {
+    let depth = 1;
+    advance(state);
+    while (depth > 0 && !at(state, TokenKind.Eof)) {
+      if (at(state, TokenKind.LParen)) depth++;
+      else if (at(state, TokenKind.RParen)) depth--;
+      advance(state);
+    }
+  }
+
+  if (at(state, TokenKind.As)) {
+    advance(state);
+    expect(state, TokenKind.Upper, "expected alias name");
+  }
+
+  return text(state, moduleToken);
+};
+
+const parseTypeDecl = (state: ParserState): S.SDeclType | S.SDeclTypeAlias | null => {
+  const start = state.current[1];
+  advance(state); // 'type'
+
+  const nameToken = expect(state, TokenKind.Upper, "expected type name");
   if (!nameToken) {
     synchronize(state);
     return null;
   }
   const name = text(state, nameToken);
-  const nameSpan = tokenSpan(nameToken);
+
+  // Parse type parameters
+  const params: string[] = [];
+  while (at(state, TokenKind.Lower)) {
+    params.push(text(state, advance(state)));
+  }
+
+  expect(state, TokenKind.Eq, "expected '=' after type name");
+
+  // Check if this is an ADT or type alias
+  // ADT: type Foo = Bar | Baz
+  // Alias: type Foo = { x: Int } or type Foo = Int or type Foo = (A, B)
+  if (at(state, TokenKind.Upper) && isConstructorDecl(state)) {
+    // ADT
+    const constructors: S.SConDecl[] = [];
+    do {
+      if (at(state, TokenKind.Bar)) advance(state);
+      const con = parseConstructor(state);
+      if (con) constructors.push(con);
+    } while (at(state, TokenKind.Bar));
+
+    return S.sdecltype(name, params, constructors, span(start, state.current[1]));
+  } else {
+    // Type alias
+    const aliasType = parseType(state);
+    if (!aliasType) {
+      error(state, "expected type after '='");
+      return null;
+    }
+    return S.sdecltypealias(name, params, aliasType, span(start, state.current[1]));
+  }
+};
+
+const isConstructorDecl = (state: ParserState): boolean => {
+  // A constructor declaration looks like: Name [fields...] [| ...]
+  // A type alias with upper starts like: UpperName followed by type application
+  const savedPos = state.lexer.pos;
+  const savedCurrent = state.current;
+
+  // Advance past the name
+  advance(state);
+
+  // Skip any fields (type atoms)
+  while (
+    atAny(state, TokenKind.Lower, TokenKind.Upper, TokenKind.LParen, TokenKind.LBrace) &&
+    !atNewStatement(state)
+  ) {
+    if (at(state, TokenKind.LParen)) {
+      let depth = 1;
+      advance(state);
+      while (depth > 0 && !at(state, TokenKind.Eof)) {
+        if (at(state, TokenKind.LParen)) depth++;
+        else if (at(state, TokenKind.RParen)) depth--;
+        advance(state);
+      }
+    } else {
+      advance(state);
+    }
+  }
+
+  // If we hit |, it's an ADT
+  const isADT = at(state, TokenKind.Bar) || at(state, TokenKind.Eof) || atNewStatement(state);
+
+  state.lexer.pos = savedPos;
+  state.current = savedCurrent;
+
+  return isADT;
+};
+
+const parseConstructor = (state: ParserState): S.SConDecl | null => {
+  const nameToken = expect(state, TokenKind.Upper, "expected constructor name");
+  if (!nameToken) return null;
+  const name = text(state, nameToken);
+
+  const fields: S.SType[] = [];
+  while (
+    atAny(state, TokenKind.Lower, TokenKind.Upper, TokenKind.LParen, TokenKind.LBrace) &&
+    !atNewStatement(state) &&
+    !at(state, TokenKind.Bar)
+  ) {
+    const field = parseTypeAtom(state);
+    if (field) fields.push(field);
+    else break;
+  }
+
+  return { name, fields };
+};
+
+const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
+  const start = state.current[1];
+  advance(state); // 'foreign'
+
+  let name: string;
+
+  // Support operator syntax: foreign (+) : type
+  if (at(state, TokenKind.LParen)) {
+    advance(state); // '('
+    const opToken = state.current;
+    if (isOperatorToken(opToken[0])) {
+      advance(state);
+      name = text(state, opToken);
+    } else {
+      error(state, "expected operator in parentheses");
+      synchronize(state);
+      return null;
+    }
+    if (!expect(state, TokenKind.RParen, "expected ')' after operator")) {
+      synchronize(state);
+      return null;
+    }
+  } else if (at(state, TokenKind.Upper)) {
+    // Support qualified names: foreign Module.name : type
+    const moduleToken = advance(state);
+    const moduleName = text(state, moduleToken);
+    if (!expect(state, TokenKind.Dot, "expected '.' after module name")) {
+      synchronize(state);
+      return null;
+    }
+    const funcToken = expect(state, TokenKind.Lower, "expected function name after '.'");
+    if (!funcToken) {
+      synchronize(state);
+      return null;
+    }
+    name = `${moduleName}.${text(state, funcToken)}`;
+  } else {
+    const nameToken = expect(state, TokenKind.Lower, "expected foreign function name");
+    if (!nameToken) {
+      synchronize(state);
+      return null;
+    }
+    name = text(state, nameToken);
+  }
 
   if (!expect(state, TokenKind.Colon, "expected ':' after foreign function name")) {
     synchronize(state);
@@ -632,290 +438,281 @@ const parseForeignBinding = (state: ParserState): ast.ForeignBinding | null => {
     return null;
   }
 
-  return ast.foreignBinding(name, type, span(start, state.current[1]), nameSpan);
+  return S.sdeclforeign(name, type, span(start, state.current[1]));
 };
 
+const isOperatorToken = (kind: TokenKind): boolean =>
+  kind === TokenKind.Plus ||
+  kind === TokenKind.Minus ||
+  kind === TokenKind.Star ||
+  kind === TokenKind.Slash ||
+  kind === TokenKind.Lt ||
+  kind === TokenKind.Le ||
+  kind === TokenKind.Gt ||
+  kind === TokenKind.Ge ||
+  kind === TokenKind.EqEq ||
+  kind === TokenKind.Ne;
+
+type LetResult =
+  | { kind: "decl"; decl: S.SDeclLet | S.SDeclLetRec }
+  | { kind: "expr"; expr: S.SExpr };
+
 /**
- * Parse a binding inside a module: let name params = expr
- * Unlike top-level bindings, these always produce a RecBinding.
+ * Parse pattern destructuring in let: let (a, b) = expr in body
+ * Desugars to: match expr when (a, b) -> body end
  */
-const parseModuleBinding = (state: ParserState): ast.RecBinding | null => {
+const parseLetPattern = (state: ParserState, start: number, _recursive: boolean): LetResult => {
+  // Parse the pattern (must be a tuple or other pattern starting with '(')
+  const pattern = parsePattern(state);
+
+  expect(state, TokenKind.Eq, "expected '=' after pattern");
+
+  const value = parseExpr(state);
+
+  // Must have 'in' for pattern destructuring (always an expression, not a declaration)
+  if (!at(state, TokenKind.In)) {
+    error(state, "expected 'in' after pattern binding value");
+    return { kind: "expr", expr: S.sint(0) };
+  }
+  advance(state); // 'in'
+
+  const body = parseExpr(state);
+  const end = body.span?.end ?? state.current[1];
+
+  // Desugar to match expression: match value when pattern -> body end
+  const matchExpr = S.smatch(value, [{ pattern, guard: null, body }], span(start, end));
+  return { kind: "expr", expr: matchExpr };
+};
+
+const parseLetDeclOrExpr = (state: ParserState): LetResult => {
+  const start = state.current[1];
   advance(state); // 'let'
 
   const recursive = at(state, TokenKind.Rec);
   if (recursive) advance(state);
 
-  return parseModuleBindingCore(state);
-};
+  // Check for pattern destructuring: let (a, b) = ...
+  if (at(state, TokenKind.LParen)) {
+    return parseLetPattern(state, start, recursive);
+  }
 
-/**
- * Parse a binding after 'and' keyword (used for mutually recursive bindings)
- */
-const parseModuleBindingAfterAnd = (state: ParserState): ast.RecBinding | null => {
-  return parseModuleBindingCore(state);
-};
-
-/**
- * Core binding parsing logic shared by let and and bindings
- */
-const parseModuleBindingCore = (state: ParserState): ast.RecBinding | null => {
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
     synchronize(state);
-    return null;
+    return { kind: "expr", expr: S.sint(0) };
   }
-  const name = text(state, nameToken);
-  const nameSpan = tokenSpan(nameToken);
-  const params = parseParams(state);
+  const firstName = text(state, nameToken);
 
-  let returnType: ast.TypeExpr | undefined;
+  // Parse parameters
+  const params: string[] = [];
+  while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
+    if (at(state, TokenKind.LParen)) {
+      // Skip typed parameter for now
+      advance(state);
+      const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
+      if (paramToken) params.push(text(state, paramToken));
+      if (at(state, TokenKind.Colon)) {
+        advance(state);
+        parseType(state); // Skip type annotation
+      }
+      expect(state, TokenKind.RParen, "expected ')'");
+    } else {
+      params.push(text(state, advance(state)));
+    }
+  }
+
+  // Skip return type annotation
   if (at(state, TokenKind.Colon)) {
     advance(state);
-    returnType = parseType(state) ?? undefined;
+    parseType(state);
   }
 
   expect(state, TokenKind.Eq, "expected '=' after parameters");
-  const value = wrapInLambdas(params, parseExpr(state));
 
-  return ast.recBinding(name, value, nameSpan, returnType);
-};
+  const value = parseExpr(state);
 
-// =============================================================================
-// USE DECLARATIONS
-// =============================================================================
+  // Wrap in lambda if there are parameters
+  const wrappedValue = params.length > 0 ? S.sabs(params, value) : value;
 
-const parseUseDecl = (state: ParserState): ast.UseDecl | null => {
-  const start = state.current[1];
-  advance(state); // 'use'
+  // Check for 'and' (mutual recursion) or 'in' (let expression)
+  if (at(state, TokenKind.AndKw)) {
+    // Mutual recursion: let rec f = ... and g = ...
+    const bindings: { name: string; value: S.SExpr }[] = [{ name: firstName, value: wrappedValue }];
 
-  const moduleToken = expect(state, TokenKind.Upper, "expected module name");
-  if (!moduleToken) {
-    synchronize(state);
-    return null;
-  }
-  const moduleName = text(state, moduleToken);
-  const moduleSpan = tokenSpan(moduleToken);
+    while (at(state, TokenKind.AndKw)) {
+      advance(state); // 'and'
+      const andNameToken = expect(state, TokenKind.Lower, "expected binding name");
+      if (!andNameToken) break;
+      const andName = text(state, andNameToken);
 
-  let imports: ast.ImportSpec | null = null;
-  let alias: string | undefined;
-  let aliasSpan: ast.Span | undefined;
-
-  // Check for import list: (..) or (items)
-  if (at(state, TokenKind.LParen)) {
-    advance(state); // (
-
-    if (at(state, TokenKind.Dot)) {
-      // Check for (..)
-      advance(state); // first .
-      if (at(state, TokenKind.Dot)) {
-        advance(state); // second .
-        imports = ast.importAll();
-      } else {
-        error(state, "expected '..' for import all");
-      }
-      expect(state, TokenKind.RParen, "expected ')' after '..'");
-    } else {
-      // Parse specific import items
-      const items = parseImportItems(state);
-      imports = ast.importSpecific(items);
-      expect(state, TokenKind.RParen, "expected ')' after import list");
-    }
-  }
-
-  // Check for 'as Alias'
-  if (at(state, TokenKind.As)) {
-    advance(state); // 'as'
-    const aliasToken = expect(state, TokenKind.Upper, "expected alias name");
-    if (aliasToken) {
-      alias = text(state, aliasToken);
-      aliasSpan = tokenSpan(aliasToken);
-    }
-  }
-
-  const end = state.current[1];
-  return ast.useDecl(moduleName, imports, alias, span(start, end), moduleSpan, aliasSpan);
-};
-
-/**
- * Parse import items: Maybe, Maybe(..), Maybe(Just, Nothing), map, filter
- */
-const parseImportItems = (state: ParserState): ast.ImportItem[] => {
-  const items: ast.ImportItem[] = [];
-
-  do {
-    if (at(state, TokenKind.Comma)) advance(state);
-
-    if (at(state, TokenKind.Upper)) {
-      // Type or Type(..) or Type(Con1, Con2)
-      const nameToken = advance(state);
-      const name = text(state, nameToken);
-      const nameSpan = tokenSpan(nameToken);
-      let constructors: readonly string[] | "all" | undefined;
-
-      if (at(state, TokenKind.LParen)) {
-        advance(state); // (
-        if (at(state, TokenKind.Dot)) {
-          // Type(..)
-          advance(state); // first .
-          if (at(state, TokenKind.Dot)) {
-            advance(state); // second .
-            constructors = "all";
-          } else {
-            error(state, "expected '..' for all constructors");
+      const andParams: string[] = [];
+      while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
+        if (at(state, TokenKind.LParen)) {
+          advance(state);
+          const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
+          if (paramToken) andParams.push(text(state, paramToken));
+          if (at(state, TokenKind.Colon)) {
+            advance(state);
+            parseType(state);
           }
+          expect(state, TokenKind.RParen, "expected ')'");
         } else {
-          // Type(Con1, Con2)
-          const cons: string[] = [];
-          do {
-            if (at(state, TokenKind.Comma)) advance(state);
-            const conToken = expect(state, TokenKind.Upper, "expected constructor name");
-            if (conToken) cons.push(text(state, conToken));
-          } while (at(state, TokenKind.Comma));
-          constructors = cons;
+          andParams.push(text(state, advance(state)));
         }
-        expect(state, TokenKind.RParen, "expected ')' after constructors");
       }
 
-      items.push(ast.importItem(name, constructors, nameSpan));
-    } else if (at(state, TokenKind.Lower)) {
-      // Value/function
-      const nameToken = advance(state);
-      items.push(ast.importItem(text(state, nameToken), undefined, tokenSpan(nameToken)));
-    } else {
-      break;
-    }
-  } while (at(state, TokenKind.Comma));
+      if (at(state, TokenKind.Colon)) {
+        advance(state);
+        parseType(state);
+      }
 
-  return items;
+      expect(state, TokenKind.Eq, "expected '=' after parameters");
+      const andValue = parseExpr(state);
+      const wrappedAndValue = andParams.length > 0 ? S.sabs(andParams, andValue) : andValue;
+      bindings.push({ name: andName, value: wrappedAndValue });
+    }
+
+    // Check for 'in' to make it an expression
+    if (at(state, TokenKind.In)) {
+      advance(state);
+      const body = parseExpr(state);
+      return {
+        kind: "expr",
+        expr: S.sletrec(bindings, body, span(start, body.span?.end ?? state.current[1])),
+      };
+    }
+
+    return { kind: "decl", decl: S.sdeclletrec(bindings, span(start, state.current[1])) };
+  }
+
+  if (at(state, TokenKind.In)) {
+    advance(state);
+    const body = parseExpr(state);
+    if (recursive) {
+      return {
+        kind: "expr",
+        expr: S.sletrec(
+          [{ name: firstName, value: wrappedValue }],
+          body,
+          span(start, body.span?.end ?? state.current[1]),
+        ),
+      };
+    }
+    return {
+      kind: "expr",
+      expr: S.slet(firstName, wrappedValue, body, span(start, body.span?.end ?? state.current[1])),
+    };
+  }
+
+  // Top-level declaration
+  if (recursive) {
+    return {
+      kind: "decl",
+      decl: S.sdeclletrec(
+        [{ name: firstName, value: wrappedValue }],
+        span(start, state.current[1]),
+      ),
+    };
+  }
+  return { kind: "decl", decl: S.sdecllet(firstName, wrappedValue, span(start, state.current[1])) };
 };
 
-/**
- * Parse a type expression including function types.
- * Type := TypeAtom | TypeAtom '->' Type
- */
-const parseType = (state: ParserState): ast.TypeExpr | null => {
-  const left = parseTypeAtom(state);
+// =============================================================================
+// TYPES
+// =============================================================================
+
+const parseType = (state: ParserState): S.SType | null => {
+  const left = parseTypeApp(state);
   if (!left) return null;
 
-  // Check for function type: a -> b
   if (at(state, TokenKind.Arrow)) {
-    advance(state); // ->
-    const right = parseType(state); // Right-associative
-    if (!right) return left;
-    return ast.tyfun(left, right);
+    advance(state);
+    const right = parseType(state);
+    if (!right) {
+      error(state, "expected type after '->'");
+      return left;
+    }
+    return S.stfun(left, right);
   }
 
   return left;
 };
 
-const parseTypeAtom = (state: ParserState): ast.TypeExpr | null => {
-  if (at(state, TokenKind.Lower)) {
-    return ast.tyvar(text(state, advance(state)));
+const parseTypeApp = (state: ParserState): S.SType | null => {
+  let left = parseTypeAtom(state);
+  if (!left) return null;
+
+  while (
+    atAny(state, TokenKind.Lower, TokenKind.Upper, TokenKind.LParen, TokenKind.LBrace) &&
+    !atNewStatement(state)
+  ) {
+    const arg = parseTypeAtom(state);
+    if (!arg) break;
+    left = S.stapp(left, arg);
   }
 
-  if (at(state, TokenKind.Upper)) {
-    const nameToken = advance(state);
-    const name = text(state, nameToken);
-
-    // Check for qualified type: Module.Type
-    let type: ast.TypeExpr;
-    if (at(state, TokenKind.Dot)) {
-      advance(state); // .
-      const typeNameToken = expect(state, TokenKind.Upper, "expected type name after '.'");
-      if (typeNameToken) {
-        type = ast.tyqual(name, text(state, typeNameToken));
-      } else {
-        type = ast.tycon(name);
-      }
-    } else {
-      type = ast.tycon(name);
-    }
-
-    while (
-      atAny(state, TokenKind.Lower, TokenKind.Upper, TokenKind.LParen) &&
-      !atNewStatement(state)
-    ) {
-      const arg = parseTypeAtomSimple(state);
-      if (arg) {
-        type = ast.tyapp(type, arg);
-      } else {
-        break;
-      }
-    }
-
-    return type;
-  }
-
-  if (at(state, TokenKind.LParen)) {
-    advance(state);
-    const first = parseType(state);
-    if (!first) {
-      expect(state, TokenKind.RParen, "expected ')' after type");
-      return null;
-    }
-
-    // Check for tuple type: (a, b, ...)
-    if (at(state, TokenKind.Comma)) {
-      const elements: ast.TypeExpr[] = [first];
-      while (at(state, TokenKind.Comma)) {
-        advance(state); // ,
-        const elem = parseType(state);
-        if (elem) elements.push(elem);
-      }
-      expect(state, TokenKind.RParen, "expected ')' after tuple type");
-      return ast.tytuple(elements);
-    }
-
-    expect(state, TokenKind.RParen, "expected ')' after type");
-    return first;
-  }
-
-  return null;
+  return left;
 };
 
-const parseTypeAtomSimple = (state: ParserState): ast.TypeExpr | null => {
+const parseTypeAtom = (state: ParserState): S.SType | null => {
   if (at(state, TokenKind.Lower)) {
-    return ast.tyvar(text(state, advance(state)));
+    const token = advance(state);
+    return S.stvar(text(state, token), tokenSpan(token));
   }
 
   if (at(state, TokenKind.Upper)) {
-    const nameToken = advance(state);
-    const name = text(state, nameToken);
-
-    // Check for qualified type: Module.Type
-    if (at(state, TokenKind.Dot)) {
-      advance(state); // .
-      const typeNameToken = expect(state, TokenKind.Upper, "expected type name after '.'");
-      if (typeNameToken) {
-        return ast.tyqual(name, text(state, typeNameToken));
-      }
-    }
-
-    return ast.tycon(name);
+    const token = advance(state);
+    return S.stcon(text(state, token), tokenSpan(token));
   }
 
   if (at(state, TokenKind.LParen)) {
     advance(state);
     const first = parseType(state);
     if (!first) {
-      expect(state, TokenKind.RParen, "expected ')' after type");
+      expect(state, TokenKind.RParen, "expected ')'");
       return null;
     }
 
-    // Check for tuple type: (a, b, ...)
     if (at(state, TokenKind.Comma)) {
-      const elements: ast.TypeExpr[] = [first];
+      const elements: S.SType[] = [first];
       while (at(state, TokenKind.Comma)) {
-        advance(state); // ,
+        advance(state);
         const elem = parseType(state);
         if (elem) elements.push(elem);
       }
-      expect(state, TokenKind.RParen, "expected ')' after tuple type");
-      return ast.tytuple(elements);
+      expect(state, TokenKind.RParen, "expected ')'");
+      return S.sttuple(elements);
     }
 
-    expect(state, TokenKind.RParen, "expected ')' after type");
+    expect(state, TokenKind.RParen, "expected ')'");
     return first;
+  }
+
+  if (at(state, TokenKind.LBrace)) {
+    advance(state);
+    const fields: { name: string; type: S.SType }[] = [];
+
+    if (!at(state, TokenKind.RBrace)) {
+      const firstName = expect(state, TokenKind.Lower, "expected field name");
+      if (firstName) {
+        expect(state, TokenKind.Colon, "expected ':'");
+        const firstType = parseType(state);
+        if (firstType) fields.push({ name: text(state, firstName), type: firstType });
+
+        while (at(state, TokenKind.Comma)) {
+          advance(state);
+          const fieldName = expect(state, TokenKind.Lower, "expected field name");
+          if (fieldName) {
+            expect(state, TokenKind.Colon, "expected ':'");
+            const fieldType = parseType(state);
+            if (fieldType) fields.push({ name: text(state, fieldName), type: fieldType });
+          }
+        }
+      }
+    }
+
+    expect(state, TokenKind.RBrace, "expected '}'");
+    return S.strecord(fields);
   }
 
   return null;
@@ -925,29 +722,22 @@ const parseTypeAtomSimple = (state: ParserState): ast.TypeExpr | null => {
 // EXPRESSIONS (PRATT PARSER)
 // =============================================================================
 
-const parseExpr = (state: ParserState): ast.Expr => parsePrecedence(state, Bp.None, true);
+const parseExpr = (state: ParserState): S.SExpr => parsePrecedence(state, Bp.None, true);
+const parseExprNoLambda = (state: ParserState): S.SExpr => parsePrecedence(state, Bp.None, false);
 
-/** Parse expression without allowing naked lambdas at the top level */
-const parseExprNoLambda = (state: ParserState): ast.Expr => parsePrecedence(state, Bp.None, false);
-
-const parsePrecedence = (state: ParserState, minBp: number, allowLambda = true): ast.Expr => {
+const parsePrecedence = (state: ParserState, minBp: number, allowLambda: boolean): S.SExpr => {
   let left = allowLambda ? parsePrefix(state) : parsePrefixNoLambda(state);
 
   while (true) {
     const bp = infixBindingPower(state);
     if (bp <= minBp) break;
-    left = parseInfix(state, left, bp);
+    left = parseInfix(state, left, bp, allowLambda);
   }
 
   return left;
 };
 
-/**
- * Parse a prefix expression, optionally allowing naked lambdas.
- * @param allowLambda - if true, x y -> body is parsed as a lambda.
- *                      Set to false in function application context.
- */
-const parsePrefixImpl = (state: ParserState, allowLambda: boolean): ast.Expr => {
+const parsePrefixImpl = (state: ParserState, allowLambda: boolean): S.SExpr => {
   const token = state.current;
   const kind = token[0];
   const start = token[1];
@@ -955,59 +745,54 @@ const parsePrefixImpl = (state: ParserState, allowLambda: boolean): ast.Expr => 
   switch (kind) {
     case TokenKind.Int: {
       advance(state);
-      return ast.int(parseInt(text(state, token), 10), tokenSpan(token));
+      return S.sint(parseInt(text(state, token), 10), tokenSpan(token));
     }
 
     case TokenKind.Float: {
       advance(state);
-      return ast.float(parseFloat(text(state, token)), tokenSpan(token));
+      return S.sfloat(parseFloat(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.String: {
       advance(state);
-      return ast.str(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
+      return S.sstring(parseStringContent(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.Char: {
       advance(state);
-      return ast.char(parseCharContent(state, text(state, token), token[1]), tokenSpan(token));
+      return S.schar(parseCharContent(text(state, token)), tokenSpan(token));
     }
 
     case TokenKind.True:
       advance(state);
-      return ast.bool(true, tokenSpan(token));
+      return S.sbool(true, tokenSpan(token));
 
     case TokenKind.False:
       advance(state);
-      return ast.bool(false, tokenSpan(token));
+      return S.sbool(false, tokenSpan(token));
 
     case TokenKind.Lower: {
-      // Check if this is a multi-param lambda: x y z -> body
-      // Only allow naked lambdas at expression start, not as function arguments
       if (allowLambda && isLambdaStart(state)) {
         return parseLambda(state);
       }
-
       advance(state);
-      const name = text(state, token);
-      return ast.var_(name, tokenSpan(token));
+      return S.svar(text(state, token), tokenSpan(token));
     }
 
     case TokenKind.Upper: {
       advance(state);
-      return ast.var_(text(state, token), tokenSpan(token));
+      return S.scon(text(state, token), tokenSpan(token));
     }
 
     case TokenKind.LParen:
       return parseParenOrTuple(state);
 
-    // Unary negation: -x desugars to 0 - x
     case TokenKind.Minus: {
       advance(state);
-      // Parse with high precedence to bind tightly (higher than multiplicative)
-      const operand = parsePrecedence(state, Bp.Multiplicative + 1);
+      const operand = parsePrecedence(state, Bp.Multiplicative + 1, false);
       const end = operand.span?.end ?? state.current[1];
-      return ast.binOp("-", ast.int(0, span(start, start)), operand, span(start, end));
+      // Unary negation: -x is SBinOp("-", 0, x)
+      return S.sbinop("-", S.sint(0, span(start, start)), operand, span(start, end));
     }
 
     case TokenKind.LBrace:
@@ -1031,134 +816,89 @@ const parsePrefixImpl = (state: ParserState, allowLambda: boolean): ast.Expr => 
     default: {
       error(state, `unexpected token: ${TokenKind[kind]}`);
       advance(state);
-      return ast.int(0);
+      return S.sint(0);
     }
   }
 };
 
-/** Parse a prefix expression (allows naked lambdas at expression start) */
-const parsePrefix = (state: ParserState): ast.Expr => parsePrefixImpl(state, true);
+const parsePrefix = (state: ParserState): S.SExpr => parsePrefixImpl(state, true);
+const parsePrefixNoLambda = (state: ParserState): S.SExpr => parsePrefixImpl(state, false);
 
-/** Parse a prefix expression without allowing naked lambdas (for function arguments) */
-const parsePrefixNoLambda = (state: ParserState): ast.Expr => parsePrefixImpl(state, false);
-
-const parseInfix = (state: ParserState, left: ast.Expr, bp: number): ast.Expr => {
+const parseInfix = (
+  state: ParserState,
+  left: S.SExpr,
+  bp: number,
+  allowLambda: boolean,
+): S.SExpr => {
   const kind = state.current[0];
   const start = left.span?.start ?? 0;
 
-  const binOp = (op: ast.Op): ast.Expr => {
-    advance(state);
-    const right = parsePrecedence(state, bp);
-    const end = right.span?.end ?? state.current[1];
-    return ast.binOp(op, left, right, span(start, end));
-  };
-
   switch (kind) {
     case TokenKind.Plus:
-      return binOp("+");
     case TokenKind.Minus:
-      return binOp("-");
     case TokenKind.Star:
-      return binOp("*");
     case TokenKind.Slash:
-      return binOp("/");
     case TokenKind.Lt:
-      return binOp("<");
     case TokenKind.Le:
-      return binOp("<=");
     case TokenKind.Gt:
-      return binOp(">");
     case TokenKind.Ge:
-      return binOp(">=");
     case TokenKind.EqEq:
-      return binOp("==");
     case TokenKind.Ne:
-      return binOp("!=");
-
-    // Logical operators desugar to if expressions for short-circuit evaluation:
-    // a && b  →  if a then b else false
-    // a || b  →  if a then true else b
-    case TokenKind.And: {
-      advance(state);
-      const right = parsePrecedence(state, bp);
-      const end = right.span?.end ?? state.current[1];
-      return ast.if_(left, right, ast.bool(false), span(start, end));
-    }
-
+    case TokenKind.And:
     case TokenKind.Or: {
-      advance(state);
-      const right = parsePrecedence(state, bp);
+      const opToken = advance(state);
+      const op = text(state, opToken);
+      const right = parsePrecedence(state, bp, allowLambda);
       const end = right.span?.end ?? state.current[1];
-      return ast.if_(left, ast.bool(true), right, span(start, end));
+      return S.sbinop(op, left, right, span(start, end));
     }
 
     case TokenKind.Pipe: {
       advance(state);
-      const right = parsePrecedence(state, bp);
+      const right = parsePrecedence(state, bp, allowLambda);
       const end = right.span?.end ?? state.current[1];
-      return ast.app(right, left, span(start, end));
+      return S.spipe(left, right, span(start, end));
     }
 
-    // Cons operator: x :: xs  →  Cons x xs (right-associative)
     case TokenKind.ColonColon: {
       advance(state);
-      // Use bp - 1 for right-associativity: a :: b :: c  →  a :: (b :: c)
-      const right = parsePrecedence(state, bp - 1);
+      // Right-associative
+      const right = parsePrecedence(state, bp - 1, allowLambda);
       const end = right.span?.end ?? state.current[1];
-      const cons = ast.var_("Cons");
-      return ast.app(ast.app(cons, left), right, span(start, end));
+      return S.scons(left, right, span(start, end));
     }
 
     case TokenKind.Dot: {
       advance(state);
 
-      // Check for qualified access: Module.name (left is uppercase Var)
-      if (
-        left.kind === "Var" &&
-        left.name.length > 0 &&
-        left.name[0]!.toUpperCase() === left.name[0]
-      ) {
-        // This could be Module.member
-        if (at(state, TokenKind.Lower) || at(state, TokenKind.Upper)) {
-          const memberToken = advance(state);
-          const member = text(state, memberToken);
-          const memberSpan = tokenSpan(memberToken);
-          const end = memberToken[2];
-          return ast.qualifiedVar(left.name, member, span(start, end), left.span, memberSpan);
-        }
+      // Tuple indexing: tuple.0
+      if (at(state, TokenKind.Int)) {
+        const indexToken = advance(state);
+        const field = text(state, indexToken);
+        return S.sfield(left, field, span(start, indexToken[2]));
       }
 
-      // Tuple indexing: tuple.0, tuple.1, etc.
-      if (at(state, TokenKind.Int)) {
-        const indexToken = state.current;
-        advance(state);
-        const indexStr = text(state, indexToken);
-        const index = parseInt(indexStr, 10);
-        if (index < 0) {
-          state.diagnostics.push({
-            start: indexToken[1],
-            end: indexToken[2],
-            message: "tuple index must be a non-negative integer",
-            severity: "error",
-          });
-        }
-        const end = indexToken[2];
-        return ast.tupleIndex(left, index, span(start, end));
+      // Record field access: record.field OR qualified constructor: Module.Constructor
+      let fieldToken: Tok | null;
+      if (at(state, TokenKind.Lower)) {
+        fieldToken = advance(state);
+      } else if (at(state, TokenKind.Upper)) {
+        // Allow uppercase for qualified constructors (Module.Constructor)
+        fieldToken = advance(state);
+      } else {
+        error(state, "expected field name after '.'");
+        fieldToken = null;
       }
-      // Record field access: record.field
-      const fieldToken = expect(state, TokenKind.Lower, "expected field name or index after '.'");
       const field = fieldToken ? text(state, fieldToken) : "?";
       const end = fieldToken ? fieldToken[2] : state.current[1];
-      return ast.fieldAccess(left, field, span(start, end));
+      return S.sfield(left, field, span(start, end));
     }
 
     default: {
-      // Parse argument with application precedence to capture field accesses (e.g., Set.empty)
-      // but not lower-precedence operators. Use allowLambda=false to prevent
-      // `f x -> y` from being parsed as `f (x -> y)`
+      // Function application
       const right = parsePrecedence(state, bp, false);
       const end = right.span?.end ?? state.current[1];
-      return ast.app(left, right, span(start, end));
+      return S.sapp(left, right, span(start, end));
     }
   }
 };
@@ -1169,261 +909,175 @@ const infixBindingPower = (state: ParserState): number => {
   switch (kind) {
     case TokenKind.Pipe:
       return Bp.Pipe;
-
     case TokenKind.ColonColon:
       return Bp.Cons;
-
     case TokenKind.Or:
       return Bp.Or;
-
     case TokenKind.And:
       return Bp.And;
-
     case TokenKind.EqEq:
     case TokenKind.Ne:
       return Bp.Equality;
-
     case TokenKind.Lt:
     case TokenKind.Le:
     case TokenKind.Gt:
     case TokenKind.Ge:
       return Bp.Comparison;
-
     case TokenKind.Plus:
     case TokenKind.Minus:
       return Bp.Additive;
-
     case TokenKind.Star:
     case TokenKind.Slash:
       return Bp.Multiplicative;
-
     case TokenKind.Dot:
       return Bp.FieldAccess;
-
-    case TokenKind.Lower:
-    case TokenKind.Upper:
-    case TokenKind.Int:
-    case TokenKind.Float:
-    case TokenKind.String:
-    case TokenKind.Char:
-    case TokenKind.True:
-    case TokenKind.False:
-    case TokenKind.LParen:
-    case TokenKind.LBrace:
-    case TokenKind.LBracket:
-      if (state.lexer.atLineStart) {
-        return Bp.None;
-      }
-      return Bp.Application;
-
     default:
+      // Application - but not across new statements (newlines at start of line)
+      if (
+        !atNewStatement(state) &&
+        atAny(
+          state,
+          TokenKind.Int,
+          TokenKind.Float,
+          TokenKind.String,
+          TokenKind.Char,
+          TokenKind.True,
+          TokenKind.False,
+          TokenKind.Lower,
+          TokenKind.Upper,
+          TokenKind.LParen,
+          TokenKind.LBrace,
+          TokenKind.LBracket,
+        )
+      ) {
+        return Bp.Application;
+      }
       return Bp.None;
   }
 };
 
 // =============================================================================
-// COMPOUND EXPRESSIONS
+// EXPRESSION HELPERS
 // =============================================================================
 
-const parseParenOrTuple = (state: ParserState): ast.Expr => {
+const parseParenOrTuple = (state: ParserState): S.SExpr => {
   const start = state.current[1];
   advance(state); // (
 
   if (at(state, TokenKind.RParen)) {
+    // Unit: ()
+    const end = state.current[2];
     advance(state);
-    error(state, "empty parentheses");
-    return ast.int(0);
-  }
-
-  // Check if this is an annotated lambda: (name : type) -> body
-  // We look for: Lower Colon
-  if (at(state, TokenKind.Lower)) {
-    const savedPos = state.lexer.pos;
-    const savedCurrent = state.current;
-    const nameToken = advance(state);
-
-    if (at(state, TokenKind.Colon)) {
-      // This is (name : type) -> body
-      advance(state); // :
-      const paramType = parseType(state);
-      expect(state, TokenKind.RParen, "expected ')' after type");
-
-      if (at(state, TokenKind.Arrow)) {
-        advance(state); // ->
-        const body = parseExpr(state);
-        const end = body.span?.end ?? state.current[1];
-        return ast.abs(
-          text(state, nameToken),
-          body,
-          span(start, end),
-          tokenSpan(nameToken),
-          paramType ?? undefined,
-        );
-      }
-
-      // Not followed by ->, this is an error
-      error(state, "expected '->' after annotated parameter");
-      return ast.int(0);
-    }
-
-    // Not an annotated lambda, restore and continue
-    state.lexer.pos = savedPos;
-    state.current = savedCurrent;
+    return S.stuple([], span(start, end));
   }
 
   const first = parseExpr(state);
 
   if (at(state, TokenKind.Comma)) {
-    const elements: ast.Expr[] = [first];
+    // Tuple: (a, b, c)
+    const elements: S.SExpr[] = [first];
     while (at(state, TokenKind.Comma)) {
       advance(state);
       elements.push(parseExpr(state));
     }
-    const endToken = expect(state, TokenKind.RParen, "expected ')' after tuple");
+    const endToken = expect(state, TokenKind.RParen, "expected ')'");
     const end = endToken ? endToken[2] : state.current[1];
-    return ast.tuple(elements, span(start, end));
+    return S.stuple(elements, span(start, end));
   }
 
-  expect(state, TokenKind.RParen, "expected ')' after expression");
+  // Check for type annotation: (e : T)
+  if (at(state, TokenKind.Colon)) {
+    advance(state);
+    const type = parseType(state);
+    const endToken = expect(state, TokenKind.RParen, "expected ')'");
+    const end = endToken ? endToken[2] : state.current[1];
+    if (type) {
+      return S.sannot(first, type, span(start, end));
+    }
+  }
+
+  expect(state, TokenKind.RParen, "expected ')'");
   return first;
 };
 
-/**
- * Parse a record literal or record update expression.
- *
- * Record literal: { field1 = value1, field2 = value2 }
- * Record update: { base | field1 = value1, field2 = value2 }
- *
- * Disambiguation: If the content after { is a field assignment (lowercase = ...)
- * or field punning (lowercase followed by , or }), it's a record literal.
- * Otherwise, parse as expression and expect | for record update.
- */
-const parseRecord = (state: ParserState): ast.Expr => {
+const parseRecord = (state: ParserState): S.SExpr => {
   const start = state.current[1];
   advance(state); // {
 
-  // Empty record
   if (at(state, TokenKind.RBrace)) {
-    const endToken = advance(state);
-    return ast.record([], span(start, endToken[2]));
+    const end = state.current[2];
+    advance(state);
+    return S.srecord([], span(start, end));
   }
 
-  // Check if this is a record literal or record update
-  // Record literal starts with: lowercase followed by =, ,, or }
-  // Record update starts with: an expression followed by |
-  const isRecordLiteralStart =
-    at(state, TokenKind.Lower) && peekIsAny(state, TokenKind.Eq, TokenKind.Comma, TokenKind.RBrace);
+  // Check for record update: { r | x = 1 }
+  const firstToken = state.current;
+  if (at(state, TokenKind.Lower)) {
+    const firstName = text(state, advance(state));
 
-  if (isRecordLiteralStart) {
-    // Parse as record literal
-    return parseRecordLiteralFields(state, start);
-  }
+    if (at(state, TokenKind.Bar)) {
+      // Record update
+      advance(state);
+      const fields: { name: string; value: S.SExpr }[] = [];
 
-  // Try parsing as record update: { expr | fields }
-  const baseExpr = parseExpr(state);
+      do {
+        if (at(state, TokenKind.Comma)) advance(state);
+        const fieldName = expect(state, TokenKind.Lower, "expected field name");
+        if (!fieldName) break;
+        expect(state, TokenKind.Eq, "expected '='");
+        const fieldValue = parseExpr(state);
+        fields.push({ name: text(state, fieldName), value: fieldValue });
+      } while (at(state, TokenKind.Comma));
 
-  if (at(state, TokenKind.Bar)) {
-    advance(state); // |
-    const fields = parseRecordUpdateFields(state);
-    const endToken = expect(state, TokenKind.RBrace, "expected '}' after record update");
-    const end = endToken ? endToken[2] : state.current[1];
-    return ast.recordUpdate(baseExpr, fields, span(start, end));
-  }
+      const endToken = expect(state, TokenKind.RBrace, "expected '}'");
+      const end = endToken ? endToken[2] : state.current[1];
+      return S.srecordUpdate(S.svar(firstName, tokenSpan(firstToken)), fields, span(start, end));
+    }
 
-  // Not followed by |, this is an error - expected record literal or update
-  error(state, "expected '|' for record update or field assignment in record literal");
-  const endToken = expect(state, TokenKind.RBrace, "expected '}' after record");
-  const end = endToken ? endToken[2] : state.current[1];
-  return ast.record([], span(start, end));
-};
+    // Regular record starting with a field
+    const fields: { name: string; value: S.SExpr }[] = [];
 
-/**
- * Peek at the next token (after current) without consuming.
- */
-const peekIsAny = (state: ParserState, ...kinds: TokenKind[]): boolean => {
-  const savedPos = state.lexer.pos;
-  const savedCurrent = state.current;
-  advance(state);
-  const result = kinds.includes(state.current[0]);
-  state.lexer.pos = savedPos;
-  state.current = savedCurrent;
-  return result;
-};
-
-/**
- * Parse record literal fields: { field1 = value1, field2 = value2 }
- */
-const parseRecordLiteralFields = (state: ParserState, start: number): ast.Record => {
-  const fields: ast.RecordField[] = [];
-
-  do {
-    if (at(state, TokenKind.Comma)) advance(state);
-
-    const nameToken = expect(state, TokenKind.Lower, "expected field name");
-    if (!nameToken) break;
-    const name = text(state, nameToken);
-    const fieldStart = nameToken[1];
-    const fieldEnd = nameToken[2];
-
-    // Support field punning: { x, y } is shorthand for { x = x, y = y }
     if (at(state, TokenKind.Eq)) {
       advance(state);
-      const value = parseExpr(state);
-      const valueEnd = value.span?.end ?? state.current[1];
-      fields.push(ast.field(name, value, span(fieldStart, valueEnd)));
+      const firstValue = parseExpr(state);
+      fields.push({ name: firstName, value: firstValue });
     } else {
       // Punning: { x } means { x = x }
-      const value = ast.var_(name, span(fieldStart, fieldEnd));
-      fields.push(ast.field(name, value, span(fieldStart, fieldEnd)));
+      fields.push({ name: firstName, value: S.svar(firstName, tokenSpan(firstToken)) });
     }
-  } while (at(state, TokenKind.Comma));
 
-  const endToken = expect(state, TokenKind.RBrace, "expected '}' after record");
-  const end = endToken ? endToken[2] : state.current[1];
-  return ast.record(fields, span(start, end));
-};
+    while (at(state, TokenKind.Comma)) {
+      advance(state);
+      const fieldName = expect(state, TokenKind.Lower, "expected field name");
+      if (!fieldName) break;
 
-/**
- * Parse record update fields (after the |): field1 = value1, field2 = value2
- * Note: No field punning in updates - must use explicit assignment.
- */
-const parseRecordUpdateFields = (state: ParserState): ast.RecordField[] => {
-  const fields: ast.RecordField[] = [];
+      if (at(state, TokenKind.Eq)) {
+        advance(state);
+        const fieldValue = parseExpr(state);
+        fields.push({ name: text(state, fieldName), value: fieldValue });
+      } else {
+        // Punning
+        fields.push({
+          name: text(state, fieldName),
+          value: S.svar(text(state, fieldName), tokenSpan(fieldName)),
+        });
+      }
+    }
 
-  if (at(state, TokenKind.RBrace)) {
-    error(state, "expected at least one field in record update");
-    return fields;
+    const endToken = expect(state, TokenKind.RBrace, "expected '}'");
+    const end = endToken ? endToken[2] : state.current[1];
+    return S.srecord(fields, span(start, end));
   }
 
-  do {
-    if (at(state, TokenKind.Comma)) advance(state);
-
-    const nameToken = expect(state, TokenKind.Lower, "expected field name");
-    if (!nameToken) break;
-    const name = text(state, nameToken);
-    const fieldStart = nameToken[1];
-
-    if (!expect(state, TokenKind.Eq, "expected '=' after field name in record update")) {
-      break;
-    }
-
-    const value = parseExpr(state);
-    const valueEnd = value.span?.end ?? state.current[1];
-    fields.push(ast.field(name, value, span(fieldStart, valueEnd)));
-  } while (at(state, TokenKind.Comma));
-
-  return fields;
+  error(state, "expected field name in record");
+  return S.srecord([], span(start, state.current[1]));
 };
 
-/**
- * Parse a list literal: [1, 2, 3]
- * Desugars to: Cons 1 (Cons 2 (Cons 3 Nil))
- */
-const parseListLiteral = (state: ParserState): ast.Expr => {
+const parseListLiteral = (state: ParserState): S.SList => {
   const start = state.current[1];
   advance(state); // [
 
-  const elements: ast.Expr[] = [];
+  const elements: S.SExpr[] = [];
 
   if (!at(state, TokenKind.RBracket)) {
     do {
@@ -1432,130 +1086,76 @@ const parseListLiteral = (state: ParserState): ast.Expr => {
     } while (at(state, TokenKind.Comma));
   }
 
-  const endToken = expect(state, TokenKind.RBracket, "expected ']' after list");
+  const endToken = expect(state, TokenKind.RBracket, "expected ']'");
   const end = endToken ? endToken[2] : state.current[1];
 
-  // Desugar [x1, x2, x3] to Cons x1 (Cons x2 (Cons x3 Nil))
-  // Build from right to left
-  let result: ast.Expr = ast.var_("Nil", span(end - 1, end));
-  for (let i = elements.length - 1; i >= 0; i--) {
-    const elem = elements[i]!;
-    const elemStart = elem.span?.start ?? start;
-    result = ast.app(ast.app(ast.var_("Cons"), elem), result, span(elemStart, end));
-  }
-
-  return result;
+  return S.slist(elements, span(start, end));
 };
 
-const parseIf = (state: ParserState): ast.Expr => {
+const parseIf = (state: ParserState): S.SIf => {
   const start = state.current[1];
   advance(state); // if
 
   const cond = parseExpr(state);
-  expect(state, TokenKind.Then, "expected 'then' after condition");
+  expect(state, TokenKind.Then, "expected 'then'");
   const thenBranch = parseExpr(state);
-  expect(state, TokenKind.Else, "expected 'else' after 'then' branch");
+  expect(state, TokenKind.Else, "expected 'else'");
   const elseBranch = parseExpr(state);
   const end = elseBranch.span?.end ?? state.current[1];
 
-  return ast.if_(cond, thenBranch, elseBranch, span(start, end));
+  return S.sif(cond, thenBranch, elseBranch, span(start, end));
 };
 
-const parseMatch = (state: ParserState): ast.Expr => {
+const parseMatch = (state: ParserState): S.SMatch => {
   const start = state.current[1];
   advance(state); // match
 
   const scrutinee = parseExpr(state);
+  const cases: S.SCase[] = [];
 
-  const cases: ast.Case[] = [];
   while (at(state, TokenKind.When)) {
-    const caseStart = state.current[1];
     advance(state); // when
     let pattern = parsePattern(state);
 
-    // Check for or-pattern: when pat1 | pat2 | pat3 -> ...
-    if (at(state, TokenKind.Bar)) {
-      const alternatives: ast.Pattern[] = [pattern];
-      while (at(state, TokenKind.Bar)) {
-        advance(state);
-        alternatives.push(parsePattern(state));
-      }
-      const orEnd = alternatives[alternatives.length - 1]?.span?.end ?? state.current[1];
-      pattern = ast.por(alternatives, span(caseStart, orEnd));
+    // Or-pattern: when p1 | p2 -> ...
+    while (at(state, TokenKind.Bar)) {
+      advance(state);
+      const right = parsePattern(state);
+      pattern = S.spor(pattern, right);
     }
 
-    // Parse optional guard: when pattern if condition -> body
-    // Use parseExprNoLambda to avoid `f x -> ...` being parsed as lambda
-    let guard: ast.Expr | undefined;
+    // Guard: when pattern if condition -> body
+    let guard: S.SExpr | null = null;
     if (at(state, TokenKind.If)) {
       advance(state);
       guard = parseExprNoLambda(state);
     }
 
-    expect(state, TokenKind.Arrow, "expected '->' after pattern");
+    expect(state, TokenKind.Arrow, "expected '->'");
     const body = parseExpr(state);
-    const caseEnd = body.span?.end ?? state.current[1];
-    cases.push(ast.case_(pattern, body, guard, span(caseStart, caseEnd)));
+    cases.push({ pattern, guard, body });
   }
 
-  const endToken = expect(state, TokenKind.End, "expected 'end' after match cases");
+  const endToken = expect(state, TokenKind.End, "expected 'end'");
   const end = endToken ? endToken[2] : state.current[1];
 
-  return ast.match(scrutinee, cases, span(start, end));
+  return S.smatch(scrutinee, cases, span(start, end));
 };
 
-/**
- * Parse a do-expression with monadic bind syntax.
- *
- * Syntax:
- *   do
- *     x <- expr           -- simple bind
- *     (a, b) <- expr      -- pattern bind (destructuring)
- *     _ <- expr           -- discard result
- *     let x = expr        -- simple let
- *     let (a, b) = expr   -- pattern let (destructuring)
- *     expr                -- expression statement (bind to _)
- *     finalExpr           -- final expression (returned as-is)
- *   end
- *
- * Desugars to nested flatMap, let, and match expressions:
- *   x <- e; rest          =>  flatMap (x -> rest) e
- *   (a, b) <- e; rest     =>  flatMap ($do -> match $do when (a, b) -> rest end) e
- *   let x = e; rest       =>  let x = e in rest
- *   let (a, b) = e; rest  =>  match e when (a, b) -> rest end
- *   e; rest               =>  flatMap (_ -> rest) e
- *   finalExpr             =>  finalExpr
- */
-const parseDo = (state: ParserState): ast.Expr => {
+const parseDo = (state: ParserState): S.SDo => {
   const start = state.current[1];
-  advance(state); // 'do'
+  advance(state); // do
 
-  type DoStmt =
-    | { kind: "bind"; pattern: ast.Pattern; expr: ast.Expr }
-    | { kind: "let"; pattern: ast.Pattern; value: ast.Expr }
-    | { kind: "expr"; expr: ast.Expr };
-
-  const stmts: DoStmt[] = [];
-  let tempCounter = 0;
+  const stmts: S.SDoStmt[] = [];
 
   while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
-    // Check for let statement: let pattern = expr
     if (at(state, TokenKind.Let)) {
       advance(state);
-      if (at(state, TokenKind.Rec)) {
-        error(state, "'let rec' is not allowed in do-notation");
-        advance(state);
-      }
       const pattern = parsePattern(state);
       expect(state, TokenKind.Eq, "expected '='");
       const value = parseExpr(state);
-      stmts.push({ kind: "let", pattern, value });
-      continue;
-    }
-
-    // Check if this looks like a pattern followed by <-
-    // Patterns can start with: _, lowercase, uppercase, (, {, literals
-    if (
+      stmts.push({ kind: "DoLet", pattern, expr: value });
+    } else if (
       atAny(
         state,
         TokenKind.Underscore,
@@ -1565,951 +1165,254 @@ const parseDo = (state: ParserState): ast.Expr => {
         TokenKind.LBrace,
       )
     ) {
-      // Save state for potential backtracking
-      const savedLexerPos = state.lexer.pos;
-      const savedLexerAtLineStart = state.lexer.atLineStart;
+      // Try pattern <- expr
+      const savedPos = state.lexer.pos;
       const savedCurrent = state.current;
       const savedDiagCount = state.diagnostics.length;
 
-      // Try to parse as pattern
       const pattern = parsePattern(state);
 
-      // Check if followed by <-
       if (at(state, TokenKind.LeftArrow)) {
-        advance(state); // '<-'
+        advance(state);
         const bindExpr = parseExpr(state);
-        stmts.push({ kind: "bind", pattern, expr: bindExpr });
-        continue;
+        stmts.push({ kind: "DoBindPattern", pattern, expr: bindExpr });
+      } else {
+        // Backtrack and parse as expression
+        state.lexer.pos = savedPos;
+        state.current = savedCurrent;
+        state.diagnostics.length = savedDiagCount;
+        const expr = parseExpr(state);
+        stmts.push({ kind: "DoExpr", expr });
       }
-
-      // Not a bind - backtrack and parse as expression
-      state.lexer.pos = savedLexerPos;
-      state.lexer.atLineStart = savedLexerAtLineStart;
-      state.current = savedCurrent;
-      // Remove any diagnostics added during pattern parsing attempt
-      state.diagnostics.length = savedDiagCount;
+    } else {
+      const expr = parseExpr(state);
+      stmts.push({ kind: "DoExpr", expr });
     }
-
-    // Parse as expression statement
-    const expr = parseExpr(state);
-    stmts.push({ kind: "expr", expr });
   }
 
   const endToken = expect(state, TokenKind.End, "expected 'end'");
   const end = endToken ? endToken[2] : state.current[1];
 
-  if (stmts.length === 0) {
-    error(state, "do block cannot be empty");
-    return ast.int(0, span(start, end));
-  }
-
-  const lastStmt = stmts[stmts.length - 1]!;
-  if (lastStmt.kind !== "expr") {
-    error(state, "do block must end with an expression");
-  }
-
-  // Helper: check if pattern is a simple variable
-  const isSimpleVar = (p: ast.Pattern): p is ast.PVar => p.kind === "PVar";
-  const isWildcard = (p: ast.Pattern): p is ast.PWildcard => p.kind === "PWildcard";
-
-  // Desugar right-to-left
-  let result: ast.Expr = lastStmt.kind === "expr" ? lastStmt.expr : ast.int(0);
-
-  for (let i = stmts.length - 2; i >= 0; i--) {
-    const stmt = stmts[i]!;
-    switch (stmt.kind) {
-      case "bind": {
-        if (isSimpleVar(stmt.pattern)) {
-          // x <- e  =>  flatMap (x -> rest) e
-          const lambda = ast.abs(stmt.pattern.name, result, undefined, stmt.pattern.span);
-          result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
-        } else if (isWildcard(stmt.pattern)) {
-          // _ <- e  =>  flatMap (_ -> rest) e
-          const lambda = ast.abs("_", result);
-          result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
-        } else {
-          // (a, b) <- e  =>  flatMap ($do0 -> match $do0 when (a, b) -> rest end) e
-          const tempVar = `$do${tempCounter++}`;
-          const matchExpr = ast.match(ast.var_(tempVar), [ast.case_(stmt.pattern, result)]);
-          const lambda = ast.abs(tempVar, matchExpr);
-          result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
-        }
-        break;
-      }
-      case "let": {
-        if (isSimpleVar(stmt.pattern)) {
-          // let x = e  =>  let x = e in rest
-          result = ast.let_(stmt.pattern.name, stmt.value, result, undefined, stmt.pattern.span);
-        } else if (isWildcard(stmt.pattern)) {
-          // let _ = e  =>  let _ = e in rest (just evaluate e for side effects)
-          result = ast.let_("_", stmt.value, result);
-        } else {
-          // let (a, b) = e  =>  match e when (a, b) -> rest end
-          result = ast.match(stmt.value, [ast.case_(stmt.pattern, result)]);
-        }
-        break;
-      }
-      case "expr": {
-        // e  =>  flatMap (_ -> rest) e
-        const lambda = ast.abs("_", result);
-        result = ast.app(ast.app(ast.var_("flatMap"), lambda), stmt.expr);
-        break;
-      }
-    }
-  }
-
-  return result;
+  return S.sdo(stmts, span(start, end));
 };
 
-/**
- * Parse a single recursive binding: name params = expr
- * Returns { name, nameSpan, value } where value has params wrapped as lambdas
- */
-const parseRecBinding = (state: ParserState): ast.RecBinding => {
-  // Accept either a lowercase identifier or underscore for binding name
-  let nameToken: Token | null = null;
-  let name: string;
-  if (at(state, TokenKind.Underscore)) {
-    nameToken = state.current;
-    advance(state);
-    name = "_";
-  } else {
-    nameToken = expect(state, TokenKind.Lower, "expected binding name");
-    if (!nameToken) {
-      return ast.recBinding("_error_", ast.int(0));
-    }
-    name = text(state, nameToken);
+const parseLetExpr = (state: ParserState): S.SExpr => {
+  const result = parseLetDeclOrExpr(state);
+  if (result.kind === "expr") {
+    return result.expr;
   }
-  const nameSpan = tokenSpan(nameToken);
-  const params = parseParams(state);
-
-  let returnType: ast.TypeExpr | undefined;
-  if (at(state, TokenKind.Colon)) {
-    advance(state);
-    returnType = parseType(state) ?? undefined;
-  }
-
-  expect(state, TokenKind.Eq, "expected '=' after name");
-  const value = wrapInLambdas(params, parseExpr(state));
-
-  return ast.recBinding(name, value, nameSpan, returnType);
-};
-
-const parseLetExpr = (state: ParserState): ast.Expr => {
-  const start = state.current[1];
-  advance(state); // let
-
-  const recursive = at(state, TokenKind.Rec);
-  if (recursive) advance(state);
-
-  // Check for destructuring pattern (tuple, record, wildcard, or constructor)
-  // Only allowed for non-recursive let
-  if (
-    !recursive &&
-    atAny(state, TokenKind.LParen, TokenKind.LBrace, TokenKind.Underscore, TokenKind.Upper)
-  ) {
-    return parseLetDestructuring(state, start);
-  }
-
-  if (recursive) {
-    // Parse first binding
-    const bindings: ast.RecBinding[] = [parseRecBinding(state)];
-
-    // Parse additional bindings with 'and'
-    while (at(state, TokenKind.AndKw)) {
-      advance(state); // 'and'
-      bindings.push(parseRecBinding(state));
-    }
-
-    expect(state, TokenKind.In, "expected 'in' after let rec bindings");
-
-    const body = parseExpr(state);
-    const end = body.span?.end ?? state.current[1];
-
-    return ast.letRec(bindings, body, span(start, end));
-  }
-
-  // Non-recursive let
-  const nameToken = expect(state, TokenKind.Lower, "expected binding name");
-  if (!nameToken) {
-    return ast.int(0);
-  }
-  const name = text(state, nameToken);
-  const nameSpan = tokenSpan(nameToken);
-  const params = parseParams(state);
-
-  let returnType: ast.TypeExpr | undefined;
-  if (at(state, TokenKind.Colon)) {
-    advance(state);
-    returnType = parseType(state) ?? undefined;
-  }
-
-  expect(state, TokenKind.Eq, "expected '=' after name");
-  const value = wrapInLambdas(params, parseExpr(state));
-
-  expect(state, TokenKind.In, "expected 'in' after let value");
-
-  const body = parseExpr(state);
-  const end = body.span?.end ?? state.current[1];
-
-  return ast.let_(name, value, body, span(start, end), nameSpan, returnType);
-};
-
-/**
- * Parse let destructuring: let pattern = expr in body
- * Desugars to: match expr when pattern -> body end
- */
-const parseLetDestructuring = (state: ParserState, start: number): ast.Expr => {
-  const pattern = parsePattern(state);
-
-  expect(state, TokenKind.Eq, "expected '=' after pattern");
-
-  const value = parseExpr(state);
-
-  expect(state, TokenKind.In, "expected 'in' after let value");
-
-  const body = parseExpr(state);
-  const end = body.span?.end ?? state.current[1];
-
-  // Desugar to: match value when pattern -> body end
-  return ast.match(value, [ast.case_(pattern, body)], span(start, end));
+  // Should not happen in expression context, but handle gracefully
+  error(state, "expected 'in' after let binding");
+  return S.sint(0);
 };
 
 // =============================================================================
 // PATTERNS
 // =============================================================================
 
-const PATTERN_STARTS = new Set([
-  TokenKind.Underscore,
-  TokenKind.Lower,
-  TokenKind.Upper,
-  TokenKind.Int,
-  TokenKind.Float,
-  TokenKind.String,
-  TokenKind.Char,
-  TokenKind.True,
-  TokenKind.False,
-  TokenKind.LParen,
-  TokenKind.LBrace,
-]);
+const parsePattern = (state: ParserState): S.SPattern => {
+  let left = parsePatternAtom(state);
 
-const parsePattern = (state: ParserState, allowArgs = true): ast.Pattern => {
-  const pattern = parsePatternCore(state, allowArgs);
+  // Cons pattern: p :: ps
+  if (at(state, TokenKind.ColonColon)) {
+    advance(state);
+    const right = parsePattern(state);
+    return S.spcons(left, right);
+  }
 
-  // Check for as-pattern: pattern as name
+  // As pattern: pattern as name
   if (at(state, TokenKind.As)) {
     advance(state);
     const nameToken = expect(state, TokenKind.Lower, "expected name after 'as'");
-    if (!nameToken) return pattern;
-    const name = text(state, nameToken);
-    const nameSpan = tokenSpan(nameToken);
-    const start = pattern.span?.start ?? nameToken[1];
-    const end = nameToken[2];
-    return ast.pas(pattern, name, span(start, end), nameSpan);
+    if (nameToken) {
+      return S.spas(text(state, nameToken), left, span(left.span?.start ?? 0, nameToken[2]));
+    }
   }
 
-  return pattern;
+  return left;
 };
 
-const parsePatternCore = (state: ParserState, allowArgs = true): ast.Pattern => {
+const parsePatternAtom = (state: ParserState): S.SPattern => {
   const token = state.current;
   const kind = token[0];
-  const start = token[1];
 
   switch (kind) {
     case TokenKind.Underscore:
       advance(state);
-      return ast.pwildcard(tokenSpan(token));
+      return S.spwild(tokenSpan(token));
 
     case TokenKind.Lower:
       advance(state);
-      return ast.pvar(text(state, token), tokenSpan(token));
+      return S.spvar(text(state, token), tokenSpan(token));
 
     case TokenKind.Upper: {
       advance(state);
       const name = text(state, token);
-      const nameSpan = tokenSpan(token);
+      const args: S.SPattern[] = [];
 
-      // Check for qualified constructor: Module.Constructor
-      if (at(state, TokenKind.Dot)) {
-        advance(state); // .
-        const conToken = expect(state, TokenKind.Upper, "expected constructor name after '.'");
-        if (!conToken) return ast.pwildcard();
-        const conName = text(state, conToken);
-        const conSpan = tokenSpan(conToken);
-
-        if (!allowArgs) {
-          const end = conToken[2];
-          return ast.qualifiedPCon(name, conName, [], span(start, end), nameSpan, conSpan);
-        }
-
-        const args: ast.Pattern[] = [];
-        while (PATTERN_STARTS.has(state.current[0])) {
-          args.push(parsePatternCore(state, false));
-        }
-        const end = args[args.length - 1]?.span?.end ?? conToken[2];
-        return ast.qualifiedPCon(name, conName, args, span(start, end), nameSpan, conSpan);
+      while (
+        atAny(
+          state,
+          TokenKind.Underscore,
+          TokenKind.Lower,
+          TokenKind.Upper,
+          TokenKind.Int,
+          TokenKind.String,
+          TokenKind.Char,
+          TokenKind.True,
+          TokenKind.False,
+          TokenKind.LParen,
+          TokenKind.LBrace,
+          TokenKind.LBracket,
+        ) &&
+        !atNewStatement(state)
+      ) {
+        args.push(parsePatternAtom(state));
       }
 
-      // Regular constructor pattern
-      if (!allowArgs) return ast.pcon(name, [], nameSpan, nameSpan);
-
-      const args: ast.Pattern[] = [];
-      while (PATTERN_STARTS.has(state.current[0])) {
-        args.push(parsePatternCore(state, false));
-      }
-      const end = args[args.length - 1]?.span?.end ?? token[2];
-      return ast.pcon(name, args, span(start, end), nameSpan);
+      return S.spcon(name, args, span(token[1], state.current[1]));
     }
 
     case TokenKind.Int:
       advance(state);
-      return ast.plit(parseInt(text(state, token), 10), tokenSpan(token));
+      return S.split({ kind: "int", value: parseInt(text(state, token), 10) }, tokenSpan(token));
 
     case TokenKind.Float:
       advance(state);
-      return ast.plit(parseFloat(text(state, token)), tokenSpan(token));
+      return S.split({ kind: "float", value: parseFloat(text(state, token)) }, tokenSpan(token));
 
     case TokenKind.String:
       advance(state);
-      return ast.plit(parseStringContent(state, text(state, token), token[1]), tokenSpan(token));
+      return S.split(
+        { kind: "string", value: parseStringContent(text(state, token)) },
+        tokenSpan(token),
+      );
 
     case TokenKind.Char:
       advance(state);
-      return ast.pchar(parseCharContent(state, text(state, token), token[1]), tokenSpan(token));
+      return S.split(
+        { kind: "char", value: parseCharContent(text(state, token)) },
+        tokenSpan(token),
+      );
 
     case TokenKind.True:
       advance(state);
-      return ast.plit(true, tokenSpan(token));
+      return S.split({ kind: "bool", value: true }, tokenSpan(token));
 
     case TokenKind.False:
       advance(state);
-      return ast.plit(false, tokenSpan(token));
+      return S.split({ kind: "bool", value: false }, tokenSpan(token));
 
-    case TokenKind.LParen:
-      return parseTuplePattern(state);
+    case TokenKind.LParen: {
+      const start = token[1];
+      advance(state);
 
-    case TokenKind.LBrace:
-      return parseRecordPattern(state);
+      if (at(state, TokenKind.RParen)) {
+        const end = state.current[2];
+        advance(state);
+        return S.sptuple([], span(start, end));
+      }
+
+      const first = parsePattern(state);
+
+      if (at(state, TokenKind.Comma)) {
+        const elements: S.SPattern[] = [first];
+        while (at(state, TokenKind.Comma)) {
+          advance(state);
+          elements.push(parsePattern(state));
+        }
+        const endToken = expect(state, TokenKind.RParen, "expected ')'");
+        return S.sptuple(elements, span(start, endToken ? endToken[2] : state.current[1]));
+      }
+
+      expect(state, TokenKind.RParen, "expected ')'");
+      return first;
+    }
+
+    case TokenKind.LBrace: {
+      const start = token[1];
+      advance(state);
+
+      const fields: { name: string; pattern: S.SPattern }[] = [];
+
+      if (!at(state, TokenKind.RBrace)) {
+        do {
+          if (at(state, TokenKind.Comma)) advance(state);
+          const fieldName = expect(state, TokenKind.Lower, "expected field name");
+          if (!fieldName) break;
+          const name = text(state, fieldName);
+
+          if (at(state, TokenKind.Eq)) {
+            advance(state);
+            const pattern = parsePattern(state);
+            fields.push({ name, pattern });
+          } else {
+            // Punning: { x } means { x = x }
+            fields.push({ name, pattern: S.spvar(name, tokenSpan(fieldName)) });
+          }
+        } while (at(state, TokenKind.Comma));
+      }
+
+      const endToken = expect(state, TokenKind.RBrace, "expected '}'");
+      return S.sprecord(fields, span(start, endToken ? endToken[2] : state.current[1]));
+    }
+
+    case TokenKind.LBracket: {
+      const start = token[1];
+      advance(state);
+
+      const elements: S.SPattern[] = [];
+
+      if (!at(state, TokenKind.RBracket)) {
+        do {
+          if (at(state, TokenKind.Comma)) advance(state);
+          elements.push(parsePattern(state));
+        } while (at(state, TokenKind.Comma));
+      }
+
+      const endToken = expect(state, TokenKind.RBracket, "expected ']'");
+      return S.splist(elements, span(start, endToken ? endToken[2] : state.current[1]));
+    }
 
     default:
       error(state, `unexpected token in pattern: ${TokenKind[kind]}`);
-      if (allowArgs) advance(state);
-      return ast.pwildcard();
-  }
-};
-
-const parseTuplePattern = (state: ParserState): ast.Pattern => {
-  const start = state.current[1];
-  advance(state); // (
-
-  if (at(state, TokenKind.RParen)) {
-    advance(state);
-    error(state, "empty pattern");
-    return ast.pwildcard();
-  }
-
-  const first = parsePattern(state);
-
-  if (at(state, TokenKind.Comma)) {
-    const elements: ast.Pattern[] = [first];
-    while (at(state, TokenKind.Comma)) {
       advance(state);
-      elements.push(parsePattern(state));
-    }
-    const endToken = expect(state, TokenKind.RParen, "expected ')' after tuple pattern");
-    const end = endToken ? endToken[2] : state.current[1];
-    return ast.ptuple(elements, span(start, end));
+      return S.spwild();
   }
-
-  expect(state, TokenKind.RParen, "expected ')' after pattern");
-  return first;
-};
-
-const parseRecordPattern = (state: ParserState): ast.Pattern => {
-  const start = state.current[1];
-  advance(state); // {
-
-  const fields: ast.PRecordField[] = [];
-
-  if (!at(state, TokenKind.RBrace)) {
-    do {
-      if (at(state, TokenKind.Comma)) advance(state);
-
-      const nameToken = expect(state, TokenKind.Lower, "expected field name");
-      if (!nameToken) break;
-      const name = text(state, nameToken);
-      const fieldStart = nameToken[1];
-      const fieldEnd = nameToken[2];
-
-      // Support field punning: { x, y } is shorthand for { x = x, y = y }
-      if (at(state, TokenKind.Eq)) {
-        advance(state);
-        const pattern = parsePattern(state);
-        const patternEnd = pattern.span?.end ?? state.current[1];
-        fields.push(ast.pfield(name, pattern, span(fieldStart, patternEnd)));
-      } else {
-        // Punning: { x } means { x = x } (binds field to variable of same name)
-        const pattern = ast.pvar(name, span(fieldStart, fieldEnd));
-        fields.push(ast.pfield(name, pattern, span(fieldStart, fieldEnd)));
-      }
-    } while (at(state, TokenKind.Comma));
-  }
-
-  const endToken = expect(state, TokenKind.RBrace, "expected '}' after record pattern");
-  const end = endToken ? endToken[2] : state.current[1];
-  return ast.precord(fields, span(start, end));
 };
 
 // =============================================================================
-// HELPERS
+// STRING/CHAR PARSING HELPERS
 // =============================================================================
 
-const parseStringContent = (state: ParserState, quoted: string, tokenStart: number): string => {
-  const inner = quoted.slice(1, -1);
-  let result = "";
-  let i = 0;
-
-  while (i < inner.length) {
-    if (inner[i] === "\\") {
-      const escapeStart = tokenStart + 1 + i; // +1 for opening quote
-      i++;
-      if (i >= inner.length) break;
-      switch (inner[i]) {
-        case "n":
-          result += "\n";
-          break;
-        case "t":
-          result += "\t";
-          break;
-        case "r":
-          result += "\r";
-          break;
-        case "\\":
-          result += "\\";
-          break;
-        case '"':
-          result += '"';
-          break;
-        default:
-          state.diagnostics.push({
-            message: `Unknown escape sequence: \\${inner[i]}`,
-            start: escapeStart,
-            end: escapeStart + 2,
-            severity: "error",
-          });
-          result += inner[i];
-      }
-    } else {
-      result += inner[i];
-    }
-    i++;
-  }
-
-  return result;
+const parseStringContent = (raw: string): string => {
+  // Remove quotes and handle escapes
+  const content = raw.slice(1, -1);
+  return content
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\r/g, "\r")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\");
 };
 
-const parseCharContent = (state: ParserState, quoted: string, tokenStart: number): string => {
-  const inner = quoted.slice(1, -1); // Remove quotes
-
-  if (inner.length === 0) {
-    state.diagnostics.push({
-      message: "Empty character literal",
-      start: tokenStart,
-      end: tokenStart + 2,
-      severity: "error",
-    });
-    return "\0";
-  }
-
-  if (inner[0] === "\\") {
-    if (inner.length < 2) {
-      state.diagnostics.push({
-        message: "Incomplete escape sequence",
-        start: tokenStart + 1,
-        end: tokenStart + 2,
-        severity: "error",
-      });
-      return "\0";
-    }
-    const escapeStart = tokenStart + 1;
-    switch (inner[1]) {
+const parseCharContent = (raw: string): string => {
+  const content = raw.slice(1, -1);
+  if (content.startsWith("\\")) {
+    switch (content[1]) {
       case "n":
         return "\n";
       case "t":
         return "\t";
       case "r":
         return "\r";
-      case "\\":
-        return "\\";
       case "'":
         return "'";
-      case "0":
-        return "\0";
+      case "\\":
+        return "\\";
       default:
-        state.diagnostics.push({
-          message: `Unknown escape sequence: \\${inner[1]}`,
-          start: escapeStart,
-          end: escapeStart + 2,
-          severity: "error",
-        });
-        return inner[1]!;
+        return content[1] ?? "";
     }
   }
-
-  return inner[0]!;
-};
-
-// =============================================================================
-// PROGRAM TO EXPRESSION
-// =============================================================================
-
-/**
- * Qualify variable references in an expression by replacing unqualified names
- * that match module binding names with their qualified equivalents.
- * E.g., `helper` becomes `Foo.helper` if `helper` is a binding in module `Foo`.
- */
-const qualifyVarsInExpr = (
-  expr: ast.Expr,
-  moduleName: string,
-  bindingNames: Set<string>,
-): ast.Expr => {
-  switch (expr.kind) {
-    case "Int":
-    case "Float":
-    case "Bool":
-    case "Str":
-    case "Char":
-    case "QualifiedVar":
-      return expr;
-
-    case "Var":
-      // If the variable is a module binding, qualify it
-      if (bindingNames.has(expr.name)) {
-        return ast.var_(`${moduleName}.${expr.name}`, expr.span);
-      }
-      return expr;
-
-    case "Abs":
-      // Don't qualify the parameter name, but do qualify the body
-      // unless the parameter shadows the binding name
-      if (bindingNames.has(expr.param)) {
-        // Shadowed - don't qualify inside this scope for this name
-        const innerNames = new Set(bindingNames);
-        innerNames.delete(expr.param);
-        return ast.abs(
-          expr.param,
-          qualifyVarsInExpr(expr.body, moduleName, innerNames),
-          expr.span,
-          expr.paramSpan,
-          expr.paramType,
-        );
-      }
-      return ast.abs(
-        expr.param,
-        qualifyVarsInExpr(expr.body, moduleName, bindingNames),
-        expr.span,
-        expr.paramSpan,
-        expr.paramType,
-      );
-
-    case "App":
-      return ast.app(
-        qualifyVarsInExpr(expr.func, moduleName, bindingNames),
-        qualifyVarsInExpr(expr.param, moduleName, bindingNames),
-        expr.span,
-      );
-
-    case "Let": {
-      const value = qualifyVarsInExpr(expr.value, moduleName, bindingNames);
-      // Binding name shadows module names in body
-      const innerNames = new Set(bindingNames);
-      innerNames.delete(expr.name);
-      const body = qualifyVarsInExpr(expr.body, moduleName, innerNames);
-      return ast.let_(expr.name, value, body, expr.span, expr.nameSpan, expr.returnType);
-    }
-
-    case "LetRec": {
-      // Add all binding names to scope (they shadow module names)
-      const innerNames = new Set(bindingNames);
-      for (const b of expr.bindings) {
-        innerNames.delete(b.name);
-      }
-      const bindings = expr.bindings.map((b) =>
-        ast.recBinding(
-          b.name,
-          qualifyVarsInExpr(b.value, moduleName, innerNames),
-          b.nameSpan,
-          b.returnType,
-        ),
-      );
-      const body = qualifyVarsInExpr(expr.body, moduleName, innerNames);
-      return ast.letRec(bindings, body);
-    }
-
-    case "If":
-      return ast.if_(
-        qualifyVarsInExpr(expr.cond, moduleName, bindingNames),
-        qualifyVarsInExpr(expr.then, moduleName, bindingNames),
-        qualifyVarsInExpr(expr.else, moduleName, bindingNames),
-        expr.span,
-      );
-
-    case "Match": {
-      const scrutinee = qualifyVarsInExpr(expr.expr, moduleName, bindingNames);
-      const cases = expr.cases.map((c) => {
-        // Pattern variables shadow module names in guard and body
-        const patternVars = collectPatternVars(c.pattern);
-        const innerNames = new Set(bindingNames);
-        for (const v of patternVars) {
-          innerNames.delete(v);
-        }
-        const guard = c.guard ? qualifyVarsInExpr(c.guard, moduleName, innerNames) : undefined;
-        const body = qualifyVarsInExpr(c.body, moduleName, innerNames);
-        return ast.case_(c.pattern, body, guard);
-      });
-      return ast.match(scrutinee, cases, expr.span);
-    }
-
-    case "BinOp":
-      return ast.binOp(
-        expr.op,
-        qualifyVarsInExpr(expr.left, moduleName, bindingNames),
-        qualifyVarsInExpr(expr.right, moduleName, bindingNames),
-        expr.span,
-      );
-
-    case "Tuple":
-      return ast.tuple(
-        expr.elements.map((e) => qualifyVarsInExpr(e, moduleName, bindingNames)),
-        expr.span,
-      );
-
-    case "Record":
-      return ast.record(
-        expr.fields.map((f) =>
-          ast.field(f.name, qualifyVarsInExpr(f.value, moduleName, bindingNames)),
-        ),
-        expr.span,
-      );
-
-    case "RecordUpdate":
-      return ast.recordUpdate(
-        qualifyVarsInExpr(expr.base, moduleName, bindingNames),
-        expr.fields.map((f) =>
-          ast.field(f.name, qualifyVarsInExpr(f.value, moduleName, bindingNames)),
-        ),
-        expr.span,
-      );
-
-    case "FieldAccess":
-      return ast.fieldAccess(
-        qualifyVarsInExpr(expr.record, moduleName, bindingNames),
-        expr.field,
-        expr.span,
-      );
-
-    case "TupleIndex":
-      return ast.tupleIndex(
-        qualifyVarsInExpr(expr.tuple, moduleName, bindingNames),
-        expr.index,
-        expr.span,
-      );
-  }
-};
-
-/**
- * Resolve imported variable references by replacing unqualified names
- * with their qualified equivalents based on the import map.
- * E.g., `freeVarsExpr` becomes `IR.freeVarsExpr` if imported from IR module.
- */
-const resolveImportsInExpr = (expr: ast.Expr, importMap: Map<string, string>): ast.Expr => {
-  if (importMap.size === 0) return expr;
-
-  switch (expr.kind) {
-    case "Int":
-    case "Float":
-    case "Bool":
-    case "Str":
-    case "Char":
-    case "QualifiedVar":
-      return expr;
-
-    case "Var": {
-      const qualified = importMap.get(expr.name);
-      if (qualified) {
-        return ast.var_(qualified, expr.span);
-      }
-      return expr;
-    }
-
-    case "Abs":
-      // Parameter shadows imports
-      if (importMap.has(expr.param)) {
-        const innerMap = new Map(importMap);
-        innerMap.delete(expr.param);
-        return ast.abs(
-          expr.param,
-          resolveImportsInExpr(expr.body, innerMap),
-          expr.span,
-          expr.paramSpan,
-          expr.paramType,
-        );
-      }
-      return ast.abs(
-        expr.param,
-        resolveImportsInExpr(expr.body, importMap),
-        expr.span,
-        expr.paramSpan,
-        expr.paramType,
-      );
-
-    case "App":
-      return ast.app(
-        resolveImportsInExpr(expr.func, importMap),
-        resolveImportsInExpr(expr.param, importMap),
-        expr.span,
-      );
-
-    case "Let": {
-      const value = resolveImportsInExpr(expr.value, importMap);
-      const innerMap = new Map(importMap);
-      innerMap.delete(expr.name);
-      const body = resolveImportsInExpr(expr.body, innerMap);
-      return ast.let_(expr.name, value, body, expr.span, expr.nameSpan, expr.returnType);
-    }
-
-    case "LetRec": {
-      const innerMap = new Map(importMap);
-      for (const b of expr.bindings) {
-        innerMap.delete(b.name);
-      }
-      const bindings = expr.bindings.map((b) =>
-        ast.recBinding(b.name, resolveImportsInExpr(b.value, innerMap), b.nameSpan, b.returnType),
-      );
-      const body = resolveImportsInExpr(expr.body, innerMap);
-      return ast.letRec(bindings, body);
-    }
-
-    case "If":
-      return ast.if_(
-        resolveImportsInExpr(expr.cond, importMap),
-        resolveImportsInExpr(expr.then, importMap),
-        resolveImportsInExpr(expr.else, importMap),
-        expr.span,
-      );
-
-    case "Match": {
-      const scrutinee = resolveImportsInExpr(expr.expr, importMap);
-      const cases = expr.cases.map((c) => {
-        const patternVars = collectPatternVars(c.pattern);
-        const innerMap = new Map(importMap);
-        for (const v of patternVars) {
-          innerMap.delete(v);
-        }
-        const guard = c.guard ? resolveImportsInExpr(c.guard, innerMap) : undefined;
-        const body = resolveImportsInExpr(c.body, innerMap);
-        return ast.case_(c.pattern, body, guard);
-      });
-      return ast.match(scrutinee, cases, expr.span);
-    }
-
-    case "BinOp":
-      return ast.binOp(
-        expr.op,
-        resolveImportsInExpr(expr.left, importMap),
-        resolveImportsInExpr(expr.right, importMap),
-        expr.span,
-      );
-
-    case "Tuple":
-      return ast.tuple(
-        expr.elements.map((e) => resolveImportsInExpr(e, importMap)),
-        expr.span,
-      );
-
-    case "Record":
-      return ast.record(
-        expr.fields.map((f) => ast.field(f.name, resolveImportsInExpr(f.value, importMap))),
-        expr.span,
-      );
-
-    case "RecordUpdate":
-      return ast.recordUpdate(
-        resolveImportsInExpr(expr.base, importMap),
-        expr.fields.map((f) => ast.field(f.name, resolveImportsInExpr(f.value, importMap))),
-        expr.span,
-      );
-
-    case "FieldAccess":
-      return ast.fieldAccess(resolveImportsInExpr(expr.record, importMap), expr.field, expr.span);
-
-    case "TupleIndex":
-      return ast.tupleIndex(resolveImportsInExpr(expr.tuple, importMap), expr.index, expr.span);
-  }
-};
-
-/** Collect all variable names bound by a pattern */
-const collectPatternVars = (pattern: ast.Pattern): string[] => {
-  const vars: string[] = [];
-  const collect = (p: ast.Pattern): void => {
-    switch (p.kind) {
-      case "PVar":
-        vars.push(p.name);
-        break;
-      case "PCon":
-        for (const arg of p.args) collect(arg);
-        break;
-      case "PTuple":
-        for (const elem of p.elements) collect(elem);
-        break;
-      case "PRecord":
-        for (const field of p.fields) collect(field.pattern);
-        break;
-      case "PAs":
-        vars.push(p.name);
-        collect(p.pattern);
-        break;
-      case "POr":
-        for (const alt of p.alternatives) collect(alt);
-        break;
-      default:
-        break;
-    }
-  };
-  collect(pattern);
-  return vars;
-};
-
-/**
- * Convert a program to a single expression for type inference and evaluation.
- * Wraps with imported module bindings, then user's top-level bindings.
- */
-export const programToExpr = (
-  program: Program,
-  modules: readonly ast.ModuleDecl[] = [],
-  uses: readonly ast.UseDecl[] = [],
-): ast.Expr | null => {
-  if (!program.expr && program.bindings.length === 0) {
-    return null;
-  }
-
-  let expr = program.expr ?? ast.int(0);
-
-  // Wrap with user's top-level bindings as a single letRec
-  // This allows all bindings to reference each other regardless of order
-  // (important for multi-file programs where file order shouldn't matter)
-  if (program.bindings.length > 0) {
-    const recBindings: ast.RecBinding[] = [];
-    for (const binding of program.bindings) {
-      let value = binding.body;
-      for (let j = binding.params.length - 1; j >= 0; j--) {
-        const p = binding.params[j]!;
-        value = ast.abs(p.name, value, undefined, p.span, p.type);
-      }
-      recBindings.push(ast.recBinding(binding.name, value, binding.nameSpan, binding.returnType));
-    }
-    expr = ast.letRec(recBindings, expr);
-  }
-
-  // STEP 1: Process use statements for unqualified aliases (wrapped first = innermost)
-  // This creates bindings like `name = QualifiedVar(Module, name)`
-  // QualifiedVar tells the type checker to look up from moduleEnv.
-  // At runtime, these are evaluated after qualified bindings (outer scope).
-  const seenModules = new Set<string>();
-  const seenNames = new Set<string>(); // Track names to avoid duplicate bindings
-  for (let i = uses.length - 1; i >= 0; i--) {
-    const use = uses[i]!;
-    if (seenModules.has(use.moduleName)) continue;
-    seenModules.add(use.moduleName);
-
-    const mod = modules.find((m) => m.name === use.moduleName);
-    if (!mod || mod.bindings.length === 0) continue;
-
-    // Determine which bindings to import unqualified based on import style
-    let namesToImport: string[] = [];
-    if (use.imports?.kind === "All") {
-      // use Module (..) - import all bindings
-      namesToImport = mod.bindings.map((b) => b.name);
-    } else if (use.imports?.kind === "Specific") {
-      // use Module (a, b, c) - import specific bindings
-      namesToImport = use.imports.items
-        .filter((item) => mod.bindings.some((b) => b.name === item.name))
-        .map((item) => item.name);
-    }
-    // Note: `use Module` (no imports) -> no unqualified aliases, only qualified access
-
-    // Filter out names that have already been bound (earlier imports win)
-    namesToImport = namesToImport.filter((name) => !seenNames.has(name));
-    for (const name of namesToImport) {
-      seenNames.add(name);
-    }
-
-    if (namesToImport.length > 0) {
-      const unqualifiedBindings = namesToImport.map((name) =>
-        ast.recBinding(name, ast.qualifiedVar(mod.name, name)),
-      );
-      expr = ast.letRec(unqualifiedBindings, expr);
-    }
-  }
-
-  // STEP 2: Process ALL modules for qualified access (wrapped last = outermost)
-  // This creates bindings like `Module.name = <actual implementation>`
-  // These have actual bodies for runtime evaluation.
-  // Being outermost means they're evaluated first and available to QualifiedVar lookups.
-  // The type checker detects `Module.name` bindings and looks up their types
-  // from moduleEnv instead of re-inferring them.
-  //
-  // We qualify variable references within binding bodies so that:
-  // 1. Same-module references use qualified names (e.g., `helper` -> `Foo.helper`)
-  // 2. Cross-module imports via `use` are resolved (e.g., `freeVarsExpr` -> `IR.freeVarsExpr`)
-  // This ensures DCE can track transitive dependencies correctly.
-  for (let i = modules.length - 1; i >= 0; i--) {
-    const mod = modules[i]!;
-    if (mod.bindings.length === 0) continue;
-
-    // Build import map from module-internal use statements
-    // Maps unqualified name -> qualified name (e.g., "freeVarsExpr" -> "IR.freeVarsExpr")
-    const importMap = new Map<string, string>();
-    for (const use of mod.uses) {
-      const importedMod = modules.find((m) => m.name === use.moduleName);
-      if (!importedMod) continue;
-
-      if (use.imports?.kind === "All") {
-        // use Module (..) - import all bindings
-        for (const b of importedMod.bindings) {
-          if (!importMap.has(b.name)) {
-            importMap.set(b.name, `${use.moduleName}.${b.name}`);
-          }
-        }
-      } else if (use.imports?.kind === "Specific") {
-        // use Module (a, b, c) - import specific bindings
-        for (const item of use.imports.items) {
-          if (importedMod.bindings.some((b) => b.name === item.name)) {
-            if (!importMap.has(item.name)) {
-              importMap.set(item.name, `${use.moduleName}.${item.name}`);
-            }
-          }
-        }
-      }
-    }
-
-    const bindings: ast.RecBinding[] = [];
-    const bindingNames = new Set(mod.bindings.map((b) => b.name));
-
-    // Add qualified bindings with implementations
-    // Variable references to sibling bindings are qualified (e.g., `helper` -> `Foo.helper`)
-    for (const b of mod.bindings) {
-      let qualifiedBody = qualifyVarsInExpr(b.value, mod.name, bindingNames);
-      // Also resolve cross-module imports
-      qualifiedBody = resolveImportsInExpr(qualifiedBody, importMap);
-      bindings.push(
-        ast.recBinding(`${mod.name}.${b.name}`, qualifiedBody, b.nameSpan, b.returnType),
-      );
-    }
-
-    expr = ast.letRec(bindings, expr);
-  }
-
-  return expr;
+  return content;
 };
