@@ -285,7 +285,11 @@ const resolveDecl = (ctx: ResolveContext, decl: C.CDecl): [ResolveContext, C.CDe
       // Check for duplicate type definition
       if (ctx.types.has(decl.name)) {
         ctx.diagnostics.push(
-          diagError(decl.span?.start ?? 0, decl.span?.end ?? 0, `Duplicate type definition: ${decl.name}`),
+          diagError(
+            decl.span?.start ?? 0,
+            decl.span?.end ?? 0,
+            `Duplicate type definition: ${decl.name}`,
+          ),
         );
       }
       // Check for duplicate constructor names
@@ -293,7 +297,11 @@ const resolveDecl = (ctx: ResolveContext, decl: C.CDecl): [ResolveContext, C.CDe
       for (const con of decl.constructors) {
         if (ctx.constructors.has(con.name)) {
           ctx.diagnostics.push(
-            diagError(decl.span?.start ?? 0, decl.span?.end ?? 0, `Duplicate constructor: ${con.name}`),
+            diagError(
+              decl.span?.start ?? 0,
+              decl.span?.end ?? 0,
+              `Duplicate constructor: ${con.name}`,
+            ),
           );
         }
         newConstructors.add(con.name);

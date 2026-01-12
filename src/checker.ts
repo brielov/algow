@@ -651,16 +651,17 @@ const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResul
     addError(ctx, "Division by zero", expr.span);
   }
 
-  // Determine result type based on operator
+  // Determine result type and constraints based on operator
   let operandType: Type;
   let resultType: Type;
+  const constraints: Constraint[] = [...c1, ...c2];
 
   switch (expr.op) {
     case "+":
-      // Addition: works for int and string
-      // Use fresh type variable, constrained by unification
+      // Addition: requires Add constraint (int, float, string)
       operandType = freshTypeVar();
       resultType = operandType;
+      constraints.push({ className: "Add", type: operandType });
       break;
     case "-":
     case "*":
@@ -671,17 +672,19 @@ const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResul
       break;
     case "==":
     case "!=":
-      // Equality: a -> a -> bool (polymorphic)
+      // Equality: requires Eq constraint
       operandType = applySubst(s2, t1);
       resultType = tBool;
+      constraints.push({ className: "Eq", type: operandType });
       break;
     case "<":
     case "<=":
     case ">":
     case ">=":
-      // Comparison: a -> a -> bool (polymorphic, works on int/float/string/char)
+      // Comparison: requires Ord constraint
       operandType = applySubst(s2, t1);
       resultType = tBool;
+      constraints.push({ className: "Ord", type: operandType });
       break;
     default:
       // Unknown operator - use fresh type variables
@@ -699,7 +702,7 @@ const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResul
   );
 
   const finalSubst = composeSubst(composeSubst(composeSubst(s1, s2), s3), s4);
-  return [finalSubst, applySubst(finalSubst, resultType), [...c1, ...c2]];
+  return [finalSubst, applySubst(finalSubst, resultType), constraints];
 };
 
 // =============================================================================
