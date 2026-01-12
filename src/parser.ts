@@ -170,10 +170,10 @@ export const parse = (source: string): ParseResult => {
     if (mod) decls.push(mod);
   }
 
-  // Parse use statements (convert to module imports for now)
+  // Parse top-level use statements
   while (at(state, TokenKind.Use)) {
-    // Skip use declarations for now - they'll be handled in name resolution
-    parseUseDecl(state);
+    const use = parseUseDecl(state);
+    if (use) decls.push(use);
   }
 
   // Parse declarations and final expression
@@ -184,6 +184,9 @@ export const parse = (source: string): ParseResult => {
     } else if (at(state, TokenKind.Module)) {
       const mod = parseModuleDecl(state);
       if (mod) decls.push(mod);
+    } else if (at(state, TokenKind.Use)) {
+      const use = parseUseDecl(state);
+      if (use) decls.push(use);
     } else if (at(state, TokenKind.Let)) {
       const result = parseLetDeclOrExpr(state);
       if (result.kind === "decl") {
@@ -225,10 +228,10 @@ const parseModuleDecl = (state: ParserState): S.SDeclModule | null => {
   const uses: string[] = [];
   const innerDecls: S.SDecl[] = [];
 
-  // Parse use statements
+  // Parse use statements within module
   while (at(state, TokenKind.Use)) {
     const use = parseUseDecl(state);
-    if (use) uses.push(use);
+    if (use) uses.push(use.module);
   }
 
   while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
@@ -255,7 +258,8 @@ const parseModuleDecl = (state: ParserState): S.SDeclModule | null => {
   return S.sdeclmodule(name, uses, innerDecls, span(start, end));
 };
 
-const parseUseDecl = (state: ParserState): string | null => {
+const parseUseDecl = (state: ParserState): S.SDeclUse | null => {
+  const start = state.current[1];
   advance(state); // 'use'
 
   const moduleToken = expect(state, TokenKind.Upper, "expected module name");
@@ -263,24 +267,39 @@ const parseUseDecl = (state: ParserState): string | null => {
     synchronize(state);
     return null;
   }
+  const moduleName = text(state, moduleToken);
 
-  // Skip import specs and aliases for now
+  // Parse import specs: (bar, baz) or (..)
+  // Names can be lowercase (functions) or uppercase (constructors)
+  let imports: readonly string[] | "all" = "all";
   if (at(state, TokenKind.LParen)) {
-    let depth = 1;
-    advance(state);
-    while (depth > 0 && !at(state, TokenKind.Eof)) {
-      if (at(state, TokenKind.LParen)) depth++;
-      else if (at(state, TokenKind.RParen)) depth--;
-      advance(state);
+    advance(state); // '('
+    if (at(state, TokenKind.DotDot)) {
+      advance(state); // '..'
+      imports = "all";
+    } else {
+      const names: string[] = [];
+      while (!at(state, TokenKind.RParen) && !at(state, TokenKind.Eof)) {
+        // Accept both lowercase (functions) and uppercase (constructors)
+        if (at(state, TokenKind.Lower) || at(state, TokenKind.Upper)) {
+          names.push(text(state, advance(state)));
+        } else {
+          error(state, "expected name");
+          break;
+        }
+        if (at(state, TokenKind.Comma)) {
+          advance(state);
+        } else {
+          break;
+        }
+      }
+      imports = names;
     }
+    expect(state, TokenKind.RParen, "expected ')' after imports");
   }
 
-  if (at(state, TokenKind.As)) {
-    advance(state);
-    expect(state, TokenKind.Upper, "expected alias name");
-  }
-
-  return text(state, moduleToken);
+  const end = state.current[1];
+  return S.sdecluse(moduleName, imports, span(start, end));
 };
 
 const parseTypeDecl = (state: ParserState): S.SDeclType | S.SDeclTypeAlias | null => {

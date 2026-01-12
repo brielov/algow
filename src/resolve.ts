@@ -23,6 +23,8 @@ type ResolveContext = {
   readonly constructors: Set<string>;
   // Track defined type names to detect duplicates
   readonly types: Set<string>;
+  // Constructor aliases: alias name → qualified name (e.g., "Ok" → "Result.Ok")
+  readonly constructorAliases: Map<string, string>;
 };
 
 const createContext = (
@@ -33,6 +35,7 @@ const createContext = (
   diagnostics: [],
   constructors,
   types,
+  constructorAliases: new Map(),
 });
 
 const extendEnv = (ctx: ResolveContext, original: string): [ResolveContext, Name] => {
@@ -128,9 +131,15 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
         expr.span,
       );
 
-    case "CCon":
+    case "CCon": {
+      // Check if this constructor is an alias (from use declarations)
+      const aliasedName = ctx.constructorAliases.get(expr.name);
+      if (aliasedName) {
+        return C.ccon(aliasedName, expr.span);
+      }
       // Constructors are global, no resolution needed
       return expr;
+    }
 
     case "CTuple":
       return C.ctuple(
@@ -177,7 +186,10 @@ type PatternResult = {
   bindings: Name[];
 };
 
-const resolvePattern = (pattern: C.CPattern): PatternResult => {
+const resolvePattern = (
+  pattern: C.CPattern,
+  constructorAliases: Map<string, string>,
+): PatternResult => {
   switch (pattern.kind) {
     case "CPWild":
       return { pattern, bindings: [] };
@@ -194,10 +206,12 @@ const resolvePattern = (pattern: C.CPattern): PatternResult => {
       return { pattern, bindings: [] };
 
     case "CPCon": {
-      const results = pattern.args.map((p) => resolvePattern(p));
+      const results = pattern.args.map((p) => resolvePattern(p, constructorAliases));
+      // Check if this constructor is an alias
+      const aliasedName = constructorAliases.get(pattern.name);
       return {
         pattern: C.cpcon(
-          pattern.name,
+          aliasedName ?? pattern.name,
           results.map((r) => r.pattern),
           pattern.span,
         ),
@@ -206,7 +220,7 @@ const resolvePattern = (pattern: C.CPattern): PatternResult => {
     }
 
     case "CPTuple": {
-      const results = pattern.elements.map((p) => resolvePattern(p));
+      const results = pattern.elements.map((p) => resolvePattern(p, constructorAliases));
       return {
         pattern: C.cptuple(
           results.map((r) => r.pattern),
@@ -221,7 +235,7 @@ const resolvePattern = (pattern: C.CPattern): PatternResult => {
       const bindings: Name[] = [];
 
       for (const f of pattern.fields) {
-        const result = resolvePattern(f.pattern);
+        const result = resolvePattern(f.pattern, constructorAliases);
         resolvedFields.push({ name: f.name, pattern: result.pattern });
         bindings.push(...result.bindings);
       }
@@ -234,7 +248,7 @@ const resolvePattern = (pattern: C.CPattern): PatternResult => {
 
     case "CPAs": {
       const name = freshName(pattern.name.original);
-      const inner = resolvePattern(pattern.pattern);
+      const inner = resolvePattern(pattern.pattern, constructorAliases);
       return {
         pattern: C.cpas(name, inner.pattern, pattern.span),
         bindings: [name, ...inner.bindings],
@@ -243,8 +257,8 @@ const resolvePattern = (pattern: C.CPattern): PatternResult => {
 
     case "CPOr": {
       // For or-patterns, both branches must bind the same variables
-      const left = resolvePattern(pattern.left);
-      const right = resolvePattern(pattern.right);
+      const left = resolvePattern(pattern.left, constructorAliases);
+      const right = resolvePattern(pattern.right, constructorAliases);
       // Use left's bindings (should be same as right's)
       return {
         pattern: C.cpor(left.pattern, right.pattern, pattern.span),
@@ -259,7 +273,7 @@ const resolvePattern = (pattern: C.CPattern): PatternResult => {
 // =============================================================================
 
 const resolveCase = (ctx: ResolveContext, c: C.CCase): C.CCase => {
-  const { pattern, bindings } = resolvePattern(c.pattern);
+  const { pattern, bindings } = resolvePattern(c.pattern, ctx.constructorAliases);
 
   // Extend context with pattern bindings
   const newEnv = new Map(ctx.env);
@@ -315,7 +329,19 @@ const resolveDecl = (ctx: ResolveContext, decl: C.CDecl): [ResolveContext, C.CDe
     case "CDeclLet": {
       const resolvedValue = resolveExpr(ctx, decl.value);
       const [newCtx, name] = extendEnv(ctx, decl.name.original);
-      return [newCtx, C.cdecllet(name, resolvedValue, decl.span)];
+
+      // If value is a constructor, add the binding name as a constructor alias
+      // This handles: use M (Constructor) → let Constructor = M.Constructor
+      let finalCtx = newCtx;
+      if (decl.value.kind === "CCon") {
+        const newConstructors = new Set(finalCtx.constructors);
+        newConstructors.add(decl.name.original);
+        const newAliases = new Map(finalCtx.constructorAliases);
+        newAliases.set(decl.name.original, decl.value.name);
+        finalCtx = { ...finalCtx, constructors: newConstructors, constructorAliases: newAliases };
+      }
+
+      return [finalCtx, C.cdecllet(name, resolvedValue, decl.span)];
     }
 
     case "CDeclLetRec": {

@@ -725,7 +725,11 @@ const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResul
         subst = composeSubst(subst, s3);
         resultType = applySubst(subst, leftType);
       } else {
-        addError(ctx, `Cannot perform arithmetic on '${typeToString(leftType)}' and '${typeToString(rightType)}'`, expr.span);
+        addError(
+          ctx,
+          `Cannot perform arithmetic on '${typeToString(leftType)}' and '${typeToString(rightType)}'`,
+          expr.span,
+        );
         resultType = tInt;
       }
       break;

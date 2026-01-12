@@ -66,6 +66,7 @@ export enum TokenKind {
   Bar, // |
   Comma, // ,
   Dot, // .
+  DotDot, // ..
   Underscore, // _
   And, // &&
   Or, // ||
@@ -452,6 +453,10 @@ const scanOperator = (state: LexerState, start: number, ch: number): Token => {
       return [TokenKind.Comma, start, state.pos];
 
     case DOT:
+      if (peek(state) === DOT) {
+        advance(state);
+        return [TokenKind.DotDot, start, state.pos];
+      }
       return [TokenKind.Dot, start, state.pos];
 
     case LPAREN:

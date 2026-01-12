@@ -565,6 +565,34 @@ const desugarDecl = (decl: S.SDecl): C.CDecl | C.CDecl[] | null => {
         decl.span,
       );
 
+    case "SDeclUse": {
+      // use Foo (bar, baz) → creates aliases from qualified names
+      // let bar = Foo.bar, let baz = Foo.baz
+      // Constructors (uppercase) use CCon, functions (lowercase) use CVar
+      if (decl.imports === "all") {
+        // "all" imports require knowing module exports at this point
+        // This will be handled by desugarDeclWithModuleInfo
+        return null;
+      }
+
+      // Create let declarations for each imported name
+      const bindings: C.CDecl[] = [];
+      for (const name of decl.imports) {
+        const qualifiedName = `${decl.module}.${name}`;
+        const isConstructor = name[0] === name[0]?.toUpperCase();
+        bindings.push(
+          C.cdecllet(
+            { id: -1, original: name },
+            isConstructor
+              ? C.ccon(qualifiedName, decl.span)
+              : C.cvar({ id: -1, original: qualifiedName }, decl.span),
+            decl.span,
+          ),
+        );
+      }
+      return bindings;
+    }
+
     case "SDeclModule": {
       // Operators module is special - don't qualify operator names
       if (decl.name === "Operators") {
@@ -1158,6 +1186,37 @@ const desugarDeclWithModuleInfo = (
   decl: S.SDecl,
   moduleExports: Map<string, Set<string>>,
 ): C.CDecl | C.CDecl[] | null => {
+  // Handle use declarations with "all" imports
+  if (decl.kind === "SDeclUse") {
+    if (decl.imports === "all") {
+      // Import all exports from the module
+      const exports = moduleExports.get(decl.module);
+      if (!exports || exports.size === 0) {
+        // Module not found or has no exports - skip
+        return null;
+      }
+
+      const bindings: C.CDecl[] = [];
+      for (const name of exports) {
+        const qualifiedName = `${decl.module}.${name}`;
+        // Constructors (uppercase) use CCon, functions (lowercase) use CVar
+        const isConstructor = name[0] === name[0]?.toUpperCase();
+        bindings.push(
+          C.cdecllet(
+            { id: -1, original: name },
+            isConstructor
+              ? C.ccon(qualifiedName, decl.span)
+              : C.cvar({ id: -1, original: qualifiedName }, decl.span),
+            decl.span,
+          ),
+        );
+      }
+      return bindings;
+    }
+    // Specific imports handled by regular desugarDecl
+    return desugarDecl(decl);
+  }
+
   if (decl.kind !== "SDeclModule") {
     return desugarDecl(decl);
   }

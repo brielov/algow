@@ -324,7 +324,8 @@ export type SDecl =
   | SDeclLet
   | SDeclLetRec
   | SDeclForeign
-  | SDeclModule;
+  | SDeclModule
+  | SDeclUse;
 
 // ADT declaration: type Maybe a = Nothing | Just a
 export type SDeclType = {
@@ -378,6 +379,14 @@ export type SDeclModule = {
   readonly name: string;
   readonly uses: readonly string[];
   readonly decls: readonly SDecl[];
+  readonly span?: Span;
+};
+
+// Use declaration: use Foo (bar, baz) or use Foo (..)
+export type SDeclUse = {
+  readonly kind: "SDeclUse";
+  readonly module: string;
+  readonly imports: readonly string[] | "all"; // specific names or ".." for all
   readonly span?: Span;
 };
 
@@ -594,3 +603,8 @@ export const sdeclmodule = (
   decls: readonly SDecl[],
   span?: Span,
 ): SDeclModule => ({ kind: "SDeclModule", name, uses, decls, span });
+export const sdecluse = (
+  module: string,
+  imports: readonly string[] | "all",
+  span?: Span,
+): SDeclUse => ({ kind: "SDeclUse", module, imports, span });
