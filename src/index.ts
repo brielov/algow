@@ -5,6 +5,7 @@
  *
  * Commands:
  *   algow compile <files...>  - Compile to JavaScript
+ *   algow run <files...>      - Compile and execute
  *   algow check <files...>    - Type check only
  */
 
@@ -214,6 +215,81 @@ program
   .description("Type check source files")
   .argument("<files...>", "Source files or glob patterns")
   .action((files) => run(files, { typeCheckOnly: true }));
+
+program
+  .command("run")
+  .description("Compile and execute source files (use -- to pass args to program)")
+  .argument("<files...>", "Source files or glob patterns")
+  .option(
+    `-t, --target <target>`,
+    `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
+  )
+  .action(async (_files: string[], options: { target?: string }) => {
+    const target = options.target;
+    if (target && !isValidTarget(target)) {
+      console.error(
+        `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
+      );
+      process.exit(1);
+    }
+
+    // Parse process.argv directly to handle -- correctly
+    // Commander strips --, so we need to find it ourselves
+    const argv = process.argv.slice(2); // Skip node and script
+    const runIndex = argv.indexOf("run");
+    const argsAfterRun = argv.slice(runIndex + 1);
+
+    // Find -- in the original args
+    const dashDashIndex = argsAfterRun.indexOf("--");
+    let sourceFiles: string[];
+    let programArgs: string[];
+
+    if (dashDashIndex !== -1) {
+      // Filter out options like -t/--target from source files
+      const beforeDash = argsAfterRun.slice(0, dashDashIndex);
+      sourceFiles = [];
+      for (let i = 0; i < beforeDash.length; i++) {
+        const arg = beforeDash[i]!;
+        if (arg === "-t" || arg === "--target") {
+          i++; // Skip the value too
+        } else if (!arg.startsWith("-")) {
+          sourceFiles.push(arg);
+        }
+      }
+      programArgs = argsAfterRun.slice(dashDashIndex + 1);
+    } else {
+      // No --, use Commander's parsed files (which excludes options)
+      sourceFiles = _files;
+      programArgs = [];
+    }
+
+    if (sourceFiles.length === 0) {
+      console.error(`${RED}error${RESET}: No source files specified`);
+      process.exit(1);
+    }
+
+    // Compile
+    const sources = await loadSources(sourceFiles);
+    const result = compile(sources, { target: (target as Target) ?? DEFAULT_TARGET });
+
+    if (result.diagnostics.length > 0) {
+      printDiagnostics(result.diagnostics, sources);
+    }
+
+    if (!result.success || !result.code) {
+      process.exit(1);
+    }
+
+    // Execute with bun
+    const proc = Bun.spawn(["bun", "-", ...programArgs], {
+      stdin: new Response(result.code),
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+
+    const exitCode = await proc.exited;
+    process.exit(exitCode);
+  });
 
 program
   .command("format")
