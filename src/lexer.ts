@@ -82,6 +82,10 @@ export enum TokenKind {
   LBracket, // [
   RBracket, // ]
 
+  // Comments (used for formatting)
+  LineComment, // -- ...
+  BlockComment, // {- ... -}
+
   // Error
   Error,
 }
@@ -530,4 +534,141 @@ export const nextToken = (state: LexerState): Token => {
 
   // Operators and punctuation
   return scanOperator(state, start, ch);
+};
+
+// =============================================================================
+// COMMENT-AWARE TOKENIZATION (for formatter)
+// =============================================================================
+
+/**
+ * Result of scanning with comments preserved.
+ */
+export type TokenWithComments = {
+  readonly token: Token;
+  readonly leadingComments: readonly Token[];
+  readonly lineBeforeToken: number; // Line number where the token starts
+};
+
+/**
+ * Skip only whitespace (not comments), returning the number of newlines crossed.
+ */
+const skipWhitespaceOnly = (state: LexerState): number => {
+  let newlines = 0;
+  while (true) {
+    const ch = peek(state);
+    if (ch === SPACE || ch === TAB) {
+      advance(state);
+    } else if (ch === LF) {
+      advance(state);
+      newlines++;
+    } else if (ch === CR) {
+      advance(state);
+      if (peek(state) === LF) advance(state);
+      newlines++;
+    } else {
+      break;
+    }
+  }
+  return newlines;
+};
+
+/**
+ * Scan a line comment and return it as a token.
+ */
+const scanLineComment = (state: LexerState): Token => {
+  const start = state.pos;
+  advance(state); // -
+  advance(state); // -
+  while (peek(state) !== LF && peek(state) !== EOF) {
+    advance(state);
+  }
+  return [TokenKind.LineComment, start, state.pos];
+};
+
+/**
+ * Scan a block comment and return it as a token.
+ */
+const scanBlockCommentToken = (state: LexerState): Token => {
+  const start = state.pos;
+  advance(state); // {
+  advance(state); // -
+  let depth = 1;
+
+  while (depth > 0 && peek(state) !== EOF) {
+    const ch = peek(state);
+    if (ch === LBRACE && peekAt(state, 1) === MINUS) {
+      advance(state);
+      advance(state);
+      depth++;
+    } else if (ch === MINUS && peekAt(state, 1) === RBRACE) {
+      advance(state);
+      advance(state);
+      depth--;
+    } else {
+      advance(state);
+    }
+  }
+  return [TokenKind.BlockComment, start, state.pos];
+};
+
+/**
+ * Get the line number (0-indexed) for a position in the source.
+ */
+export const getLineNumber = (source: string, pos: number): number => {
+  let line = 0;
+  for (let i = 0; i < pos && i < source.length; i++) {
+    if (source.charCodeAt(i) === LF) line++;
+  }
+  return line;
+};
+
+/**
+ * Returns the next token along with any leading comments.
+ * Used by the formatter to preserve comments.
+ */
+export const nextTokenWithComments = (state: LexerState): TokenWithComments => {
+  const leadingComments: Token[] = [];
+
+  while (true) {
+    skipWhitespaceOnly(state);
+    const ch = peek(state);
+
+    // Line comment: --
+    if (ch === MINUS && peekAt(state, 1) === MINUS) {
+      leadingComments.push(scanLineComment(state));
+      continue;
+    }
+
+    // Block comment: {- ... -}
+    if (ch === LBRACE && peekAt(state, 1) === MINUS) {
+      leadingComments.push(scanBlockCommentToken(state));
+      continue;
+    }
+
+    break;
+  }
+
+  const lineBeforeToken = getLineNumber(state.source, state.pos);
+  const start = state.pos;
+  const ch = peek(state);
+
+  let token: Token;
+
+  if (ch === EOF) {
+    token = [TokenKind.Eof, start, start];
+  } else if (isDigit(ch)) {
+    token = scanNumber(state, start);
+  } else if (ch === DOUBLE_QUOTE) {
+    token = scanString(state, start);
+  } else if (ch === SINGLE_QUOTE) {
+    token = scanChar(state, start);
+  } else if (isLower(ch) || ch === UNDERSCORE) {
+    token = scanLowerOrKeyword(state, start);
+  } else if (isUpper(ch)) {
+    token = scanUpper(state, start);
+  } else {
+    token = scanOperator(state, start, ch);
+  }
+
+  return { token, leadingComments, lineBeforeToken };
 };

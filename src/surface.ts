@@ -18,6 +18,16 @@ export type Literal =
   | { readonly kind: "bool"; readonly value: boolean };
 
 // =============================================================================
+// Comments (for formatter)
+// =============================================================================
+
+export type Comment = {
+  readonly kind: "line" | "block";
+  readonly text: string;
+  readonly span: Span;
+};
+
+// =============================================================================
 // Surface Expressions (Section 4.1)
 // =============================================================================
 

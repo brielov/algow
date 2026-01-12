@@ -11,6 +11,7 @@
 import { Command } from "commander";
 import { Glob } from "bun";
 import { compile, type SourceFile } from "./compile";
+import { format } from "./format";
 import type { Diagnostic } from "./diagnostics";
 
 // =============================================================================
@@ -186,6 +187,64 @@ program
   .description("Type check source files")
   .argument("<files...>", "Source files or glob patterns")
   .action((files) => run(files, { typeCheckOnly: true }));
+
+program
+  .command("format")
+  .description("Format source files")
+  .argument("<files...>", "Source files or glob patterns")
+  .option("-w, --write", "Write formatted output back to files")
+  .option("--check", "Check if files are formatted (exit 1 if not)")
+  .action(async (files: string[], options: { write?: boolean; check?: boolean }) => {
+    const filePaths = await resolveFiles(files);
+
+    if (filePaths.length === 0) {
+      console.error(`${RED}error${RESET}: No files matched the given patterns`);
+      process.exit(1);
+    }
+
+    let hasChanges = false;
+    let hasErrors = false;
+
+    for (const filePath of filePaths) {
+      const content = await Bun.file(filePath).text();
+      const result = format(content);
+
+      if (result.diagnostics.length > 0) {
+        console.error(`${RED}error${RESET}: ${filePath}`);
+        for (const diag of result.diagnostics) {
+          printDiagnostic(diag, content, filePath);
+        }
+        hasErrors = true;
+        continue;
+      }
+
+      const isChanged = result.formatted !== content;
+
+      if (options.check) {
+        if (isChanged) {
+          console.log(`${filePath}`);
+          hasChanges = true;
+        }
+      } else if (options.write) {
+        if (isChanged) {
+          await Bun.write(filePath, result.formatted);
+          console.log(`${GRAY}formatted${RESET} ${filePath}`);
+        }
+      } else {
+        // Print to stdout
+        process.stdout.write(result.formatted);
+      }
+    }
+
+    if (hasErrors) {
+      process.exit(1);
+    }
+
+    if (options.check && hasChanges) {
+      console.error(`\n${RED}error${RESET}: Some files need formatting`);
+      process.exit(1);
+    }
+  });
 
 // Default command for backwards compatibility
 program
