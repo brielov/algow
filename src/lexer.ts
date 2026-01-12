@@ -2,8 +2,8 @@
  * Lexer for the Algow language.
  *
  * Uses a cursor-based approach where tokens are returned as [kind, start, end]
- * tuples. No strings are allocated during lexing - the actual text can be
- * extracted from the source using the start/end positions when needed.
+ * tuples. Minimal string allocation during lexing - only for keyword lookup.
+ * Token text can be extracted from the source using start/end positions.
  *
  * Character comparisons use hex codes for clarity:
  *   0x09 = tab, 0x0a = newline, 0x0d = carriage return, 0x20 = space

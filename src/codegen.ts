@@ -380,11 +380,6 @@ const nameToJs = (name: Name): string => {
   return JS_RESERVED.has(result) ? `$${result}` : result;
 };
 
-/** Check if a constructor is a List constructor */
-const _isListConstructor = (name: string): boolean => {
-  return name === "Nil" || name === "Cons";
-};
-
 /** Get the tag for a constructor */
 const getConstructorTag = (ctx: CodeGenContext, typeName: string, conName: string): number => {
   const typeMap = ctx.tagMap.get(typeName);
@@ -428,11 +423,9 @@ const genAtom = (ctx: CodeGenContext, atom: IR.Atom): string => {
         // Cons as a function: (h) => (t) => ({ h, t })
         return "((h) => (t) => ({ h, t }))";
       }
-      // Other constructors - need to know arity
-      // For nullary constructors, return the tag array
-      // For constructors with args, return a curried function
-      // We'll handle this during codegen based on context
-      return `/* constructor ${atom.name} */`;
+      // Other constructors are declared as variables during type declaration
+      // processing, so just reference them by name
+      return atom.name;
     }
   }
 };
@@ -462,6 +455,10 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
       }
       if (binding.op === "!=") {
         return `!$eq(${left}, ${right})`;
+      }
+      // Integer division
+      if (binding.op === "/") {
+        return `Math.trunc(${left} / ${right})`;
       }
       // For other operators, generate direct JS operators
       return `(${left} ${binding.op} ${right})`;
@@ -502,6 +499,17 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
         result = `${result}(${genAtom(ctx, arg)})`;
       }
       return result;
+    }
+
+    case "IRBMatch": {
+      // Match expression as binding - create an IIFE with the match
+      const matchExpr: IR.IRMatch = {
+        kind: "IRMatch",
+        scrutinee: binding.scrutinee,
+        cases: binding.cases,
+        type: binding.type,
+      };
+      return genMatch(ctx, matchExpr);
     }
   }
 };
@@ -815,6 +823,17 @@ const genPatternMatch = (
       }
 
       return { condition: conditions.join(" && ") || "true", bindings };
+    }
+
+    case "IRPAs": {
+      // As-pattern: bind the whole value AND match the inner pattern
+      const jsName = nameToJs(pattern.name);
+      const innerResult = genPatternMatch(ctx, scrutinee, pattern.pattern);
+      // Add binding for the whole value, then include inner bindings
+      return {
+        condition: innerResult.condition,
+        bindings: [[jsName, scrutinee], ...innerResult.bindings],
+      };
     }
   }
 };

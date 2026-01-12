@@ -101,7 +101,8 @@ export type IRBinding =
   | IRBRecordUpdate
   | IRBField
   | IRBLambda
-  | IRBForeign;
+  | IRBForeign
+  | IRBMatch;
 
 export type IRBAtom = {
   readonly kind: "IRBAtom";
@@ -169,6 +170,13 @@ export type IRBForeign = {
   readonly type: Type;
 };
 
+export type IRBMatch = {
+  readonly kind: "IRBMatch";
+  readonly scrutinee: Atom;
+  readonly cases: readonly IRCase[];
+  readonly type: Type;
+};
+
 // Binding constructors
 export const irbatom = (atom: Atom): IRBAtom => ({ kind: "IRBAtom", atom });
 export const irbapp = (func: Atom, arg: Atom, type: Type): IRBApp => ({
@@ -217,11 +225,18 @@ export const irbforeign = (
   type: Type,
 ): IRBForeign => ({ kind: "IRBForeign", module, name, args, type });
 
+export const irbmatch = (scrutinee: Atom, cases: readonly IRCase[], type: Type): IRBMatch => ({
+  kind: "IRBMatch",
+  scrutinee,
+  cases,
+  type,
+});
+
 // =============================================================================
 // IR Patterns (Section 10.1)
 // =============================================================================
 
-export type IRPattern = IRPWild | IRPVar | IRPLit | IRPCon | IRPTuple | IRPRecord;
+export type IRPattern = IRPWild | IRPVar | IRPLit | IRPCon | IRPTuple | IRPRecord | IRPAs;
 
 export type IRPWild = {
   readonly kind: "IRPWild";
@@ -255,6 +270,13 @@ export type IRPRecord = {
   readonly fields: readonly { readonly name: string; readonly pattern: IRPattern }[];
 };
 
+export type IRPAs = {
+  readonly kind: "IRPAs";
+  readonly name: Name;
+  readonly pattern: IRPattern;
+  readonly type: Type;
+};
+
 // Pattern constructors
 export const irpwild = (): IRPWild => ({ kind: "IRPWild" });
 export const irpvar = (name: Name, type: Type): IRPVar => ({ kind: "IRPVar", name, type });
@@ -272,6 +294,12 @@ export const irptuple = (elements: readonly IRPattern[]): IRPTuple => ({
 export const irprecord = (fields: readonly { name: string; pattern: IRPattern }[]): IRPRecord => ({
   kind: "IRPRecord",
   fields,
+});
+export const irpas = (name: Name, pattern: IRPattern, type: Type): IRPAs => ({
+  kind: "IRPAs",
+  name,
+  pattern,
+  type,
 });
 
 // =============================================================================
@@ -361,6 +389,7 @@ export const bindingType = (binding: IRBinding): Type => {
     case "IRBField":
     case "IRBLambda":
     case "IRBForeign":
+    case "IRBMatch":
       return binding.type;
   }
 };

@@ -584,18 +584,6 @@ const collectModuleNames = (decls: readonly S.SDecl[]): Set<string> => {
 };
 
 /**
- * Desugar expression with module context - qualifies references to module-local names.
- */
-const desugarExprInModule = (
-  expr: S.SExpr,
-  moduleName: string,
-  moduleNames: Set<string>,
-): C.CExpr => {
-  // Use empty imported names map for backward compatibility
-  return desugarExprInModuleWithImports(expr, moduleName, moduleNames, new Map());
-};
-
-/**
  * Desugar expression with module context and imported names.
  * - If name is defined in current module → qualify with current module
  * - If name is imported via `use` → qualify with source module
@@ -887,7 +875,16 @@ const desugarDoInModuleWithImports = (
               C.cabs(
                 { id: -1, original: tmp },
                 C.cmatch(C.cvar({ id: -1, original: tmp }), [
-                  { pattern: desugarPattern(stmt.pattern), guard: null, body: result },
+                  {
+                    pattern: desugarPatternInModuleWithImports(
+                      stmt.pattern,
+                      moduleName,
+                      moduleNames,
+                      importedNames,
+                    ),
+                    guard: null,
+                    body: result,
+                  },
                 ]),
               ),
             ),
@@ -902,7 +899,16 @@ const desugarDoInModuleWithImports = (
           result = C.clet({ id: -1, original: stmt.pattern.name }, recurse(stmt.expr), result);
         } else {
           result = C.cmatch(recurse(stmt.expr), [
-            { pattern: desugarPattern(stmt.pattern), guard: null, body: result },
+            {
+              pattern: desugarPatternInModuleWithImports(
+                stmt.pattern,
+                moduleName,
+                moduleNames,
+                importedNames,
+              ),
+              guard: null,
+              body: result,
+            },
           ]);
         }
         break;

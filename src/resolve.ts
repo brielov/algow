@@ -171,7 +171,7 @@ type PatternResult = {
   bindings: Name[];
 };
 
-const resolvePattern = (_ctx: ResolveContext, pattern: C.CPattern): PatternResult => {
+const resolvePattern = (pattern: C.CPattern): PatternResult => {
   switch (pattern.kind) {
     case "CPWild":
       return { pattern, bindings: [] };
@@ -188,7 +188,7 @@ const resolvePattern = (_ctx: ResolveContext, pattern: C.CPattern): PatternResul
       return { pattern, bindings: [] };
 
     case "CPCon": {
-      const results = pattern.args.map((p) => resolvePattern(_ctx, p));
+      const results = pattern.args.map((p) => resolvePattern(p));
       return {
         pattern: C.cpcon(
           pattern.name,
@@ -200,7 +200,7 @@ const resolvePattern = (_ctx: ResolveContext, pattern: C.CPattern): PatternResul
     }
 
     case "CPTuple": {
-      const results = pattern.elements.map((p) => resolvePattern(_ctx, p));
+      const results = pattern.elements.map((p) => resolvePattern(p));
       return {
         pattern: C.cptuple(
           results.map((r) => r.pattern),
@@ -215,7 +215,7 @@ const resolvePattern = (_ctx: ResolveContext, pattern: C.CPattern): PatternResul
       const bindings: Name[] = [];
 
       for (const f of pattern.fields) {
-        const result = resolvePattern(_ctx, f.pattern);
+        const result = resolvePattern(f.pattern);
         resolvedFields.push({ name: f.name, pattern: result.pattern });
         bindings.push(...result.bindings);
       }
@@ -228,7 +228,7 @@ const resolvePattern = (_ctx: ResolveContext, pattern: C.CPattern): PatternResul
 
     case "CPAs": {
       const name = freshName(pattern.name.original);
-      const inner = resolvePattern(_ctx, pattern.pattern);
+      const inner = resolvePattern(pattern.pattern);
       return {
         pattern: C.cpas(name, inner.pattern, pattern.span),
         bindings: [name, ...inner.bindings],
@@ -237,8 +237,8 @@ const resolvePattern = (_ctx: ResolveContext, pattern: C.CPattern): PatternResul
 
     case "CPOr": {
       // For or-patterns, both branches must bind the same variables
-      const left = resolvePattern(_ctx, pattern.left);
-      const right = resolvePattern(_ctx, pattern.right);
+      const left = resolvePattern(pattern.left);
+      const right = resolvePattern(pattern.right);
       // Use left's bindings (should be same as right's)
       return {
         pattern: C.cpor(left.pattern, right.pattern, pattern.span),
@@ -253,7 +253,7 @@ const resolvePattern = (_ctx: ResolveContext, pattern: C.CPattern): PatternResul
 // =============================================================================
 
 const resolveCase = (ctx: ResolveContext, c: C.CCase): C.CCase => {
-  const { pattern, bindings } = resolvePattern(ctx, c.pattern);
+  const { pattern, bindings } = resolvePattern(c.pattern);
 
   // Extend context with pattern bindings
   const newEnv = new Map(ctx.env);

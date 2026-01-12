@@ -42,16 +42,6 @@ const literalToConst = (lit: Literal): ConstValue => {
   }
 };
 
-const _atomToConst = (atom: IR.Atom, env: ConstEnv): ConstValue | undefined => {
-  if (atom.kind === "ALit") {
-    return literalToConst(atom.value);
-  }
-  if (atom.kind === "AVar") {
-    return env.get(nameKey(atom.name));
-  }
-  return undefined;
-};
-
 const foldExpr = (expr: IR.IRExpr, env: ConstEnv): IR.IRExpr => {
   switch (expr.kind) {
     case "IRAtom":
@@ -119,6 +109,9 @@ const foldBinding = (binding: IR.IRBinding, _env: ConstEnv): IR.IRBinding => {
       return IR.irblambda(binding.param, foldExpr(binding.body, new Map()), binding.type);
 
     case "IRBForeign":
+      return binding;
+
+    case "IRBMatch":
       return binding;
   }
 };
@@ -213,6 +206,14 @@ const collectUsesBinding = (binding: IR.IRBinding, uses: Set<string>): void => {
         addAtom(arg);
       }
       break;
+
+    case "IRBMatch":
+      addAtom(binding.scrutinee);
+      for (const c of binding.cases) {
+        if (c.guard) collectUses(c.guard, uses);
+        collectUses(c.body, uses);
+      }
+      break;
   }
 };
 
@@ -269,6 +270,7 @@ const removeUnusedBinding = (binding: IR.IRBinding, uses: Set<string>): IR.IRBin
     case "IRBRecordUpdate":
     case "IRBField":
     case "IRBForeign":
+    case "IRBMatch":
       return binding;
 
     case "IRBLambda":
@@ -370,6 +372,14 @@ const hasCallToBinding = (binding: IR.IRBinding, funcName: Name): boolean => {
 
     case "IRBForeign":
       return binding.args.some((a) => a.kind === "AVar" && nameEq(a.name, funcName));
+
+    case "IRBMatch":
+      return (
+        (binding.scrutinee.kind === "AVar" && nameEq(binding.scrutinee.name, funcName)) ||
+        binding.cases.some(
+          (c) => hasCallTo(c.body, funcName) || (c.guard && hasCallTo(c.guard, funcName)),
+        )
+      );
   }
 };
 
@@ -430,6 +440,10 @@ const hasNonTailCall = (binding: IR.IRBinding, funcName: Name): boolean => {
     case "IRBLambda":
       // Lambdas don't count as tail calls
       return false;
+
+    case "IRBMatch":
+      // Match bindings - scrutinee is not a tail position
+      return binding.scrutinee.kind === "AVar" && nameEq(binding.scrutinee.name, funcName);
   }
 };
 
@@ -496,6 +510,7 @@ const transformBindingTCO = (binding: IR.IRBinding): IR.IRBinding => {
     case "IRBRecordUpdate":
     case "IRBField":
     case "IRBForeign":
+    case "IRBMatch":
       return binding;
 
     case "IRBLambda":
@@ -559,6 +574,7 @@ const optimizeBinding = (binding: IR.IRBinding): IR.IRBinding => {
     case "IRBRecordUpdate":
     case "IRBField":
     case "IRBForeign":
+    case "IRBMatch":
       return binding;
 
     case "IRBLambda":

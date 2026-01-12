@@ -520,6 +520,11 @@ const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResul
 
   switch (expr.op) {
     case "+":
+      // Addition: works for int and string
+      // Use fresh type variable, constrained by unification
+      operandType = freshTypeVar();
+      resultType = operandType;
+      break;
     case "-":
     case "*":
     case "/":
@@ -675,9 +680,20 @@ const inferPattern = (
       }
 
       case "CPRecord": {
-        let subst: Subst = new Map();
+        // Create field types and build expected record type
+        const fieldTypes: [string, Type][] = [];
         for (const f of pat.fields) {
-          const fieldType = freshTypeVar();
+          fieldTypes.push([f.name, freshTypeVar()]);
+        }
+        const rowVar = freshTypeVar();
+        const recordType = trecord(fieldTypes, rowVar);
+
+        // Unify with expected type
+        let subst = unify(ctx, expected, recordType, pat.span);
+
+        // Infer each field pattern
+        for (const f of pat.fields) {
+          const fieldType = fieldTypes.find(([n]) => n === f.name)![1];
           const s = infer(applySubst(subst, fieldType), f.pattern);
           subst = composeSubst(subst, s);
         }

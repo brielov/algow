@@ -879,7 +879,7 @@ const parseInfix = (
       }
 
       // Record field access: record.field OR qualified constructor: Module.Constructor
-      let fieldToken: Tok | null;
+      let fieldToken: Token | null;
       if (at(state, TokenKind.Lower)) {
         fieldToken = advance(state);
       } else if (at(state, TokenKind.Upper)) {
@@ -1232,6 +1232,25 @@ const parsePattern = (state: ParserState): S.SPattern => {
   return left;
 };
 
+/**
+ * Parse a simple pattern atom - used for constructor arguments.
+ * Uppercase identifiers are parsed as nullary constructors (no arguments).
+ * Use parentheses to group constructor patterns with arguments.
+ */
+const parseSimplePatternAtom = (state: ParserState): S.SPattern => {
+  const token = state.current;
+  const kind = token[0];
+
+  // For uppercase identifiers, return nullary constructor (no greedy arg collection)
+  if (kind === TokenKind.Upper) {
+    advance(state);
+    return S.spcon(text(state, token), [], tokenSpan(token));
+  }
+
+  // For everything else, use the full parsePatternAtom
+  return parsePatternAtom(state);
+};
+
 const parsePatternAtom = (state: ParserState): S.SPattern => {
   const token = state.current;
   const kind = token[0];
@@ -1250,6 +1269,8 @@ const parsePatternAtom = (state: ParserState): S.SPattern => {
       const name = text(state, token);
       const args: S.SPattern[] = [];
 
+      // Collect arguments using simple patterns - nested constructors are nullary
+      // unless parenthesized
       while (
         atAny(
           state,
@@ -1267,7 +1288,7 @@ const parsePatternAtom = (state: ParserState): S.SPattern => {
         ) &&
         !atNewStatement(state)
       ) {
-        args.push(parsePatternAtom(state));
+        args.push(parseSimplePatternAtom(state));
       }
 
       return S.spcon(name, args, span(token[1], state.current[1]));
@@ -1386,14 +1407,39 @@ const parsePatternAtom = (state: ParserState): S.SPattern => {
 // =============================================================================
 
 const parseStringContent = (raw: string): string => {
-  // Remove quotes and handle escapes
+  // Remove quotes and handle escapes with single-pass processing
   const content = raw.slice(1, -1);
-  return content
-    .replace(/\\n/g, "\n")
-    .replace(/\\t/g, "\t")
-    .replace(/\\r/g, "\r")
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, "\\");
+  let result = "";
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === "\\" && i + 1 < content.length) {
+      switch (content[i + 1]) {
+        case "n":
+          result += "\n";
+          break;
+        case "t":
+          result += "\t";
+          break;
+        case "r":
+          result += "\r";
+          break;
+        case '"':
+          result += '"';
+          break;
+        case "\\":
+          result += "\\";
+          break;
+        default:
+          result += content[i + 1];
+          break;
+      }
+      i += 2;
+    } else {
+      result += content[i];
+      i++;
+    }
+  }
+  return result;
 };
 
 const parseCharContent = (raw: string): string => {

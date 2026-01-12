@@ -163,11 +163,70 @@ const normalize = (ctx: LowerContext, expr: C.CExpr): NormalizeResult => {
         return { bindings: [], atom: lowered.atom };
       }
 
-      // Extract bindings and final atom
-      const { bindings, finalAtom } = extractBindings(lowered);
-      return { bindings, atom: finalAtom };
+      // For expressions that are a chain of lets ending in an atom, extract bindings
+      if (canExtractBindings(lowered)) {
+        const { bindings, finalAtom } = extractBindings(lowered);
+        return { bindings, atom: finalAtom };
+      }
+
+      // For match expressions (or lets ending in match), bind to a fresh variable
+      const { bindings: letBindings, finalExpr } = extractBindingsUntilNonLet(lowered);
+      if (finalExpr.kind === "IRMatch") {
+        const name = freshName(ctx, "$v");
+        const type = finalExpr.type;
+        const binding = IR.irbmatch(finalExpr.scrutinee, finalExpr.cases, type);
+        return { bindings: [...letBindings, { name, binding }], atom: IR.avar(name, type) };
+      }
+
+      // For other complex expressions, this shouldn't happen in well-formed IR
+      throw new Error(`Cannot normalize IR expression: ${finalExpr.kind}`);
     }
   }
+};
+
+/**
+ * Extract let bindings until we hit a non-let expression.
+ * Returns the bindings and the final non-let expression.
+ */
+const extractBindingsUntilNonLet = (
+  expr: IR.IRExpr,
+): { bindings: { name: Name; binding: IR.IRBinding }[]; finalExpr: IR.IRExpr } => {
+  const bindings: { name: Name; binding: IR.IRBinding }[] = [];
+  let current = expr;
+
+  while (current.kind === "IRLet") {
+    bindings.push({ name: current.name, binding: current.binding });
+    current = current.body;
+  }
+
+  if (current.kind === "IRLetRec") {
+    bindings.push(...current.bindings);
+    current = current.body;
+  }
+
+  while (current.kind === "IRLet") {
+    bindings.push({ name: current.name, binding: current.binding });
+    current = current.body;
+  }
+
+  return { bindings, finalExpr: current };
+};
+
+/**
+ * Check if an IR expression can have bindings extracted (chain of lets ending in atom).
+ */
+const canExtractBindings = (expr: IR.IRExpr): boolean => {
+  let current = expr;
+  while (current.kind === "IRLet") {
+    current = current.body;
+  }
+  if (current.kind === "IRLetRec") {
+    current = current.body;
+  }
+  while (current.kind === "IRLet") {
+    current = current.body;
+  }
+  return current.kind === "IRAtom";
 };
 
 /**
@@ -333,13 +392,26 @@ const lowerLet = (ctx: LowerContext, expr: C.CLet): IR.IRExpr => {
     return IR.irlet(expr.name, binding, bodyIR);
   }
 
-  // Complex case: extract bindings
-  const { bindings, finalAtom } = extractBindings(valueIR);
-  const binding = IR.irbatom(finalAtom);
-  const bodyIR = lowerExpr(ctx, expr.body);
-  const result = IR.irlet(expr.name, binding, bodyIR);
+  // Try to extract bindings ending in an atom
+  if (canExtractBindings(valueIR)) {
+    const { bindings, finalAtom } = extractBindings(valueIR);
+    const binding = IR.irbatom(finalAtom);
+    const bodyIR = lowerExpr(ctx, expr.body);
+    const result = IR.irlet(expr.name, binding, bodyIR);
+    return wrapWithBindings(bindings, result);
+  }
 
-  return wrapWithBindings(bindings, result);
+  // Handle let chains ending in match
+  const { bindings, finalExpr } = extractBindingsUntilNonLet(valueIR);
+  if (finalExpr.kind === "IRMatch") {
+    const matchBinding = IR.irbmatch(finalExpr.scrutinee, finalExpr.cases, finalExpr.type);
+    const bodyIR = lowerExpr(ctx, expr.body);
+    const result = IR.irlet(expr.name, matchBinding, bodyIR);
+    return wrapWithBindings(bindings, result);
+  }
+
+  // Fallback: shouldn't happen for well-formed IR
+  throw new Error(`Cannot lower let with value: ${finalExpr.kind}`);
 };
 
 const lowerLetRec = (ctx: LowerContext, expr: C.CLetRec): IR.IRExpr => {
@@ -373,15 +445,156 @@ const lowerLetRec = (ctx: LowerContext, expr: C.CLetRec): IR.IRExpr => {
   return IR.irletrec(irBindings, bodyIR);
 };
 
+/**
+ * Expand or-patterns in a case into multiple cases.
+ * For example: `Left a | Right a -> body` becomes two cases:
+ *   `Left a -> body` and `Right a -> body`
+ *
+ * Important: The body was resolved with the left branch's variable bindings,
+ * so we must rewrite the right branch's pattern variables to use the same
+ * Name IDs as the left branch.
+ */
+const expandOrPatterns = (cases: readonly C.CCase[]): C.CCase[] => {
+  const expanded: C.CCase[] = [];
+
+  for (const c of cases) {
+    expandCase(c.pattern, c.guard, c.body, null, expanded);
+  }
+
+  return expanded;
+};
+
+/**
+ * Collect variable bindings from a pattern (original name -> Name).
+ */
+const collectPatternBindings = (pattern: C.CPattern): Map<string, Name> => {
+  const bindings = new Map<string, Name>();
+
+  const collect = (p: C.CPattern): void => {
+    switch (p.kind) {
+      case "CPVar":
+        bindings.set(p.name.original, p.name);
+        break;
+      case "CPCon":
+        p.args.forEach(collect);
+        break;
+      case "CPTuple":
+        p.elements.forEach(collect);
+        break;
+      case "CPRecord":
+        p.fields.forEach((f) => collect(f.pattern));
+        break;
+      case "CPAs":
+        bindings.set(p.name.original, p.name);
+        collect(p.pattern);
+        break;
+      case "CPOr":
+        collect(p.left);
+        break;
+      case "CPWild":
+      case "CPLit":
+        break;
+    }
+  };
+
+  collect(pattern);
+  return bindings;
+};
+
+/**
+ * Rewrite pattern variables to use names from the given map.
+ */
+const rewritePatternVars = (pattern: C.CPattern, nameMap: Map<string, Name>): C.CPattern => {
+  switch (pattern.kind) {
+    case "CPWild":
+    case "CPLit":
+      return pattern;
+
+    case "CPVar": {
+      const newName = nameMap.get(pattern.name.original);
+      if (newName) {
+        return C.cpvar(newName, pattern.span);
+      }
+      return pattern;
+    }
+
+    case "CPCon":
+      return C.cpcon(
+        pattern.name,
+        pattern.args.map((a) => rewritePatternVars(a, nameMap)),
+        pattern.span,
+      );
+
+    case "CPTuple":
+      return C.cptuple(
+        pattern.elements.map((e) => rewritePatternVars(e, nameMap)),
+        pattern.span,
+      );
+
+    case "CPRecord":
+      return C.cprecord(
+        pattern.fields.map((f) => ({
+          name: f.name,
+          pattern: rewritePatternVars(f.pattern, nameMap),
+        })),
+        pattern.span,
+      );
+
+    case "CPAs": {
+      const newName = nameMap.get(pattern.name.original);
+      return C.cpas(
+        newName ?? pattern.name,
+        rewritePatternVars(pattern.pattern, nameMap),
+        pattern.span,
+      );
+    }
+
+    case "CPOr":
+      return C.cpor(
+        rewritePatternVars(pattern.left, nameMap),
+        rewritePatternVars(pattern.right, nameMap),
+        pattern.span,
+      );
+  }
+};
+
+const expandCase = (
+  pattern: C.CPattern,
+  guard: C.CExpr | null,
+  body: C.CExpr,
+  leftBindings: Map<string, Name> | null,
+  result: C.CCase[],
+): void => {
+  if (pattern.kind === "CPOr") {
+    // Collect bindings from the left branch (used for body resolution)
+    const bindings = leftBindings ?? collectPatternBindings(pattern.left);
+
+    // Expand left branch (no rewriting needed - it has the original names)
+    expandCase(pattern.left, guard, body, bindings, result);
+
+    // Expand right branch with rewritten variable names
+    const rewrittenRight = rewritePatternVars(pattern.right, bindings);
+    expandCase(rewrittenRight, guard, body, bindings, result);
+  } else {
+    // No or-pattern at top level, but there might be nested or-patterns
+    // For now, we only expand top-level or-patterns
+    // Nested or-patterns would require more complex expansion
+    result.push({ pattern, guard, body });
+  }
+};
+
 const lowerMatch = (ctx: LowerContext, expr: C.CMatch): IR.IRExpr => {
   // Normalize scrutinee to atom
   const scrutineeResult = normalize(ctx, expr.scrutinee);
+
+  // Expand or-patterns into multiple cases
+  const expandedCases = expandOrPatterns(expr.cases);
 
   // Lower each case
   const irCases: IR.IRCase[] = [];
   let resultType: Type | null = null;
 
-  for (const c of expr.cases) {
+  for (const c of expandedCases) {
     // Lower the pattern
     const irPattern = lowerPattern(ctx, c.pattern, scrutineeResult.atom.type);
 
@@ -639,17 +852,15 @@ const lowerPattern = (
 
     case "CPAs": {
       // As-pattern: bind the whole value and match the inner pattern
-      // IR doesn't have as-patterns directly, so we compile it differently
-      // For now, just return the inner pattern (the binding is handled during codegen)
-      return lowerPattern(ctx, pattern.pattern, scrutineeType);
+      const innerPattern = lowerPattern(ctx, pattern.pattern, scrutineeType);
+      return IR.irpas(pattern.name, innerPattern, scrutineeType);
     }
 
     case "CPOr": {
-      // Or-pattern: try left first, then right
-      // IR doesn't support or-patterns directly either
-      // Compile as separate cases (handled at a higher level)
-      // For now, just use the left pattern
-      return lowerPattern(ctx, pattern.left, scrutineeType);
+      // Or-patterns should be expanded into multiple cases before reaching here.
+      // This is handled in lowerMatch by expandOrPatterns.
+      // If we get here, it means the expansion didn't happen, which is a bug.
+      throw new Error("Or-pattern should have been expanded before lowering");
     }
   }
 };
