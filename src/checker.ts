@@ -698,11 +698,8 @@ const inferBinOp = (ctx: CheckContext, env: TypeEnv, expr: C.CBinOp): InferResul
     expr.span,
   );
 
-  return [
-    composeSubst(composeSubst(composeSubst(s1, s2), s3), s4),
-    applySubst(s4, resultType),
-    [...c1, ...c2],
-  ];
+  const finalSubst = composeSubst(composeSubst(composeSubst(s1, s2), s3), s4);
+  return [finalSubst, applySubst(finalSubst, resultType), [...c1, ...c2]];
 };
 
 // =============================================================================

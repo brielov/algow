@@ -117,8 +117,11 @@ export const applySubst = (subst: Subst, type: Type): Type => {
     case "TCon":
       return type;
 
-    case "TVar":
-      return subst.get(type.name) ?? type;
+    case "TVar": {
+      const resolved = subst.get(type.name);
+      // Recursively apply to handle transitive substitutions like {t1 -> {x: t2}, t2 -> int}
+      return resolved ? applySubst(subst, resolved) : type;
+    }
 
     case "TFun":
       return tfun(applySubst(subst, type.param), applySubst(subst, type.ret));
