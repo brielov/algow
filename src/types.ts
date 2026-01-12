@@ -113,43 +113,58 @@ export const emptySubst: Subst = new Map();
 
 // Apply a substitution to a type (Section 8.3)
 export const applySubst = (subst: Subst, type: Type): Type => {
-  switch (type.kind) {
-    case "TCon":
-      return type;
+  // Track type variables being resolved to detect cycles
+  const resolving = new Set<string>();
 
-    case "TVar": {
-      const resolved = subst.get(type.name);
-      // Recursively apply to handle transitive substitutions like {t1 -> {x: t2}, t2 -> int}
-      return resolved ? applySubst(subst, resolved) : type;
-    }
+  const apply = (t: Type): Type => {
+    switch (t.kind) {
+      case "TCon":
+        return t;
 
-    case "TFun":
-      return tfun(applySubst(subst, type.param), applySubst(subst, type.ret));
-
-    case "TApp":
-      return tapp(applySubst(subst, type.con), applySubst(subst, type.arg));
-
-    case "TTuple":
-      return ttuple(type.elements.map((t) => applySubst(subst, t)));
-
-    case "TRecord": {
-      const newFields = new Map<string, Type>();
-      for (const [name, fieldType] of type.fields) {
-        newFields.set(name, applySubst(subst, fieldType));
-      }
-      const substitutedRow = type.row ? applySubst(subst, type.row) : null;
-      // If the row resolves to another record, merge its fields
-      if (substitutedRow && substitutedRow.kind === "TRecord") {
-        for (const [name, fieldType] of substitutedRow.fields) {
-          if (!newFields.has(name)) {
-            newFields.set(name, fieldType);
-          }
+      case "TVar": {
+        // Cycle detection: if we're already resolving this variable, return it as-is
+        if (resolving.has(t.name)) {
+          return t;
         }
-        return { kind: "TRecord", fields: newFields, row: substitutedRow.row };
+        const resolved = subst.get(t.name);
+        if (!resolved) return t;
+        // Mark as resolving and recursively apply
+        resolving.add(t.name);
+        const result = apply(resolved);
+        resolving.delete(t.name);
+        return result;
       }
-      return { kind: "TRecord", fields: newFields, row: substitutedRow };
+
+      case "TFun":
+        return tfun(apply(t.param), apply(t.ret));
+
+      case "TApp":
+        return tapp(apply(t.con), apply(t.arg));
+
+      case "TTuple":
+        return ttuple(t.elements.map(apply));
+
+      case "TRecord": {
+        const newFields = new Map<string, Type>();
+        for (const [name, fieldType] of t.fields) {
+          newFields.set(name, apply(fieldType));
+        }
+        const substitutedRow = t.row ? apply(t.row) : null;
+        // If the row resolves to another record, merge its fields
+        if (substitutedRow && substitutedRow.kind === "TRecord") {
+          for (const [name, fieldType] of substitutedRow.fields) {
+            if (!newFields.has(name)) {
+              newFields.set(name, fieldType);
+            }
+          }
+          return { kind: "TRecord", fields: newFields, row: substitutedRow.row };
+        }
+        return { kind: "TRecord", fields: newFields, row: substitutedRow };
+      }
     }
-  }
+  };
+
+  return apply(type);
 };
 
 // Apply substitution to a scheme

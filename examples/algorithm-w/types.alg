@@ -134,7 +134,7 @@ module Subst
             when Subst bindings ->
               Subst (List.filter (p ->
                 match p
-                  when (v, t) -> not (String.eq v var)
+                  when (v, t) -> String.eq v var == false
                 end
               ) bindings)
           end
@@ -171,7 +171,7 @@ module FreeVars
   let freeInScheme = scheme ->
     match scheme
       when Forall vars ty ->
-        List.filter (v -> not (List.elem v vars)) (freeInType ty)
+        List.filter (v -> List.elem v vars == false) (freeInType ty)
     end
 
   -- Get free type variables in an environment

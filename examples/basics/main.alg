@@ -13,7 +13,7 @@ let testIntegers =
   let sum = a + b + c in           -- 25
   let diff = a - b in              -- 59
   let prod = 6 * 7 in              -- 42
-  let quot = 100 / 3 in            -- 33 (integer division)
+  let quot = Int.div 100 3 in      -- 33 (integer division)
   let neg = 0 - 5 in               -- -5
   sum + diff + prod + quot + neg   -- 25 + 59 + 42 + 33 + (-5) = 154
 
@@ -56,9 +56,9 @@ let testBooleans =
 let testShortCircuit =
   -- && should not evaluate second arg if first is false
   let x = 0 in
-  let a = if false && (1 / x == 0) then 1 else 0 in  -- 0 (doesn't crash)
+  let a = if false && (Int.div 1 x == 0) then 1 else 0 in  -- 0 (doesn't crash)
   -- || should not evaluate second arg if first is true
-  let b = if true || (1 / x == 0) then 1 else 0 in   -- 1 (doesn't crash)
+  let b = if true || (Int.div 1 x == 0) then 1 else 0 in   -- 1 (doesn't crash)
   a + b                                               -- 1
 
 -- =============================================================================
@@ -225,7 +225,7 @@ let testListOps =
   let xs = [1, 2, 3, 4, 5] in
   let doubled = List.map (x -> x * 2) xs in
   let a = List.foldl (acc x -> acc + x) 0 doubled in   -- 30
-  let evens = List.filter (x -> x / 2 * 2 == x) xs in
+  let evens = List.filter (x -> Int.mod x 2 == 0) xs in
   let b = List.length evens in                          -- 2
   let ys = [6, 7, 8] in
   let zs = List.append xs ys in

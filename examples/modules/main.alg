@@ -19,7 +19,7 @@ module Math
     let g = gcd a b in
     if g == 0
       then 0
-      else abs (a * b) / g
+      else Int.div (abs (a * b)) g
 
   let rec pow = base exp ->
     if exp == 0

@@ -1108,11 +1108,16 @@ export const checkProgram = (
           subst = composeSubst(subst, s2);
         }
 
-        // Generalize
+        // Generalize: remove current bindings from env to allow proper generalization
+        const outerEnv = applySubstEnv(subst, env);
+        for (const b of decl.bindings) {
+          const key = `${b.name.id}:${b.name.original}`;
+          outerEnv.delete(key);
+        }
         for (const b of decl.bindings) {
           const key = `${b.name.id}:${b.name.original}`;
           const t = applySubst(subst, bindingTypes.get(key)!);
-          const generalizedScheme = generalize(applySubstEnv(subst, env), t);
+          const generalizedScheme = generalize(outerEnv, t);
           env.set(key, generalizedScheme);
           recordType(ctx, b.name, t);
         }

@@ -54,7 +54,7 @@ let rec nub = xs ->
   end
 
 -- Set difference (xs - ys)
-let diff = xs ys -> List.filter (x -> not (member x ys)) xs
+let diff = xs ys -> List.filter (x -> member x ys == false) xs
 
 -- =============================================================================
 -- Type Environment Operations
@@ -112,7 +112,7 @@ let applySubstScheme = subst scheme ->
         match acc
           when Subst bindings ->
             Subst (List.filter (p ->
-              match p when (v, t) -> not (strEq v var) end
+              match p when (v, t) -> strEq v var == false end
             ) bindings)
         end
       ) subst vars in

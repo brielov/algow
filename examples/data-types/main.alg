@@ -46,7 +46,7 @@ let testDataADTs =
     match shape
       when Circle r -> r * r * 3
       when Rectangle w h -> w * h
-      when Triangle a b c -> (a + b + c) / 2
+      when Triangle a b c -> Int.div (a + b + c) 2
     end
   in
   let perimeter = shape ->
@@ -232,7 +232,7 @@ let testMaybeType =
 
 let testEitherType =
   let safeDivide = a b ->
-    if b == 0 then Left "division by zero" else Right (a / b)
+    if b == 0 then Left "division by zero" else Right (Int.div a b)
   in
   let eitherMap = f either_ ->
     match either_
@@ -285,7 +285,7 @@ let testListType =
   let e = List.foldl (acc x -> acc + x) 0 doubled in  -- 30
 
   -- Filter
-  let evens = List.filter (x -> x / 2 * 2 == x) ys in
+  let evens = List.filter (x -> Int.mod x 2 == 0) ys in
   let f = List.foldl (acc x -> acc + x) 0 evens in    -- 24 (6 + 8 + 10)
 
   -- Concat

@@ -113,7 +113,7 @@ let testFlipConstId =
   let g = subtractFrom 10 3 in               -- -7 (3 - 10)
 
   -- Flip with division
-  let divide = a b -> a / b in
+  let divide = a b -> Int.div a b in
   let divideInto = flip_ divide in
   let h = divide 10 2 in                     -- 5
   let i = divideInto 10 2 in                 -- 0 (2 / 10)
@@ -171,7 +171,7 @@ let testListFunctions =
   let c = sum (List.map (x -> x * 2) nums) in  -- 30
 
   -- Filter with predicate
-  let isEven = x -> x / 2 * 2 == x in
+  let isEven = x -> Int.mod x 2 == 0 in
   let evens = List.filter isEven nums in
   let d = sum evens in                       -- 6
 

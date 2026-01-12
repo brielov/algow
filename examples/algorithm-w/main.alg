@@ -52,7 +52,7 @@ let listUnion = xs ys ->
   List.foldl (acc x -> if listMember x acc then acc else Cons x acc) ys xs
 
 let listDiff = xs ys ->
-  List.filter (x -> not (listMember x ys)) xs
+  List.filter (x -> listMember x ys == false) xs
 
 let rec listNub = xs ->
   match xs
@@ -81,7 +81,7 @@ module Env
   let remove = name env ->
     match env
       when Env bindings ->
-        Env (List.filter (p -> match p when (n, s) -> not (strEq n name) end) bindings)
+        Env (List.filter (p -> match p when (n, s) -> strEq n name == false end) bindings)
     end
 end
 
@@ -120,7 +120,7 @@ module Subst
         let filtered = match s
           when Subst bindings ->
             Subst (List.filter (p ->
-              match p when (v, t) -> not (listMember v vars) end
+              match p when (v, t) -> listMember v vars == false end
             ) bindings)
         end in
         Forall vars (applyType filtered ty)

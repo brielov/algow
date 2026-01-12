@@ -146,7 +146,7 @@ let testGuardPatterns =
   let safeDiv = pair ->
     match pair
       when (_, 0) -> Nothing
-      when (a, b) if b != 0 -> Just (a / b)
+      when (a, b) if b != 0 -> Just (Int.div a b)
       when _ -> Nothing
     end
   in

@@ -248,7 +248,7 @@ let testHigherOrderRecursion =
         if p x then x :: filter_ p rest else filter_ p rest
     end
   in
-  let evens = filter_ (x -> x / 2 * 2 == x) [1, 2, 3, 4, 5, 6] in
+  let evens = filter_ (x -> Int.mod x 2 == 0) [1, 2, 3, 4, 5, 6] in
   let c = fold (x acc -> x + acc) 0 evens in    -- 12
 
   -- takeWhile
@@ -282,35 +282,35 @@ let testHigherOrderRecursion =
 let testNumericRecursion =
   -- Greatest Common Divisor (Euclidean algorithm)
   let rec gcd = a b ->
-    if b == 0 then a else gcd b (a - (a / b) * b)
+    if b == 0 then a else gcd b (Int.mod a b)
   in
   let a = gcd 48 18 in                      -- 6
   let b = gcd 100 35 in                     -- 5
 
   -- Integer square root (binary search style)
   let rec isqrt_ = n guess ->
-    let next = (guess + n / guess) / 2 in
+    let next = Int.div (guess + Int.div n guess) 2 in
     if next >= guess then guess else isqrt_ n next
   in
-  let isqrt = n -> if n <= 1 then n else isqrt_ n (n / 2) in
+  let isqrt = n -> if n <= 1 then n else isqrt_ n (Int.div n 2) in
   let c = isqrt 100 in                      -- 10
   let d = isqrt 144 in                      -- 12
 
   -- Digit sum
   let rec digitSum = n ->
-    if n <= 0 then 0 else (n - (n / 10) * 10) + digitSum (n / 10)
+    if n <= 0 then 0 else Int.mod n 10 + digitSum (Int.div n 10)
   in
   let e = digitSum 12345 in                 -- 15
 
   -- Count digits
   let rec countDigits = n ->
-    if n < 10 then 1 else 1 + countDigits (n / 10)
+    if n < 10 then 1 else 1 + countDigits (Int.div n 10)
   in
   let f = countDigits 12345 in              -- 5
 
   -- Reverse integer
   let rec reverseInt = acc n ->
-    if n <= 0 then acc else reverseInt (acc * 10 + (n - (n / 10) * 10)) (n / 10)
+    if n <= 0 then acc else reverseInt (acc * 10 + Int.mod n 10) (Int.div n 10)
   in
   let g = reverseInt 0 12345 in             -- 54321
 
@@ -341,7 +341,7 @@ let testBuildingRecursion =
       when Nil -> Empty
       when Cons x rest ->
         let len = List.length rest in
-        let half = len / 2 in
+        let half = Int.div len 2 in
         let left = List.take half rest in
         let right = List.drop half rest in
         Branch x (buildTree left) (buildTree right)
@@ -400,7 +400,7 @@ let testDivideAndConquer =
       when Cons _ Nil -> xs
       when Cons _ _ ->
         let len = List.length xs in
-        let (left, right) = splitAt (len / 2) xs in
+        let (left, right) = splitAt (Int.div len 2) xs in
         merge (mergeSort left) (mergeSort right)
     end
   in
@@ -427,7 +427,7 @@ let testDivideAndConquer =
         if len == 1 then
           match xs when Cons x _ -> x == target when Nil -> false end
         else
-          let mid = len / 2 in
+          let mid = Int.div len 2 in
           let (left, right) = splitAt mid xs in
           match right
             when Cons midVal _ ->

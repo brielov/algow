@@ -4,6 +4,7 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
+    "test": "bun run scripts/test-examples.ts",
     "lint": "oxlint --type-aware --type-check --ignore-pattern 'playground/*'",
     "format": "oxfmt --write",
     "lsp": "bun run src/lsp/index.ts",

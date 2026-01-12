@@ -248,7 +248,7 @@ let testRecordDataStructures =
 
 let testComplexRecordOps =
   -- Merge two points (midpoint)
-  let midpoint = p1 p2 -> { x = (p1.x + p2.x) / 2, y = (p1.y + p2.y) / 2 } in
+  let midpoint = p1 p2 -> { x = Int.div (p1.x + p2.x) 2, y = Int.div (p1.y + p2.y) 2 } in
   let mid = midpoint { x = 0, y = 0 } { x = 10, y = 20 } in
   let a = mid.x + mid.y in                  -- 15
 

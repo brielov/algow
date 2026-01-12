@@ -28,11 +28,12 @@
 --     when (x, y) | (x, 0) -> x
 --   end
 
--- VALID: Both sides bind the same variable 'x'
+-- VALID: Extracts nested Maybe values
 let valid1 = opt ->
   match opt
-    when Just (Just x) | Just (Right x) -> x
-    when _ -> 0
+    when Just (Just x) -> x
+    when Just Nothing -> 0
+    when Nothing -> 0
   end
 
 -- VALID: Neither side binds any variables

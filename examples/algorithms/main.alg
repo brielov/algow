@@ -93,17 +93,17 @@ let testSearchingAlgorithms =
 
 let testNumericAlgorithms =
   -- Greatest Common Divisor
-  let rec gcd = a b -> if b == 0 then a else gcd b (a - (a / b) * b) in
+  let rec gcd = a b -> if b == 0 then a else gcd b (Int.mod a b) in
   let a = gcd 48 18 in                      -- 6
 
   -- Least Common Multiple
-  let lcm = a b -> (a * b) / gcd a b in
+  let lcm = a b -> Int.div (a * b) (gcd a b) in
   let b = lcm 12 18 in                      -- 36
 
   -- Prime check (simple trial division)
   let rec isPrimeHelper = n divisor ->
     if divisor * divisor > n then true
-    else if n - (n / divisor) * divisor == 0 then false
+    else if Int.mod n divisor == 0 then false
     else isPrimeHelper n (divisor + 1)
   in
   let isPrime = n -> if n < 2 then false else isPrimeHelper n 2 in
@@ -112,8 +112,8 @@ let testNumericAlgorithms =
 
   -- Sum of divisors
   let rec sumDivisors = n d ->
-    if d > n / 2 then 0
-    else if n - (n / d) * d == 0 then d + sumDivisors n (d + 1)
+    if d > Int.div n 2 then 0
+    else if Int.mod n d == 0 then d + sumDivisors n (d + 1)
     else sumDivisors n (d + 1)
   in
   let e = sumDivisors 12 1 in               -- 16 (1+2+3+4+6)

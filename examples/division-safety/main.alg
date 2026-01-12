@@ -4,16 +4,16 @@
 -- The compiler detects division by literal zero at compile time.
 
 -- Safe division examples
-let a = 10 / 2   -- 5
-let b = 100 / 10 -- 10
-let c = 7 / 3    -- 2 (integer division, truncated)
-let d = 15 / 4   -- 3 (integer division, truncated)
+let a = Int.div 10 2   -- 5
+let b = Int.div 100 10 -- 10
+let c = Int.div 7 3    -- 2 (integer division, truncated)
+let d = Int.div 15 4   -- 3 (integer division, truncated)
 
 -- Safe division with variables (runtime check needed)
 let safeDivide = x y ->
   if y == 0
     then Nothing
-    else Just (x / y)
+    else Just (Int.div x y)
 
 -- Using safe division
 let result1 = match safeDivide 10 2
@@ -32,7 +32,7 @@ let average = xs ->
   let len = List.length xs in
   if len == 0
     then Nothing
-    else Just (sum / len)
+    else Just (Int.div sum len)
 
 let avg1 = match average [10, 20, 30]
   when Just x -> x

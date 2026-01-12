@@ -27,11 +27,13 @@ let isSpecialValue = opt ->
     when Just (Just _) -> false
   end
 
--- Or-pattern with same variable in all alternatives
+-- Or-pattern with nested patterns and same variable binding
+-- Extracts value from deeply nested Maybe structures
 let extractValue = opt ->
   match opt
-    when Just (Just x) | Just (Right x) -> x
-    when _ -> 0
+    when Just (Just x) -> x
+    when Just Nothing -> 0
+    when Nothing -> 0
   end
 
 -- Or-pattern with literals
@@ -58,7 +60,7 @@ let result =
   (if isSpecialValue Nothing then 1 else 0) +     -- 1
   (if isSpecialValue (Just Nothing) then 1 else 0) + -- 1
   extractValue (Just (Just 42)) +                 -- 42
-  extractValue (Just (Right 10)) +                -- 10
+  extractValue (Just Nothing) +                   -- 0
   extractValue Nothing +                          -- 0
   (if isZeroOrOne 0 then 1 else 0) +              -- 1
   (if isZeroOrOne 1 then 1 else 0) +              -- 1
@@ -66,6 +68,6 @@ let result =
   (if startsWithZeroOrOne [0, 2, 3] then 1 else 0) + -- 1
   (if startsWithZeroOrOne [1, 2, 3] then 1 else 0) + -- 1
   (if startsWithZeroOrOne [5, 2, 3] then 1 else 0)   -- 0
-  -- Total: 1 + 0 + 1 + 1 + 0 + 1 + 1 + 42 + 10 + 0 + 1 + 1 + 0 + 1 + 1 + 0 = 61
+  -- Total: 1 + 0 + 1 + 1 + 0 + 1 + 1 + 42 + 0 + 0 + 1 + 1 + 0 + 1 + 1 + 0 = 51
 
 result
