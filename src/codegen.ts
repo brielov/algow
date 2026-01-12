@@ -440,6 +440,11 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
       return genAtom(ctx, binding.atom);
 
     case "IRBApp": {
+      // Special case: Cons(h) → (t) => ({ h: h, t })
+      if (binding.func.kind === "ACon" && binding.func.name === "Cons") {
+        const h = genAtom(ctx, binding.arg);
+        return `(t) => ({ h: ${h}, t })`;
+      }
       const func = genAtom(ctx, binding.func);
       const arg = genAtom(ctx, binding.arg);
       // Direct function call
@@ -601,6 +606,15 @@ const genExpr = (ctx: CodeGenContext, expr: IR.IRExpr): string => {
       return genAtom(ctx, expr.atom);
 
     case "IRLet": {
+      // Optimization: if body is just returning this variable, skip the intermediate binding
+      if (
+        expr.body.kind === "IRAtom" &&
+        expr.body.atom.kind === "AVar" &&
+        expr.body.atom.name.id === expr.name.id
+      ) {
+        return genBinding(ctx, expr.binding);
+      }
+
       const binding = genBinding(ctx, expr.binding);
       const jsName = nameToJs(expr.name);
 
@@ -640,18 +654,33 @@ const genExpr = (ctx: CodeGenContext, expr: IR.IRExpr): string => {
 // =============================================================================
 
 const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
-  const scrutinee = genAtom(ctx, match.scrutinee);
-  const scrutineeVar = freshScrutinee(ctx);
+  // If scrutinee is a simple variable, use it directly without IIFE wrapping
+  const isSimpleVar = match.scrutinee.kind === "AVar";
+  const scrutineeVar = isSimpleVar ? nameToJs(match.scrutinee.name) : freshScrutinee(ctx);
+  const scrutineeExpr = isSimpleVar ? null : genAtom(ctx, match.scrutinee);
 
   const lines: string[] = [];
-  lines.push(`((${scrutineeVar}) => {`);
+  if (isSimpleVar) {
+    lines.push("(() => {");
+  } else {
+    lines.push(`((${scrutineeVar}) => {`);
+  }
 
   for (let i = 0; i < match.cases.length; i++) {
     const case_ = match.cases[i]!;
     const { condition, bindings } = genPatternMatch(ctx, scrutineeVar, case_.pattern);
+    const isLast = i === match.cases.length - 1;
 
-    const prefix = i === 0 ? "if" : "} else if";
-    lines.push(`  ${prefix} (${condition}) {`);
+    // Use plain 'else' for last case (type checker ensures exhaustiveness)
+    let prefix: string;
+    if (i === 0) {
+      prefix = `if (${condition})`;
+    } else if (isLast) {
+      prefix = "} else";
+    } else {
+      prefix = `} else if (${condition})`;
+    }
+    lines.push(`  ${prefix} {`);
 
     // Emit bindings
     for (const [name, expr] of bindings) {
@@ -696,7 +725,11 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   }
 
   lines.push("  }");
-  lines.push(`})(${scrutinee})`);
+  if (isSimpleVar) {
+    lines.push("})()");
+  } else {
+    lines.push(`})(${scrutineeExpr})`);
+  }
 
   return lines.join("\n" + "  ".repeat(ctx.indent));
 };

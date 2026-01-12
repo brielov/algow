@@ -522,6 +522,127 @@ const transformBindingTCO = (binding: IR.IRBinding): IR.IRBinding => {
 };
 
 // =============================================================================
+// Inline Trivial Bindings
+// =============================================================================
+
+type InlineEnv = Map<string, IR.Atom>;
+
+/** Inline trivial atom bindings (let x = y in ... → substitute y for x) */
+const inlineExpr = (expr: IR.IRExpr, env: InlineEnv): IR.IRExpr => {
+  switch (expr.kind) {
+    case "IRAtom": {
+      if (expr.atom.kind === "AVar") {
+        const inlined = env.get(nameKey(expr.atom.name));
+        if (inlined) return IR.iratom(inlined);
+      }
+      return expr;
+    }
+
+    case "IRLet": {
+      const newBinding = inlineBinding(expr.binding, env);
+
+      // If binding is just an atom, add to inline env
+      if (newBinding.kind === "IRBAtom") {
+        const newEnv = new Map(env);
+        newEnv.set(nameKey(expr.name), newBinding.atom);
+        return inlineExpr(expr.body, newEnv);
+      }
+
+      // At this point, newBinding is not an atom (non-trivial binding)
+      const newBody = inlineExpr(expr.body, env);
+      return IR.irlet(expr.name, newBinding, newBody);
+    }
+
+    case "IRLetRec": {
+      const newBindings = expr.bindings.map((b) => ({
+        name: b.name,
+        binding: inlineBinding(b.binding, env),
+      }));
+      return IR.irletrec(newBindings, inlineExpr(expr.body, env));
+    }
+
+    case "IRMatch": {
+      const newScrutinee = inlineAtom(expr.scrutinee, env);
+      const cases = expr.cases.map((c) => ({
+        pattern: c.pattern,
+        guard: c.guard ? inlineExpr(c.guard, env) : null,
+        body: inlineExpr(c.body, env),
+      }));
+      return IR.irmatch(newScrutinee, cases, expr.type);
+    }
+  }
+};
+
+const inlineAtom = (atom: IR.Atom, env: InlineEnv): IR.Atom => {
+  if (atom.kind === "AVar") {
+    const inlined = env.get(nameKey(atom.name));
+    if (inlined) return inlined;
+  }
+  return atom;
+};
+
+const inlineBinding = (binding: IR.IRBinding, env: InlineEnv): IR.IRBinding => {
+  switch (binding.kind) {
+    case "IRBAtom":
+      return IR.irbatom(inlineAtom(binding.atom, env));
+
+    case "IRBApp":
+      return IR.irbapp(inlineAtom(binding.func, env), inlineAtom(binding.arg, env), binding.type);
+
+    case "IRBBinOp":
+      return IR.irbbinop(
+        binding.op,
+        inlineAtom(binding.left, env),
+        inlineAtom(binding.right, env),
+        binding.type,
+      );
+
+    case "IRBTuple":
+      return IR.irbtuple(
+        binding.elements.map((e) => inlineAtom(e, env)),
+        binding.type,
+      );
+
+    case "IRBRecord":
+      return IR.irbrecord(
+        binding.fields.map((f) => ({ name: f.name, value: inlineAtom(f.value, env) })),
+        binding.type,
+      );
+
+    case "IRBRecordUpdate":
+      return IR.irbrecordupdate(
+        inlineAtom(binding.record, env),
+        binding.fields.map((f) => ({ name: f.name, value: inlineAtom(f.value, env) })),
+        binding.type,
+      );
+
+    case "IRBField":
+      return IR.irbfield(inlineAtom(binding.record, env), binding.field, binding.type);
+
+    case "IRBLambda":
+      return IR.irblambda(binding.param, inlineExpr(binding.body, env), binding.type);
+
+    case "IRBForeign":
+      return IR.irbforeign(
+        binding.module,
+        binding.name,
+        binding.args.map((a) => inlineAtom(a, env)),
+        binding.type,
+      );
+
+    case "IRBMatch": {
+      const newScrutinee = inlineAtom(binding.scrutinee, env);
+      const cases = binding.cases.map((c) => ({
+        pattern: c.pattern,
+        guard: c.guard ? inlineExpr(c.guard, env) : null,
+        body: inlineExpr(c.body, env),
+      }));
+      return IR.irbmatch(newScrutinee, cases, binding.type);
+    }
+  }
+};
+
+// =============================================================================
 // Optimization Pipeline
 // =============================================================================
 
@@ -532,12 +653,15 @@ const optimizeExpr = (expr: IR.IRExpr): IR.IRExpr => {
   // 1. Constant folding
   let result = foldExpr(expr, new Map());
 
-  // 2. Dead code elimination
+  // 2. Inline trivial bindings
+  result = inlineExpr(result, new Map());
+
+  // 3. Dead code elimination
   const uses = new Set<string>();
   collectUses(result, uses);
   result = removeUnused(result, uses);
 
-  // 3. Tail call optimization
+  // 4. Tail call optimization
   result = transformTCO(result);
 
   return result;
@@ -583,11 +707,65 @@ const optimizeBinding = (binding: IR.IRBinding): IR.IRBinding => {
 };
 
 /**
+ * Collect trivial atom bindings from declarations (for global inlining).
+ */
+const collectGlobalInlines = (decls: readonly IR.IRDecl[]): InlineEnv => {
+  const env: InlineEnv = new Map();
+  for (const decl of decls) {
+    if (decl.kind === "IRDeclLet" && decl.binding.kind === "IRBAtom") {
+      env.set(nameKey(decl.name), decl.binding.atom);
+    }
+  }
+  return env;
+};
+
+/**
+ * Filter out declarations that are trivial atom bindings.
+ */
+const filterTrivialDecls = (decls: readonly IR.IRDecl[], env: InlineEnv): IR.IRDecl[] => {
+  return decls.filter((decl) => {
+    if (decl.kind === "IRDeclLet") {
+      return !env.has(nameKey(decl.name));
+    }
+    return true;
+  });
+};
+
+/**
+ * Apply global inlining to a declaration.
+ */
+const inlineDecl = (decl: IR.IRDecl, env: InlineEnv): IR.IRDecl => {
+  switch (decl.kind) {
+    case "IRDeclType":
+      return decl;
+    case "IRDeclLet":
+      return IR.irdecllet(decl.name, inlineBinding(decl.binding, env));
+    case "IRDeclLetRec": {
+      const newBindings = decl.bindings.map((b) => ({
+        name: b.name,
+        binding: inlineBinding(b.binding, env),
+      }));
+      return IR.irdeclletrec(newBindings);
+    }
+  }
+};
+
+/**
  * Optimize an IR program.
  */
 export const optimize = (program: IR.IRProgram): IR.IRProgram => {
-  const decls = program.decls.map(optimizeDecl);
-  const main = program.main ? optimizeExpr(program.main) : null;
+  // First, apply per-declaration optimizations
+  let decls = program.decls.map(optimizeDecl);
+  let main = program.main ? optimizeExpr(program.main) : null;
+
+  // Then, do global inlining of trivial atom bindings
+  const globalEnv = collectGlobalInlines(decls);
+  if (globalEnv.size > 0) {
+    decls = filterTrivialDecls(decls, globalEnv).map((d) => inlineDecl(d, globalEnv));
+    if (main) {
+      main = inlineExpr(main, globalEnv);
+    }
+  }
 
   return { decls, main };
 };
