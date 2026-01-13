@@ -5,24 +5,25 @@
  * No file I/O - that's handled by the CLI.
  */
 
-import { parse } from "./parser";
-import { desugarProgram } from "./desugar";
-import { resolveProgram } from "./resolve";
+import { minify as terserMinify } from "terser";
 import { checkProgram, typeToString, type CheckOutput } from "./checker";
-import { lowerProgram } from "./lower";
-import { optimize } from "./optimize";
-import { generateJS, type Target, DEFAULT_TARGET } from "./codegen";
+import { DEFAULT_TARGET, generateJS, type Target } from "./codegen";
+import { desugarProgram } from "./desugar";
 import type { Diagnostic } from "./diagnostics";
-import type { SDecl, SProgram } from "./surface";
-import { type Type, type Scheme, applySubst } from "./types";
+import { lowerProgram } from "./lower";
 import type { SymbolTable } from "./lsp/symbols";
 import { enrichWithTypes } from "./lsp/symbols";
 import type { FileRegistry } from "./lsp/workspace";
-import { createFileRegistryBuilder, registerFile, freezeFileRegistry } from "./lsp/workspace";
+import { createFileRegistryBuilder, freezeFileRegistry, registerFile } from "./lsp/workspace";
+import { optimize } from "./optimize";
+import { parse } from "./parser";
+import { resolveProgram } from "./resolve";
+import type { SDecl, SProgram } from "./surface";
+import { applySubst, type Scheme, type Type } from "./types";
 
 // Re-export Target type and helpers
+export { DEFAULT_TARGET, isValidTarget, TARGETS } from "./codegen";
 export type { Target } from "./codegen";
-export { TARGETS, DEFAULT_TARGET, isValidTarget } from "./codegen";
 
 // =============================================================================
 // Types
@@ -40,6 +41,8 @@ export type CompileOptions = {
   readonly optimize?: boolean;
   /** Target platform for code generation (default: "node") */
   readonly target?: Target;
+  /** Minify the output JavaScript with terser */
+  readonly minify?: boolean;
 };
 
 export type CompileResult = {
@@ -115,14 +118,15 @@ const hasMainDecl = (decl: SDecl): boolean => {
  * @param options - Compilation options
  * @returns Compilation result with code, type, and diagnostics
  */
-export const compile = (
+export const compile = async (
   sources: readonly SourceFile[],
   options: CompileOptions = {},
-): CompileResult => {
+): Promise<CompileResult> => {
   const {
     typeCheckOnly = false,
     optimize: shouldOptimize = true,
     target = DEFAULT_TARGET,
+    minify = false,
   } = options;
   const allDiagnostics: Diagnostic[] = [];
 
@@ -239,8 +243,20 @@ export const compile = (
   // 9. Generate JavaScript
   const output = generateJS(irProgram, { target });
 
+  // 10. Minify (optional)
+  let code = output.code;
+  if (minify) {
+    const result = await terserMinify(code, {
+      compress: { dead_code: true, unused: true },
+      mangle: true,
+    });
+    if (result.code) {
+      code = result.code;
+    }
+  }
+
   return {
-    code: output.code,
+    code,
     type: mainType,
     typeString: typeToString(mainType),
     diagnostics: allDiagnostics,

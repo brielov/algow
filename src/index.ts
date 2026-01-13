@@ -159,10 +159,10 @@ const loadSources = async (patterns: string[]): Promise<SourceFile[]> => {
 /** Run compilation and handle diagnostics/exit. */
 const run = async (
   patterns: string[],
-  options: { typeCheckOnly: boolean; target?: Target },
+  options: { typeCheckOnly: boolean; target?: Target; minify?: boolean },
 ): Promise<void> => {
   const sources = await loadSources(patterns);
-  const result = compile(sources, options);
+  const result = await compile(sources, options);
 
   if (result.diagnostics.length > 0) {
     printDiagnostics(result.diagnostics, sources);
@@ -199,7 +199,8 @@ program
     `-t, --target <target>`,
     `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
   )
-  .action((files, options: { target?: string }) => {
+  .option("-m, --minify", "Minify the output JavaScript with terser")
+  .action((files, options: { target?: string; minify?: boolean }) => {
     const target = options.target;
     if (target && !isValidTarget(target)) {
       console.error(
@@ -207,7 +208,11 @@ program
       );
       process.exit(1);
     }
-    void run(files, { typeCheckOnly: false, target: target as Target | undefined });
+    void run(files, {
+      typeCheckOnly: false,
+      target: target as Target | undefined,
+      minify: options.minify,
+    });
   });
 
 program
@@ -224,7 +229,8 @@ program
     `-t, --target <target>`,
     `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
   )
-  .action(async (_files: string[], options: { target?: string }) => {
+  .option("-m, --minify", "Minify the output JavaScript with terser")
+  .action(async (_files: string[], options: { target?: string; minify?: boolean }) => {
     const target = options.target;
     if (target && !isValidTarget(target)) {
       console.error(
@@ -270,7 +276,10 @@ program
 
     // Compile
     const sources = await loadSources(sourceFiles);
-    const result = compile(sources, { target: (target as Target) ?? DEFAULT_TARGET });
+    const result = await compile(sources, {
+      target: (target as Target) ?? DEFAULT_TARGET,
+      minify: options.minify,
+    });
 
     if (result.diagnostics.length > 0) {
       printDiagnostics(result.diagnostics, sources);
@@ -358,19 +367,29 @@ program
     `--target <target>`,
     `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
   )
-  .action(async (file, options: { compile?: boolean; typecheck?: boolean; target?: string }) => {
-    if (!file) {
-      program.help();
-      return;
-    }
-    const target = options.target;
-    if (target && !isValidTarget(target)) {
-      console.error(
-        `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
-      );
-      process.exit(1);
-    }
-    await run([file], { typeCheckOnly: !!options.typecheck, target: target as Target | undefined });
-  });
+  .option("-m, --minify", "Minify the output JavaScript with terser")
+  .action(
+    async (
+      file,
+      options: { compile?: boolean; typecheck?: boolean; target?: string; minify?: boolean },
+    ) => {
+      if (!file) {
+        program.help();
+        return;
+      }
+      const target = options.target;
+      if (target && !isValidTarget(target)) {
+        console.error(
+          `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
+        );
+        process.exit(1);
+      }
+      await run([file], {
+        typeCheckOnly: !!options.typecheck,
+        target: target as Target | undefined,
+        minify: options.minify,
+      });
+    },
+  );
 
 program.parse();
