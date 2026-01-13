@@ -18,7 +18,16 @@ import { createFileRegistryBuilder, freezeFileRegistry, registerFile } from "./l
 import { optimize } from "./optimize";
 import { parse } from "./parser";
 import { resolveProgram } from "./resolve";
-import type { SDecl, SProgram } from "./surface";
+import type {
+  SCase,
+  SDecl,
+  SDoStmt,
+  SExpr,
+  SPattern,
+  SProgram,
+  Span,
+  SType,
+} from "./surface";
 import { applySubst, type Scheme, type Type } from "./types";
 
 // Re-export Target type and helpers
@@ -265,6 +274,307 @@ export const compile = async (
 };
 
 // =============================================================================
+// Span Offsetting (for multi-file LSP compilation)
+// =============================================================================
+
+/** Offset a span by a given amount */
+const offsetSpan = (span: Span | undefined, offset: number): Span | undefined => {
+  if (!span) return undefined;
+  return { start: span.start + offset, end: span.end + offset };
+};
+
+/** Offset all spans in a type */
+const offsetType = (type: SType, offset: number): SType => {
+  switch (type.kind) {
+    case "STVar":
+      return { ...type, span: offsetSpan(type.span, offset) };
+    case "STCon":
+      return { ...type, span: offsetSpan(type.span, offset) };
+    case "STApp":
+      return {
+        ...type,
+        func: offsetType(type.func, offset),
+        arg: offsetType(type.arg, offset),
+        span: offsetSpan(type.span, offset),
+      };
+    case "STFun":
+      return {
+        ...type,
+        param: offsetType(type.param, offset),
+        result: offsetType(type.result, offset),
+        span: offsetSpan(type.span, offset),
+      };
+    case "STTuple":
+      return {
+        ...type,
+        elements: type.elements.map((e) => offsetType(e, offset)),
+        span: offsetSpan(type.span, offset),
+      };
+    case "STRecord":
+      return {
+        ...type,
+        fields: type.fields.map((f) => ({ ...f, type: offsetType(f.type, offset) })),
+        span: offsetSpan(type.span, offset),
+      };
+  }
+};
+
+/** Offset all spans in a pattern */
+const offsetPattern = (pattern: SPattern, offset: number): SPattern => {
+  switch (pattern.kind) {
+    case "SPWild":
+      return { ...pattern, span: offsetSpan(pattern.span, offset) };
+    case "SPVar":
+      return { ...pattern, span: offsetSpan(pattern.span, offset) };
+    case "SPLit":
+      return { ...pattern, span: offsetSpan(pattern.span, offset) };
+    case "SPCon":
+      return {
+        ...pattern,
+        args: pattern.args.map((p) => offsetPattern(p, offset)),
+        span: offsetSpan(pattern.span, offset),
+      };
+    case "SPTuple":
+      return {
+        ...pattern,
+        elements: pattern.elements.map((p) => offsetPattern(p, offset)),
+        span: offsetSpan(pattern.span, offset),
+      };
+    case "SPRecord":
+      return {
+        ...pattern,
+        fields: pattern.fields.map((f) => ({ ...f, pattern: offsetPattern(f.pattern, offset) })),
+        span: offsetSpan(pattern.span, offset),
+      };
+    case "SPAs":
+      return {
+        ...pattern,
+        pattern: offsetPattern(pattern.pattern, offset),
+        span: offsetSpan(pattern.span, offset),
+      };
+    case "SPOr":
+      return {
+        ...pattern,
+        left: offsetPattern(pattern.left, offset),
+        right: offsetPattern(pattern.right, offset),
+        span: offsetSpan(pattern.span, offset),
+      };
+    case "SPCons":
+      return {
+        ...pattern,
+        head: offsetPattern(pattern.head, offset),
+        tail: offsetPattern(pattern.tail, offset),
+        span: offsetSpan(pattern.span, offset),
+      };
+    case "SPList":
+      return {
+        ...pattern,
+        elements: pattern.elements.map((p) => offsetPattern(p, offset)),
+        span: offsetSpan(pattern.span, offset),
+      };
+  }
+};
+
+/** Offset all spans in a case */
+const offsetCase = (c: SCase, offset: number): SCase => ({
+  pattern: offsetPattern(c.pattern, offset),
+  guard: c.guard ? offsetExpr(c.guard, offset) : null,
+  body: offsetExpr(c.body, offset),
+});
+
+/** Offset all spans in a do statement */
+const offsetDoStmt = (stmt: SDoStmt, offset: number): SDoStmt => {
+  switch (stmt.kind) {
+    case "DoBindPattern":
+      return {
+        ...stmt,
+        pattern: offsetPattern(stmt.pattern, offset),
+        expr: offsetExpr(stmt.expr, offset),
+      };
+    case "DoLet":
+      return {
+        ...stmt,
+        pattern: offsetPattern(stmt.pattern, offset),
+        expr: offsetExpr(stmt.expr, offset),
+      };
+    case "DoExpr":
+      return { ...stmt, expr: offsetExpr(stmt.expr, offset) };
+  }
+};
+
+/** Offset all spans in an expression */
+const offsetExpr = (expr: SExpr, offset: number): SExpr => {
+  switch (expr.kind) {
+    case "SVar":
+      return { ...expr, span: offsetSpan(expr.span, offset) };
+    case "SLit":
+      return { ...expr, span: offsetSpan(expr.span, offset) };
+    case "SApp":
+      return {
+        ...expr,
+        func: offsetExpr(expr.func, offset),
+        arg: offsetExpr(expr.arg, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SAbs":
+      return {
+        ...expr,
+        body: offsetExpr(expr.body, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SLet":
+      return {
+        ...expr,
+        value: offsetExpr(expr.value, offset),
+        body: offsetExpr(expr.body, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SLetRec":
+      return {
+        ...expr,
+        bindings: expr.bindings.map((b) => ({ ...b, value: offsetExpr(b.value, offset) })),
+        body: offsetExpr(expr.body, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SIf":
+      return {
+        ...expr,
+        cond: offsetExpr(expr.cond, offset),
+        thenBranch: offsetExpr(expr.thenBranch, offset),
+        elseBranch: offsetExpr(expr.elseBranch, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SMatch":
+      return {
+        ...expr,
+        scrutinee: offsetExpr(expr.scrutinee, offset),
+        cases: expr.cases.map((c) => offsetCase(c, offset)),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SCon":
+      return { ...expr, span: offsetSpan(expr.span, offset) };
+    case "STuple":
+      return {
+        ...expr,
+        elements: expr.elements.map((e) => offsetExpr(e, offset)),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SRecord":
+      return {
+        ...expr,
+        fields: expr.fields.map((f) => ({ ...f, value: offsetExpr(f.value, offset) })),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SRecordUpdate":
+      return {
+        ...expr,
+        record: offsetExpr(expr.record, offset),
+        fields: expr.fields.map((f) => ({ ...f, value: offsetExpr(f.value, offset) })),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SField":
+      return {
+        ...expr,
+        record: offsetExpr(expr.record, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SList":
+      return {
+        ...expr,
+        elements: expr.elements.map((e) => offsetExpr(e, offset)),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SPipe":
+      return {
+        ...expr,
+        left: offsetExpr(expr.left, offset),
+        right: offsetExpr(expr.right, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SCons":
+      return {
+        ...expr,
+        head: offsetExpr(expr.head, offset),
+        tail: offsetExpr(expr.tail, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SBinOp":
+      return {
+        ...expr,
+        left: offsetExpr(expr.left, offset),
+        right: offsetExpr(expr.right, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SDo":
+      return {
+        ...expr,
+        stmts: expr.stmts.map((s) => offsetDoStmt(s, offset)),
+        span: offsetSpan(expr.span, offset),
+      };
+    case "SAnnot":
+      return {
+        ...expr,
+        expr: offsetExpr(expr.expr, offset),
+        type: offsetType(expr.type, offset),
+        span: offsetSpan(expr.span, offset),
+      };
+  }
+};
+
+/** Offset all spans in a declaration */
+const offsetDecl = (decl: SDecl, offset: number): SDecl => {
+  switch (decl.kind) {
+    case "SDeclType":
+      return {
+        ...decl,
+        constructors: decl.constructors.map((c) => ({
+          ...c,
+          fields: c.fields.map((f) => offsetType(f, offset)),
+        })),
+        span: offsetSpan(decl.span, offset),
+      };
+    case "SDeclTypeAlias":
+      return {
+        ...decl,
+        type: offsetType(decl.type, offset),
+        span: offsetSpan(decl.span, offset),
+      };
+    case "SDeclLet":
+      return {
+        ...decl,
+        value: offsetExpr(decl.value, offset),
+        span: offsetSpan(decl.span, offset),
+      };
+    case "SDeclLetRec":
+      return {
+        ...decl,
+        bindings: decl.bindings.map((b) => ({ ...b, value: offsetExpr(b.value, offset) })),
+        span: offsetSpan(decl.span, offset),
+      };
+    case "SDeclForeign":
+      return {
+        ...decl,
+        type: offsetType(decl.type, offset),
+        span: offsetSpan(decl.span, offset),
+      };
+    case "SDeclModule":
+      return {
+        ...decl,
+        decls: decl.decls.map((d) => offsetDecl(d, offset)),
+        span: offsetSpan(decl.span, offset),
+      };
+    case "SDeclUse":
+      return { ...decl, span: offsetSpan(decl.span, offset) };
+  }
+};
+
+/** Offset all spans in a program */
+const offsetProgram = (program: SProgram, offset: number): SProgram => ({
+  decls: program.decls.map((d) => offsetDecl(d, offset)),
+  expr: program.expr ? offsetExpr(program.expr, offset) : null,
+});
+
+// =============================================================================
 // Helpers
 // =============================================================================
 
@@ -317,14 +627,23 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
   const allDiagnostics: Diagnostic[] = [];
 
   // Build file registry (tracks file identity through compilation)
+  // Also track global offsets to adjust spans for multi-file compilation
   const registryBuilder = createFileRegistryBuilder();
   const parsedFiles: ParsedFile[] = [];
 
   for (const { path, content } of sources) {
+    // Get the current global offset BEFORE registering (this is where this file starts)
+    const globalOffset = registryBuilder.currentOffset;
+
     registerFile(registryBuilder, path, content);
     const parseResult = parse(content);
     allDiagnostics.push(...parseResult.diagnostics);
-    parsedFiles.push({ path, source: content, program: parseResult.program });
+
+    // Offset all spans in the parsed program to be global
+    // This ensures symbol locations are correctly mapped to files
+    const offsettedProgram = offsetProgram(parseResult.program, globalOffset);
+
+    parsedFiles.push({ path, source: content, program: offsettedProgram });
   }
 
   const fileRegistry = freezeFileRegistry(registryBuilder);

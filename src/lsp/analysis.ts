@@ -5,11 +5,35 @@
  * and providing access to symbol information.
  */
 
+import { readFileSync } from "fs";
 import { compileForLSP, type SourceFile } from "../compile";
 import type { Diagnostic } from "../diagnostics";
 import { typeToString } from "../checker";
 import type { DocumentManager } from "./documents";
 import { getSourceFiles } from "./documents";
+
+// =============================================================================
+// Prelude Loading
+// =============================================================================
+
+/** Get the path to the prelude file bundled with the compiler */
+const getPreludePath = (): string => {
+  const url = new URL("../../lib/prelude.alg", import.meta.url);
+  return url.pathname;
+};
+
+/** Cached prelude content */
+let cachedPrelude: SourceFile | null = null;
+
+/** Load the prelude file */
+const loadPrelude = (): SourceFile => {
+  if (cachedPrelude) return cachedPrelude;
+
+  const path = getPreludePath();
+  const content = readFileSync(path, "utf-8");
+  cachedPrelude = { path, content };
+  return cachedPrelude;
+};
 import {
   buildLineIndex,
   offsetToPosition,
@@ -55,7 +79,10 @@ export const createAnalyzer = (): Analyzer => ({
 
 /** Run analysis on all open documents */
 export const analyze = (analyzer: Analyzer, documents: DocumentManager): AnalysisResult => {
-  const sources = getSourceFiles(documents);
+  // Load prelude and user sources
+  const prelude = loadPrelude();
+  const userSources = getSourceFiles(documents);
+  const sources = [prelude, ...userSources];
 
   // Build line indices for each file
   const lineIndices = new Map<string, LineIndex>();

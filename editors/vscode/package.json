@@ -1,0 +1,89 @@
+{
+  "name": "algow",
+  "displayName": "Algow",
+  "description": "Language support for Algow - a statically-typed ML-like language",
+  "version": "0.1.0",
+  "publisher": "algow",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brielov/algow"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "algow",
+    "ml",
+    "functional",
+    "type-inference"
+  ],
+  "activationEvents": [
+    "onLanguage:algow"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "algow",
+        "aliases": [
+          "Algow",
+          "algow"
+        ],
+        "extensions": [
+          ".alg"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/algow-light.png",
+          "dark": "./icons/algow-dark.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "algow",
+        "scopeName": "source.algow",
+        "path": "./syntaxes/algow.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "algow.restartServer",
+        "title": "Algow: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Algow",
+      "properties": {
+        "algow.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Algow language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

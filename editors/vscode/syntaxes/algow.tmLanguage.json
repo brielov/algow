@@ -1,0 +1,142 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Algow",
+  "scopeName": "source.algow",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#characters" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#operators" },
+    { "include": "#types" },
+    { "include": "#constructors" },
+    { "include": "#functions" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-dash.algow",
+          "match": "--.*$"
+        },
+        {
+          "name": "comment.block.algow",
+          "begin": "\\{-",
+          "end": "-\\}",
+          "patterns": [
+            { "include": "#comments" }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.algow",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.algow",
+          "match": "\\\\(?:[nrt\\\\\"']|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})"
+        }
+      ]
+    },
+    "characters": {
+      "name": "string.quoted.single.algow",
+      "match": "'(?:[^'\\\\]|\\\\(?:[nrt\\\\\"']|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}))'"
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.algow",
+          "match": "\\b\\d+\\.\\d+(?:[eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.algow",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.algow",
+          "match": "\\b(if|then|else|match|when|end|do)\\b"
+        },
+        {
+          "name": "keyword.other.algow",
+          "match": "\\b(let|rec|in|and|as|type|module|use|foreign|async)\\b"
+        },
+        {
+          "name": "constant.language.boolean.algow",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.algow",
+          "match": "->|<-"
+        },
+        {
+          "name": "keyword.operator.pipe.algow",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.cons.algow",
+          "match": "::"
+        },
+        {
+          "name": "keyword.operator.comparison.algow",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.logical.algow",
+          "match": "&&|\\|\\|"
+        },
+        {
+          "name": "keyword.operator.arithmetic.algow",
+          "match": "[+\\-*/]"
+        },
+        {
+          "name": "keyword.operator.assignment.algow",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.other.algow",
+          "match": "\\||\\.\\.?"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.algow",
+          "match": "\\b(int|float|string|bool|char|unit)\\b"
+        },
+        {
+          "name": "support.type.builtin.algow",
+          "match": "\\b(List|Maybe|Either|IO)\\b"
+        }
+      ]
+    },
+    "constructors": {
+      "name": "entity.name.tag.algow",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.algow",
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?==\\s*[a-z_].*->)"
+        }
+      ]
+    },
+    "identifiers": {
+      "name": "variable.other.algow",
+      "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+    }
+  }
+}
