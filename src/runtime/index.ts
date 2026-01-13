@@ -32,6 +32,7 @@ const [
   set,
   path,
   json,
+  http,
   nodeTarget,
   denoTarget,
   browserTarget,
@@ -47,6 +48,7 @@ const [
   loadModule("./modules/set.js"),
   loadModule("./modules/path.js"),
   loadModule("./modules/json.js"),
+  loadModule("./modules/http.js"),
   loadModule("./targets/node.js"),
   loadModule("./targets/deno.js"),
   loadModule("./targets/browser.js"),
@@ -54,7 +56,9 @@ const [
 ]);
 
 // Cross-platform modules shared by all targets
-const crossPlatform = [base, string, char, int, float, debug, map, set, path, json].join("\n");
+const crossPlatform = [base, string, char, int, float, debug, map, set, path, json, http].join(
+  "\n",
+);
 
 // Pre-built runtimes for each target
 const RUNTIMES: Record<Target, string> = {

@@ -43,5 +43,53 @@ const $unavailable = (target, module, fn) => () => {
   throw new Error(`${module}.${fn} is not available in target "${target}"`);
 };
 
+// Convert any Algow value to a printable string
+const $show = (v) => {
+  // Primitives
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (v === null) return "()";
+
+  // Non-object primitives
+  if (typeof v !== "object") return String(v);
+
+  // List (Cons cells with h/t fields)
+  if ("h" in v && "t" in v) {
+    const items = [];
+    let cur = v;
+    while (cur !== null) {
+      items.push($showInner(cur.h));
+      cur = cur.t;
+    }
+    return "[" + items.join(", ") + "]";
+  }
+
+  // ADT or Tuple (arrays)
+  if (Array.isArray(v)) {
+    if (v.length > 0 && typeof v[0] === "number" && Number.isInteger(v[0])) {
+      // ADT: [tag, arg1, arg2, ...]
+      const tag = v[0];
+      if (v.length === 1) return "<" + tag + ">";
+      const args = v.slice(1).map($showInner).join(", ");
+      return "<" + tag + ": " + args + ">";
+    }
+    // Tuple
+    return "(" + v.map($showInner).join(", ") + ")";
+  }
+
+  // Record
+  const entries = Object.entries(v);
+  if (entries.length === 0) return "{}";
+  const fields = entries.map(([k, val]) => k + ": " + $showInner(val)).join(", ");
+  return "{ " + fields + " }";
+};
+
+// Inner show (for nested values) - strings are quoted
+const $showInner = (v) => {
+  if (typeof v === "string") return '"' + v.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+  return $show(v);
+};
+
 // Foreign function registry
 const $foreign = {};

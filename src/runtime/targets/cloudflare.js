@@ -2,12 +2,12 @@
 // Limited IO, no File/Dir access
 
 $foreign.IO = {
-  print: (s) => {
-    console.log(s);
+  print: (v) => {
+    console.log($show(v));
     return null;
   },
-  printLine: (s) => {
-    console.log(s);
+  printLine: (v) => {
+    console.log($show(v));
     return null;
   },
   exit: $unavailable("cloudflare", "IO", "exit"),

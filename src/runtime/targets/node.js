@@ -5,12 +5,12 @@
 const fs = require("fs").promises;
 
 $foreign.IO = {
-  print: (s) => {
-    process.stdout.write(s);
+  print: (v) => {
+    process.stdout.write($show(v));
     return null;
   },
-  printLine: (s) => {
-    console.log(s);
+  printLine: (v) => {
+    console.log($show(v));
     return null;
   },
   exit: (code) => {

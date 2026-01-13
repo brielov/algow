@@ -30,6 +30,12 @@ type JsonValue
   | JsonArray (List JsonValue)
   | JsonObject (List (string, JsonValue))
 
+type HttpError
+  = NetworkError string
+  | TimeoutError
+  | InvalidUrl string
+  | HttpStatusError int string
+
 -- =============================================================================
 -- Maybe Functions
 -- =============================================================================
@@ -409,8 +415,8 @@ end
 -- =============================================================================
 
 module IO
-  foreign print : string -> unit
-  foreign printLine : string -> unit
+  foreign print : a -> unit
+  foreign printLine : a -> unit
   foreign exit : int -> unit
   foreign getEnv : string -> Maybe string
 end
@@ -507,4 +513,15 @@ end
 module Json
   foreign decode : string -> Either string JsonValue
   foreign encode : a -> string
+end
+
+-- =============================================================================
+-- Http Functions (foreign async)
+-- =============================================================================
+
+module Http
+  foreign async get    : string -> Either HttpError { status: int, body: string, headers: List (string, string) }
+  foreign async post   : string -> string -> Either HttpError { status: int, body: string, headers: List (string, string) }
+  foreign async put    : string -> string -> Either HttpError { status: int, body: string, headers: List (string, string) }
+  foreign async delete : string -> Either HttpError { status: int, body: string, headers: List (string, string) }
 end

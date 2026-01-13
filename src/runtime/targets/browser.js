@@ -2,13 +2,13 @@
 // IO with console, File/Dir as stubs
 
 $foreign.IO = {
-  print: (s) => {
+  print: (v) => {
     // Browser has no stdout, use console
-    console.log(s);
+    console.log($show(v));
     return null;
   },
-  printLine: (s) => {
-    console.log(s);
+  printLine: (v) => {
+    console.log($show(v));
     return null;
   },
   exit: $unavailable("browser", "IO", "exit"),

@@ -3,12 +3,12 @@
 // File and Dir operations are async for transparent async/await support
 
 $foreign.IO = {
-  print: (s) => {
-    Deno.stdout.writeSync(new TextEncoder().encode(s));
+  print: (v) => {
+    Deno.stdout.writeSync(new TextEncoder().encode($show(v)));
     return null;
   },
-  printLine: (s) => {
-    console.log(s);
+  printLine: (v) => {
+    console.log($show(v));
     return null;
   },
   exit: (code) => {
