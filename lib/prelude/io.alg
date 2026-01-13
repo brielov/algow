@@ -1,5 +1,12 @@
 -- I/O, filesystem, and debugging
-type IOError = FileNotFound string | PermissionDenied string | IsDirectory string | NotDirectory string | AlreadyExists string | NotEmpty string | UnknownError string
+type IOError
+  = FileNotFound string
+  | PermissionDenied string
+  | IsDirectory string
+  | NotDirectory string
+  | AlreadyExists string
+  | NotEmpty string
+  | UnknownError string
 
 module IO
   foreign print : a -> unit

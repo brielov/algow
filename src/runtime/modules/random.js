@@ -1,8 +1,12 @@
 // Random module - cross-platform
 $foreign.Random = {
   int: (min) => (max) => Math.floor(Math.random() * (max - min + 1)) + min,
-  get float() { return Math.random(); },
-  get bool() { return Math.random() < 0.5; },
+  get float() {
+    return Math.random();
+  },
+  get bool() {
+    return Math.random() < 0.5;
+  },
   pick: (list) => {
     if (list === null) return [0]; // Nothing
     const items = [];

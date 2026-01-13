@@ -1,5 +1,11 @@
 -- Data structures and serialization
-type JsonValue = JsonNull | JsonBool bool | JsonNumber float | JsonString string | JsonArray (List JsonValue) | JsonObject (List (string, JsonValue))
+type JsonValue
+  = JsonNull
+  | JsonBool bool
+  | JsonNumber float
+  | JsonString string
+  | JsonArray (List JsonValue)
+  | JsonObject (List (string, JsonValue))
 
 module Map
   foreign empty : Map v

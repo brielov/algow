@@ -1,9 +1,15 @@
 -- Core data types
-type Maybe a = Nothing | Just a
+type Maybe a
+  = Nothing
+  | Just a
 
-type Either a b = Left a | Right b
+type Either a b
+  = Left a
+  | Right b
 
-type List a = Nil | Cons a (List a)
+type List a
+  = Nil
+  | Cons a (List a)
 
 -- Core functional programming utilities
 module Function

@@ -75,7 +75,10 @@ $foreign.String = {
     return parts.join("\n");
   },
   words: (s) => {
-    const parts = s.trim().split(/\s+/).filter((x) => x.length > 0);
+    const parts = s
+      .trim()
+      .split(/\s+/)
+      .filter((x) => x.length > 0);
     let result = null;
     for (let i = parts.length - 1; i >= 0; i--) result = { h: parts[i], t: result };
     return result;

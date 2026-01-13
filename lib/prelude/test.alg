@@ -1,5 +1,4 @@
 -- Testing utilities
-
 module Assert
   foreign equal : a -> a -> string -> unit
   foreign notEqual : a -> a -> string -> unit

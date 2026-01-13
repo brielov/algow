@@ -199,8 +199,18 @@ const formatDecl = (ctx: FormatContext, decl: SDecl, level: number): string => {
   switch (decl.kind) {
     case "SDeclType": {
       const params = decl.params.length > 0 ? " " + decl.params.join(" ") : "";
-      const cons = decl.constructors.map(formatConDecl).join(" | ");
-      return `${ind(level)}type ${decl.name}${params} = ${cons}`;
+      const cons = decl.constructors.map(formatConDecl);
+      // Single constructor: keep on one line
+      if (cons.length === 1) {
+        return `${ind(level)}type ${decl.name}${params} = ${cons[0]}`;
+      }
+      // Multiple constructors: format on separate lines
+      const [first, ...rest] = cons;
+      const lines = [`${ind(level)}type ${decl.name}${params}`, `${ind(level + 1)}= ${first}`];
+      for (const c of rest) {
+        lines.push(`${ind(level + 1)}| ${c}`);
+      }
+      return lines.join("\n");
     }
 
     case "SDeclTypeAlias": {
@@ -228,8 +238,10 @@ const formatDecl = (ctx: FormatContext, decl: SDecl, level: number): string => {
       return lines.join("\n");
     }
 
-    case "SDeclForeign":
-      return `${ind(level)}foreign ${decl.name.text} : ${formatType(decl.type)}`;
+    case "SDeclForeign": {
+      const asyncMod = decl.isAsync ? "async " : "";
+      return `${ind(level)}foreign ${asyncMod}${decl.name.text} : ${formatType(decl.type)}`;
+    }
 
     case "SDeclModule": {
       const lines = [`${ind(level)}module ${decl.name}`];
