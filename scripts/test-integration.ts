@@ -2,7 +2,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 const TIMEOUT_MS = 3000;
-const EXAMPLES_DIR = "examples";
+const INTEGRATION_DIR = "integration";
 
 async function findAlgFiles(dir: string): Promise<string[]> {
   const files: string[] = [];
@@ -41,11 +41,11 @@ async function runWithTimeout(file: string): Promise<{ ok: boolean; output: stri
 }
 
 async function main() {
-  const files = await findAlgFiles(EXAMPLES_DIR);
+  const files = await findAlgFiles(INTEGRATION_DIR);
   let passed = 0;
   let failed = 0;
 
-  console.log(`Running ${files.length} examples...\n`);
+  console.log(`Running ${files.length} integration tests...\n`);
 
   for (const file of files) {
     const { ok, output } = await runWithTimeout(file);

@@ -41,13 +41,13 @@ A small, experimental programming language with Hindley-Milner type inference th
 bun install
 
 # Type check a file
-bun run src/index.ts check examples/basics/main.alg
+bun run src/index.ts check integration/basics/main.alg
 
 # Compile and run (with arguments)
-bun run src/index.ts run examples/basics/main.alg -- arg1 arg2
+bun run src/index.ts run integration/basics/main.alg -- arg1 arg2
 
 # Compile to JavaScript
-bun run src/index.ts compile examples/basics/main.alg > out.js
+bun run src/index.ts compile integration/basics/main.alg > out.js
 
 # Compile for different targets
 bun run src/index.ts compile --target deno file.alg      # Deno
@@ -165,9 +165,9 @@ deno run --allow-read app.js
 bun run src/index.ts compile --target browser app.alg > app.js
 ```
 
-## Examples
+## Integration Tests
 
-See the `examples/` directory for comprehensive examples:
+See the `integration/` directory for comprehensive examples:
 
 - `basics/` — Literals, operators, strings, booleans, tuples
 - `functions/` — Higher-order functions, closures, currying
