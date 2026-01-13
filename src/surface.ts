@@ -5,7 +5,11 @@
 // Spans, Names, and Literals
 // =============================================================================
 
+/** File identifier for multi-file support */
+export type FileId = number;
+
 export type Span = {
+  readonly fileId: FileId;
   readonly start: number;
   readonly end: number;
 };

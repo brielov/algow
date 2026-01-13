@@ -37,7 +37,7 @@ const collectComments = (source: string): CommentInfo[] => {
       comments.push({
         kind: kind === TokenKind.LineComment ? "line" : "block",
         text: slice(lexer, start, end),
-        span: { start, end },
+        span: { fileId: 0, start, end },
         line: getLineNumber(source, start),
       });
     }

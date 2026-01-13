@@ -181,8 +181,8 @@ export const getDefinitionAtPosition = (
   const defLineIndex = result.lineIndices.get(defFile.path);
   if (!defLineIndex) return null;
 
-  // Convert span to range
-  const range = spanToRange(defLineIndex, def.location.span);
+  // Convert location (which is a span) to range
+  const range = spanToRange(defLineIndex, def.location);
 
   return { path: defFile.path, range };
 };
@@ -212,7 +212,7 @@ export const getReferencesAtPosition = (
     if (defFile && defLineIndex) {
       locations.push({
         path: defFile.path,
-        range: spanToRange(defLineIndex, def.location.span),
+        range: spanToRange(defLineIndex, def.location),
       });
     }
   }
@@ -224,7 +224,7 @@ export const getReferencesAtPosition = (
     if (refFile && refLineIndex) {
       locations.push({
         path: refFile.path,
-        range: spanToRange(refLineIndex, ref.location.span),
+        range: spanToRange(refLineIndex, ref.location),
       });
     }
   }
@@ -262,9 +262,9 @@ export const getHoverAtPosition = (
   }
   contents += `\n\n*${def.kind}*`;
 
-  // Get range from the symbol location
+  // Get range from the symbol location (location is a Span)
   const loc = symbol.kind === "definition" ? symbol.def.location : symbol.ref.location;
-  const range = spanToRange(lineIndex, loc.span);
+  const range = spanToRange(lineIndex, loc);
 
   return { contents, range };
 };
@@ -389,9 +389,8 @@ export const getCompletionsAtPosition = (
     if (result.checkOutput) {
       const scrutineeStart = findMatchScrutineeStart(file.content, offset);
       if (scrutineeStart !== null) {
-        // Convert local offset to global offset
-        const globalOffset = file.globalOffset + scrutineeStart;
-        const scrutineeType = result.checkOutput.exprTypeMap.get(globalOffset);
+        // Look up scrutinee type by local offset (exprTypeMap now uses file-local offsets)
+        const scrutineeType = result.checkOutput.exprTypeMap.get(scrutineeStart);
 
         if (scrutineeType) {
           const typeName = getTypeConstructorName(scrutineeType);
@@ -486,7 +485,7 @@ export const getDocumentSymbols = (
     // Only include top-level symbols (functions, types)
     if (def.kind === "parameter" || def.kind === "pattern-binding") continue;
 
-    const range = spanToRange(lineIndex, def.location.span);
+    const range = spanToRange(lineIndex, def.location);
     const detail = def.scheme ? typeToString(def.scheme.type) : undefined;
 
     symbols.push({
@@ -500,7 +499,7 @@ export const getDocumentSymbols = (
   // Add type definitions
   for (const [name, typeInfo] of result.symbolTable.types) {
     if (typeInfo.location && typeInfo.location.fileId === file.id) {
-      const range = spanToRange(lineIndex, typeInfo.location.span);
+      const range = spanToRange(lineIndex, typeInfo.location);
       symbols.push({
         name,
         kind: "type",

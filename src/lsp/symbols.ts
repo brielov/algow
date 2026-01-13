@@ -5,26 +5,22 @@
  * and scope information for LSP features.
  */
 
+import type { FileId, Span } from "../surface";
 import { applySubst, type Scheme, type Subst, type Type } from "../types";
+
+// Re-export for convenience
+export type { FileId, Span } from "../surface";
 
 // =============================================================================
 // Location Types
 // =============================================================================
 
-/** File identifier for multi-file support */
-export type FileId = number;
-
-/** Byte offset span in source */
-export type Span = {
-  readonly start: number;
-  readonly end: number;
-};
-
-/** Location with file identity */
-export type Location = {
-  readonly fileId: FileId;
-  readonly span: Span;
-};
+/**
+ * Location in source code.
+ * Note: With file-aware spans, Location is essentially just Span
+ * (since Span now includes fileId). We keep Location for API compatibility.
+ */
+export type Location = Span;
 
 // =============================================================================
 // Symbol Types
@@ -223,8 +219,8 @@ export const findSymbolAt = (
   for (const def of table.definitions.values()) {
     if (
       def.location.fileId === fileId &&
-      offset >= def.location.span.start &&
-      offset < def.location.span.end
+      offset >= def.location.start &&
+      offset < def.location.end
     ) {
       return { kind: "definition", def };
     }
@@ -235,8 +231,8 @@ export const findSymbolAt = (
     for (const ref of refs) {
       if (
         ref.location.fileId === fileId &&
-        offset >= ref.location.span.start &&
-        offset < ref.location.span.end
+        offset >= ref.location.start &&
+        offset < ref.location.end
       ) {
         return { kind: "reference", ref };
       }

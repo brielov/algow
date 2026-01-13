@@ -874,22 +874,22 @@ export type Token = {
 
 ### Phase 3: File-Aware Spans
 
-- [ ] **3.1** Update `Span` type to include `fileId: number`
-- [ ] **3.2** Move `FileRegistry` from LSP to core (it's needed by all spans now)
-- [ ] **3.3** Update parser to accept file ID and embed in all spans
-- [ ] **3.4** Update `compile.ts` to create file registry before parsing
-- [ ] **3.5** Remove `offsetSpan` function
-- [ ] **3.6** Remove `offsetType` function
-- [ ] **3.7** Remove `offsetPattern` function
-- [ ] **3.8** Remove `offsetCase` function
-- [ ] **3.9** Remove `offsetDoStmt` function
-- [ ] **3.10** Remove `offsetExpr` function
-- [ ] **3.11** Remove `offsetDecl` function
-- [ ] **3.12** Remove `offsetProgram` function
-- [ ] **3.13** Update `spanToRange` to use file registry for content lookup
-- [ ] **3.14** Update diagnostic printing to resolve file from span
-- [ ] **3.15** Update LSP position conversion to use file-aware spans
-- [ ] **3.16** Run full test suite and fix any issues
+- [x] **3.1** Update `Span` type to include `fileId: number`
+- [x] **3.2** Move `FileRegistry` from LSP to core (it's needed by all spans now)
+- [x] **3.3** Update parser to accept file ID and embed in all spans
+- [x] **3.4** Update `compile.ts` to create file registry before parsing
+- [x] **3.5** Remove `offsetSpan` function
+- [x] **3.6** Remove `offsetType` function
+- [x] **3.7** Remove `offsetPattern` function
+- [x] **3.8** Remove `offsetCase` function
+- [x] **3.9** Remove `offsetDoStmt` function
+- [x] **3.10** Remove `offsetExpr` function
+- [x] **3.11** Remove `offsetDecl` function
+- [x] **3.12** Remove `offsetProgram` function
+- [x] **3.13** Update `spanToRange` to use file registry for content lookup
+- [x] **3.14** Update diagnostic printing to resolve file from span
+- [x] **3.15** Update LSP position conversion to use file-aware spans
+- [x] **3.16** Run full test suite and fix any issues
 
 ### Phase 4: Node IDs and Unified Type Map
 

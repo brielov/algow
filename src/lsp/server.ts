@@ -37,7 +37,7 @@ import {
   type RequestMessage,
   type NotificationMessage,
 } from "./protocol";
-import { getFileById, globalToLocal, pathToUri, uriToPath } from "./workspace";
+import { getAllPaths, getFileByPath, pathToUri, uriToPath } from "./workspace";
 
 // =============================================================================
 // LSP Types
@@ -277,24 +277,26 @@ const reanalyzeAndPublishDiagnostics = (server: LSPServer): void => {
   }
 
   // Convert compiler diagnostics to LSP diagnostics
-  for (const diag of result.diagnostics) {
-    // Map global offset to file-local offset
-    const localStart = globalToLocal(result.fileRegistry, diag.start);
-    if (!localStart) continue;
+  // With file-aware spans, diagnostics use file-local offsets
+  // Find the first user file (not prelude) for diagnostics without explicit file info
+  const userFilePath = getAllPaths(result.fileRegistry).find((p) => p !== "<prelude>");
 
-    const file = getFileById(result.fileRegistry, localStart.fileId);
-    if (!file) continue;
+  for (const diag of result.diagnostics) {
+    // Determine which file this diagnostic belongs to
+    const filePath = diag.file ?? userFilePath;
+    if (!filePath) continue;
 
     // Skip diagnostics from prelude
-    if (file.path === "<prelude>") continue;
+    if (filePath === "<prelude>") continue;
+
+    const file = getFileByPath(result.fileRegistry, filePath);
+    if (!file) continue;
 
     const lineIndex = result.lineIndices.get(file.path);
     if (!lineIndex) continue;
 
-    // Calculate local end offset
-    const localEnd = diag.end - diag.start + localStart.localOffset;
-
-    const range = spanToRange(lineIndex, { start: localStart.localOffset, end: localEnd });
+    // Use start/end directly (they're now file-local offsets)
+    const range = spanToRange(lineIndex, { fileId: file.id, start: diag.start, end: diag.end });
     const severity: DiagnosticSeverity = diag.severity === "error" ? 1 : 2;
 
     const lspDiag: LSPDiagnostic = {

@@ -108,8 +108,9 @@ export const positionToOffset = (index: LineIndex, position: Position): number =
   return lineStart + clampedChar;
 };
 
-/** Convert LSP Range to span */
+/** Convert LSP Range to span (uses fileId 0 since this is for text extraction only) */
 export const rangeToSpan = (index: LineIndex, range: Range): Span => ({
+  fileId: 0,
   start: positionToOffset(index, range.start),
   end: positionToOffset(index, range.end),
 });

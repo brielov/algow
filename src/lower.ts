@@ -63,7 +63,7 @@ const createContext = (
 });
 
 /** Generate a fresh name for temporaries */
-const syntheticSpan: Span = { start: 0, end: 0 };
+const syntheticSpan: Span = { fileId: 0, start: 0, end: 0 };
 const freshName = (ctx: LowerContext, prefix = "_t"): Name => {
   const id = --ctx.varCounter; // Use negative IDs to avoid collision
   return { id, text: `${prefix}${-id}`, span: syntheticSpan };

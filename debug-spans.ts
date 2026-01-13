@@ -25,9 +25,9 @@ if (result.symbolTable) {
           " (" +
           def.kind +
           "): span " +
-          def.location.span.start +
+          def.location.start +
           "-" +
-          def.location.span.end,
+          def.location.end,
       );
     }
   }

@@ -23,8 +23,7 @@ import {
   addScopeSnapshot,
   freezeSymbolTable,
 } from "./lsp/symbols";
-import type { FileRegistry } from "./lsp/workspace";
-import { spanToLocation } from "./lsp/workspace";
+import type { FileRegistry } from "./files";
 
 // =============================================================================
 // Resolution Context
@@ -67,7 +66,7 @@ const createContext = (
   lsp,
 });
 
-const syntheticSpan: Span = { start: 0, end: 0 };
+const syntheticSpan: Span = { fileId: 0, start: 0, end: 0 };
 
 const extendEnv = (
   ctx: ResolveContext,
@@ -81,15 +80,12 @@ const extendEnv = (
 
   // Track definition for LSP
   if (ctx.lsp && span) {
-    const location = spanToLocation(ctx.lsp.fileRegistry, span);
-    if (location) {
-      addDefinition(ctx.lsp.builder, {
-        nameId: name.id,
-        name: original,
-        kind,
-        location,
-      });
-    }
+    addDefinition(ctx.lsp.builder, {
+      nameId: name.id,
+      name: original,
+      kind,
+      location: span,
+    });
   }
 
   return [{ ...ctx, env: newEnv }, name];
@@ -112,15 +108,12 @@ const extendEnvMany = (
 
     // Track definition for LSP
     if (ctx.lsp && span) {
-      const location = spanToLocation(ctx.lsp.fileRegistry, span);
-      if (location) {
-        addDefinition(ctx.lsp.builder, {
-          nameId: name.id,
-          name: original,
-          kind,
-          location,
-        });
-      }
+      addDefinition(ctx.lsp.builder, {
+        nameId: name.id,
+        name: original,
+        kind,
+        location: span,
+      });
     }
   }
   return [{ ...ctx, env: newEnv }, names];
@@ -131,13 +124,10 @@ const lookup = (ctx: ResolveContext, original: string, span?: C.CExpr["span"]): 
   if (name) {
     // Track reference for LSP
     if (ctx.lsp && span) {
-      const location = spanToLocation(ctx.lsp.fileRegistry, span);
-      if (location) {
-        addReference(ctx.lsp.builder, {
-          targetId: name.id,
-          location,
-        });
-      }
+      addReference(ctx.lsp.builder, {
+        targetId: name.id,
+        location: span,
+      });
     }
     return name;
   }
@@ -311,13 +301,10 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
       // Track constructor reference for LSP
       const conId = ctx.constructorIds.get(resolvedName);
       if (ctx.lsp && conId !== undefined) {
-        const location = spanToLocation(ctx.lsp.fileRegistry, pattern.span);
-        if (location) {
-          addReference(ctx.lsp.builder, {
-            targetId: conId,
-            location,
-          });
-        }
+        addReference(ctx.lsp.builder, {
+          targetId: conId,
+          location: pattern.span,
+        });
       }
 
       return {
@@ -393,15 +380,12 @@ const resolveCase = (ctx: ResolveContext, c: C.CCase): C.CCase => {
 
     // Track definition for LSP
     if (ctx.lsp) {
-      const location = spanToLocation(ctx.lsp.fileRegistry, binding.span);
-      if (location) {
-        addDefinition(ctx.lsp.builder, {
-          nameId: binding.name.id,
-          name: binding.name.text,
-          kind: "pattern-binding",
-          location,
-        });
-      }
+      addDefinition(ctx.lsp.builder, {
+        nameId: binding.name.id,
+        name: binding.name.text,
+        kind: "pattern-binding",
+        location: binding.span,
+      });
     }
   }
   const newCtx = { ...ctx, env: newEnv };
@@ -474,15 +458,12 @@ export const resolveProgram = (
           const conName = freshName(con.name, con.span);
           newConstructorIds.set(con.name, conName.id);
           if (ctx.lsp) {
-            const location = spanToLocation(ctx.lsp.fileRegistry, con.span);
-            if (location) {
-              addDefinition(ctx.lsp.builder, {
-                nameId: conName.id,
-                name: con.name,
-                kind: "constructor",
-                location,
-              });
-            }
+            addDefinition(ctx.lsp.builder, {
+              nameId: conName.id,
+              name: con.name,
+              kind: "constructor",
+              location: con.span,
+            });
             // Also add to constructors map for completions
             ctx.lsp.builder.constructors.set(con.name, {
               name: con.name,
@@ -490,7 +471,7 @@ export const resolveProgram = (
               typeName: decl.name,
               tag,
               arity: con.fields.length,
-              location: location ?? undefined,
+              location: con.span,
             });
           }
         }
@@ -510,15 +491,12 @@ export const resolveProgram = (
         bindingNames.set(decl.name.text, name);
         // Track definition for LSP (name now includes span)
         if (ctx.lsp) {
-          const location = spanToLocation(ctx.lsp.fileRegistry, decl.name.span);
-          if (location) {
-            addDefinition(ctx.lsp.builder, {
-              nameId: name.id,
-              name: decl.name.text,
-              kind: "function",
-              location,
-            });
-          }
+          addDefinition(ctx.lsp.builder, {
+            nameId: name.id,
+            name: decl.name.text,
+            kind: "function",
+            location: decl.name.span,
+          });
         }
         break;
       }
@@ -529,15 +507,12 @@ export const resolveProgram = (
           bindingNames.set(b.name.text, name);
           // Track definition for LSP (name now includes span)
           if (ctx.lsp) {
-            const location = spanToLocation(ctx.lsp.fileRegistry, b.name.span);
-            if (location) {
-              addDefinition(ctx.lsp.builder, {
-                nameId: name.id,
-                name: b.name.text,
-                kind: "function",
-                location,
-              });
-            }
+            addDefinition(ctx.lsp.builder, {
+              nameId: name.id,
+              name: b.name.text,
+              kind: "function",
+              location: b.name.span,
+            });
           }
         }
         break;
@@ -547,15 +522,12 @@ export const resolveProgram = (
         bindingNames.set(decl.name.text, name);
         // Track definition for LSP (name now includes span)
         if (ctx.lsp) {
-          const location = spanToLocation(ctx.lsp.fileRegistry, decl.name.span);
-          if (location) {
-            addDefinition(ctx.lsp.builder, {
-              nameId: name.id,
-              name: decl.name.text,
-              kind: "foreign",
-              location,
-            });
-          }
+          addDefinition(ctx.lsp.builder, {
+            nameId: name.id,
+            name: decl.name.text,
+            kind: "foreign",
+            location: decl.name.span,
+          });
         }
         break;
       }
