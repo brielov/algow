@@ -7,6 +7,7 @@
     { "include": "#strings" },
     { "include": "#characters" },
     { "include": "#numbers" },
+    { "include": "#do-notation" },
     { "include": "#keywords" },
     { "include": "#operators" },
     { "include": "#types" },
@@ -28,6 +29,15 @@
           "patterns": [{ "include": "#comments" }]
         }
       ]
+    },
+    "do-notation": {
+      "match": "\\b(do)\\s*(\\[)\\s*([A-Z][a-zA-Z0-9_]*)\\s*(\\])",
+      "captures": {
+        "1": { "name": "keyword.control.do.algow" },
+        "2": { "name": "punctuation.bracket.square.algow" },
+        "3": { "name": "entity.name.type.module.algow" },
+        "4": { "name": "punctuation.bracket.square.algow" }
+      }
     },
     "strings": {
       "name": "string.quoted.double.algow",
@@ -60,7 +70,7 @@
       "patterns": [
         {
           "name": "keyword.control.algow",
-          "match": "\\b(if|then|else|match|when|end|do)\\b"
+          "match": "\\b(if|then|else|match|when|end)\\b"
         },
         {
           "name": "keyword.other.algow",

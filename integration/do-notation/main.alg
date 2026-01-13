@@ -2,18 +2,15 @@
 -- Do-Notation Examples
 -- =============================================================================
 -- Demonstrates do-notation for monadic composition
-
--- Bring Maybe's flatMap into scope for do-notation
-let flatMap = Maybe.flatMap
-let pure = x -> Just x
+-- Syntax: do[Module] ... end uses Module.flatMap for bind operations
 
 -- Basic do-notation: sequence Maybe computations
 let testBasic =
-  let result = do
+  let result = do[Maybe]
     x <- Just 1
     y <- Just 2
     z <- Just 3
-    pure (x + y + z)
+    Just (x + y + z)
   end in
   match result
     when Just n -> n
@@ -22,11 +19,11 @@ let testBasic =
 
 -- Short-circuit on Nothing
 let testShortCircuit =
-  let result = do
+  let result = do[Maybe]
     x <- Just 10
     y <- Nothing
     z <- Just 20
-    pure (x + y + z)
+    Just (x + y + z)
   end in
   match result
     when Just _ -> 0
@@ -35,10 +32,10 @@ let testShortCircuit =
 
 -- Pattern matching in bind
 let testPatternBind =
-  let result = do
+  let result = do[Maybe]
     (a, b) <- Just (1, 2)
     (c, d) <- Just (3, 4)
-    pure (a + b + c + d)
+    Just (a + b + c + d)
   end in
   match result
     when Just n -> n
@@ -47,11 +44,11 @@ let testPatternBind =
 
 -- Let bindings inside do
 let testDoLet =
-  let result = do
+  let result = do[Maybe]
     x <- Just 5
     let doubled = x * 2
     y <- Just doubled
-    pure (x + y)
+    Just (x + y)
   end in
   match result
     when Just n -> n
@@ -60,14 +57,14 @@ let testDoLet =
 
 -- Nested do blocks
 let testNested =
-  let inner = x -> do
+  let inner = x -> do[Maybe]
     y <- Just (x * 2)
-    pure (y + 1)
+    Just (y + 1)
   end in
-  let result = do
+  let result = do[Maybe]
     a <- Just 5
     b <- inner a
-    pure b
+    Just b
   end in
   match result
     when Just n -> n
@@ -78,11 +75,11 @@ let testNested =
 let safeDivide = x y -> if y == 0 then Nothing else Just (Int.div x y)
 
 let testChain =
-  let result = do
+  let result = do[Maybe]
     a <- safeDivide 100 2
     b <- safeDivide a 5
     c <- safeDivide b 2
-    pure c
+    Just c
   end in
   match result
     when Just n -> n
@@ -91,11 +88,11 @@ let testChain =
 
 -- Division by zero short-circuits
 let testDivByZero =
-  let result = do
+  let result = do[Maybe]
     a <- safeDivide 100 2
     b <- safeDivide a 0
     c <- safeDivide b 2
-    pure c
+    Just c
   end in
   match result
     when Just _ -> 0
@@ -111,11 +108,11 @@ let rec listNth = n xs ->
 
 let testListLookup =
   let items = [10, 20, 30, 40, 50] in
-  let result = do
+  let result = do[Maybe]
     first <- listNth 0 items
     third <- listNth 2 items
     last <- listNth 4 items
-    pure (first + third + last)
+    Just (first + third + last)
   end in
   match result
     when Just n -> n

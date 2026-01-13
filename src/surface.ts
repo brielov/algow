@@ -237,9 +237,11 @@ export type SBinOp = {
 };
 
 // Do-notation (Section 4.3)
+// Required module qualifier: do[Maybe] ... end desugars to Maybe.flatMap
 export type SDo = {
   readonly kind: "SDo";
   readonly nodeId: NodeId;
+  readonly moduleName: string;
   readonly stmts: readonly SDoStmt[];
   readonly span: Span;
 };
@@ -660,9 +662,15 @@ export const sbinop = (
   right,
   span,
 });
-export const sdo = (nodeId: NodeId, stmts: readonly SDoStmt[], span: Span): SDo => ({
+export const sdo = (
+  nodeId: NodeId,
+  moduleName: string,
+  stmts: readonly SDoStmt[],
+  span: Span,
+): SDo => ({
   kind: "SDo",
   nodeId,
+  moduleName,
   stmts,
   span,
 });

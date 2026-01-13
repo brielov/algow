@@ -284,7 +284,7 @@ export const desugarExpr = (state: DesugarState, expr: S.SExpr): C.CExpr => {
 
     case "SDo":
       // D⟦ SDo stmts ⟧ = D_do⟦stmts⟧
-      return desugarDo(state, expr.stmts, expr.span);
+      return desugarDo(state, expr.moduleName, expr.stmts, expr.span);
 
     case "SAnnot":
       // D⟦ SAnnot e t ⟧ = D⟦e⟧
@@ -366,12 +366,20 @@ const desugarCase = (state: DesugarState, c: S.SCase): C.CCase => ({
 // Do-Notation Desugaring (Section 6.2)
 // =============================================================================
 
-const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Span): C.CExpr => {
+const desugarDo = (
+  state: DesugarState,
+  moduleName: string,
+  stmts: readonly S.SDoStmt[],
+  span: S.Span,
+): C.CExpr => {
   if (stmts.length === 0) {
     // Empty do block - should have been caught by parser
     // Synthetic node
     return C.clit(freshNodeId(state), { kind: "int", value: 0 }, span);
   }
+
+  // Use Module.flatMap from the specified module
+  const flatMapName = `${moduleName}.flatMap`;
 
   const lastStmt = stmts[stmts.length - 1]!;
 
@@ -400,7 +408,7 @@ const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Spa
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, flatMapName, stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
                 unresolvedName(state, stmt.pattern.name.text, stmt.pattern.name.span),
@@ -422,7 +430,7 @@ const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Spa
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, flatMapName, stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
                 unresolvedName(state, tmp, stmtSpan),
@@ -474,7 +482,7 @@ const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Spa
           freshNodeId(state),
           C.capp(
             freshNodeId(state),
-            C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+            C.cvar(freshNodeId(state), unresolvedName(state, flatMapName, stmtSpan), stmtSpan),
             C.cabs(freshNodeId(state), unresolvedName(state, tmp, stmtSpan), result, stmtSpan),
             stmtSpan,
           ),
@@ -1229,6 +1237,7 @@ const desugarExprInModuleWithImports = (
     case "SDo":
       return desugarDoInModuleWithImports(
         state,
+        expr.moduleName,
         expr.stmts,
         moduleName,
         moduleNames,
@@ -1328,6 +1337,7 @@ const desugarListInModuleWithImports = (
 
 const desugarDoInModuleWithImports = (
   state: DesugarState,
+  doModuleName: string,
   stmts: readonly S.SDoStmt[],
   moduleName: string,
   moduleNames: Set<string>,
@@ -1341,6 +1351,9 @@ const desugarDoInModuleWithImports = (
     // Synthetic node
     return C.clit(freshNodeId(state), { kind: "int", value: 0 }, span);
   }
+
+  // Use Module.flatMap from the specified module (from do[Module] syntax)
+  const flatMapName = `${doModuleName}.flatMap`;
 
   const lastStmt = stmts[stmts.length - 1]!;
 
@@ -1365,7 +1378,7 @@ const desugarDoInModuleWithImports = (
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, flatMapName, stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
                 unresolvedName(state, stmt.pattern.name.text, stmt.pattern.name.span),
@@ -1383,7 +1396,7 @@ const desugarDoInModuleWithImports = (
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, flatMapName, stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
                 unresolvedName(state, tmp, stmtSpan),
@@ -1456,7 +1469,7 @@ const desugarDoInModuleWithImports = (
           freshNodeId(state),
           C.capp(
             freshNodeId(state),
-            C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+            C.cvar(freshNodeId(state), unresolvedName(state, flatMapName, stmtSpan), stmtSpan),
             C.cabs(freshNodeId(state), unresolvedName(state, tmp, stmtSpan), result, stmtSpan),
             stmtSpan,
           ),

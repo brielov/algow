@@ -1322,6 +1322,12 @@ const parseDo = (state: ParserState): S.SDo => {
   const start = state.current[1];
   advance(state); // do
 
+  // Parse required module qualifier: do[Module] ... end
+  expect(state, TokenKind.LBracket, "expected '[' after 'do' - syntax is do[Module]");
+  const moduleToken = expect(state, TokenKind.Upper, "expected module name");
+  const moduleName = moduleToken ? text(state, moduleToken) : "";
+  expect(state, TokenKind.RBracket, "expected ']' after module name");
+
   const stmts: S.SDoStmt[] = [];
 
   while (!at(state, TokenKind.End) && !at(state, TokenKind.Eof)) {
@@ -1369,7 +1375,7 @@ const parseDo = (state: ParserState): S.SDo => {
   const endToken = expect(state, TokenKind.End, "expected 'end'");
   const end = endToken ? endToken[2] : state.current[1];
 
-  return S.sdo(nextNodeId(state), stmts, span(state, start, end));
+  return S.sdo(nextNodeId(state), moduleName, stmts, span(state, start, end));
 };
 
 const parseLetExpr = (state: ParserState): S.SExpr => {

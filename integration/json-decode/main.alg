@@ -3,10 +3,6 @@
 -- =============================================================================
 -- Demonstrates both combinator-style and do-notation for JSON parsing
 
--- Bring Maybe's flatMap into scope for do-notation
-let flatMap = Maybe.flatMap
-let pure = x -> Just x
-
 -- Define a Todo type matching jsonplaceholder.typicode.com/todos schema
 type Todo = Todo {
   userId: int,
@@ -30,12 +26,12 @@ let decodeTodoCombinator = json ->
 -- Do-Notation Style (cleaner!)
 -- =============================================================================
 
-let decodeTodoDo = json -> do
+let decodeTodoDo = json -> do[Maybe]
   userId <- Json.at "userId" Json.int json
   id <- Json.at "id" Json.int json
   title <- Json.at "title" Json.string json
   completed <- Json.at "completed" Json.bool json
-  pure (Todo { userId = userId, id = id, title = title, completed = completed })
+  Just (Todo { userId = userId, id = id, title = title, completed = completed })
 end
 
 -- Decode a list of Todos
