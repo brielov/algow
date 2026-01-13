@@ -104,9 +104,9 @@ const isValidMainSignature = (type: Type): boolean => {
  * Check if a declaration defines `main`.
  */
 const hasMainDecl = (decl: SDecl): boolean => {
-  if (decl.kind === "SDeclLet" && decl.name === "main") return true;
+  if (decl.kind === "SDeclLet" && decl.name.text === "main") return true;
   if (decl.kind === "SDeclLetRec") {
-    return decl.bindings.some((b) => b.name === "main");
+    return decl.bindings.some((b) => b.name.text === "main");
   }
   return false;
 };
@@ -269,8 +269,7 @@ export const compile = async (
 // =============================================================================
 
 /** Offset a span by a given amount */
-const offsetSpan = (span: Span | undefined, offset: number): Span | undefined => {
-  if (!span) return undefined;
+const offsetSpan = (span: Span, offset: number): Span => {
   return { start: span.start + offset, end: span.end + offset };
 };
 
@@ -410,25 +409,26 @@ const offsetExpr = (expr: SExpr, offset: number): SExpr => {
     case "SAbs":
       return {
         ...expr,
-        params: expr.params.map((p) => ({ ...p, span: offsetSpan(p.span, offset) })),
+        params: expr.params.map((p) => ({
+          name: { text: p.name.text, span: offsetSpan(p.name.span, offset) },
+        })),
         body: offsetExpr(expr.body, offset),
         span: offsetSpan(expr.span, offset),
       };
     case "SLet":
       return {
         ...expr,
+        name: { text: expr.name.text, span: offsetSpan(expr.name.span, offset) },
         value: offsetExpr(expr.value, offset),
         body: offsetExpr(expr.body, offset),
         span: offsetSpan(expr.span, offset),
-        nameSpan: offsetSpan(expr.nameSpan, offset),
       };
     case "SLetRec":
       return {
         ...expr,
         bindings: expr.bindings.map((b) => ({
-          ...b,
+          name: { text: b.name.text, span: offsetSpan(b.name.span, offset) },
           value: offsetExpr(b.value, offset),
-          nameSpan: offsetSpan(b.nameSpan, offset),
         })),
         body: offsetExpr(expr.body, offset),
         span: offsetSpan(expr.span, offset),
@@ -541,26 +541,25 @@ const offsetDecl = (decl: SDecl, offset: number): SDecl => {
     case "SDeclLet":
       return {
         ...decl,
+        name: { text: decl.name.text, span: offsetSpan(decl.name.span, offset) },
         value: offsetExpr(decl.value, offset),
         span: offsetSpan(decl.span, offset),
-        nameSpan: offsetSpan(decl.nameSpan, offset),
       };
     case "SDeclLetRec":
       return {
         ...decl,
         bindings: decl.bindings.map((b) => ({
-          ...b,
+          name: { text: b.name.text, span: offsetSpan(b.name.span, offset) },
           value: offsetExpr(b.value, offset),
-          nameSpan: offsetSpan(b.nameSpan, offset),
         })),
         span: offsetSpan(decl.span, offset),
       };
     case "SDeclForeign":
       return {
         ...decl,
+        name: { text: decl.name.text, span: offsetSpan(decl.name.span, offset) },
         type: offsetType(decl.type, offset),
         span: offsetSpan(decl.span, offset),
-        nameSpan: offsetSpan(decl.nameSpan, offset),
       };
     case "SDeclModule":
       return {
@@ -598,9 +597,49 @@ const combinePrograms = (files: readonly ParsedFile[]): SProgram => {
   return { decls: allDecls, expr: null };
 };
 
+/**
+ * Collect module exports from parsed declarations.
+ * Returns a map from module name to the set of exported names.
+ */
+const collectModules = (decls: readonly SDecl[]): ModuleInfo => {
+  const modules = new Map<string, Set<string>>();
+
+  for (const decl of decls) {
+    if (decl.kind === "SDeclModule") {
+      const members = new Set<string>();
+      for (const inner of decl.decls) {
+        switch (inner.kind) {
+          case "SDeclLet":
+            members.add(inner.name.text);
+            break;
+          case "SDeclLetRec":
+            for (const b of inner.bindings) {
+              members.add(b.name.text);
+            }
+            break;
+          case "SDeclForeign":
+            members.add(inner.name.text);
+            break;
+          case "SDeclType":
+            for (const ctor of inner.constructors) {
+              members.add(ctor.name);
+            }
+            break;
+        }
+      }
+      modules.set(decl.name, members);
+    }
+  }
+
+  return modules;
+};
+
 // =============================================================================
 // LSP Compilation
 // =============================================================================
+
+/** Module information for LSP completions */
+export type ModuleInfo = ReadonlyMap<string, ReadonlySet<string>>;
 
 /** Result of LSP-focused compilation */
 export type LSPCompileResult = {
@@ -614,6 +653,8 @@ export type LSPCompileResult = {
   readonly checkOutput: CheckOutput | null;
   /** File registry for position mapping */
   readonly fileRegistry: FileRegistry;
+  /** Module names and their exports (for completions) */
+  readonly modules: ModuleInfo;
 };
 
 /**
@@ -659,6 +700,9 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
   // Combine all programs
   const combinedProgram = combinePrograms(parsedFiles);
 
+  // Collect module information before desugaring (for LSP completions)
+  const modules = collectModules(combinedProgram.decls);
+
   // Desugar
   const coreProgram = desugarProgram(combinedProgram);
 
@@ -677,6 +721,7 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
       symbolTable: resolveResult.symbolTable,
       checkOutput: null,
       fileRegistry,
+      modules,
     };
   }
 
@@ -700,5 +745,6 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
     symbolTable,
     checkOutput: checkResult,
     fileRegistry,
+    modules,
   };
 };

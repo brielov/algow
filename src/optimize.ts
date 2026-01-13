@@ -26,7 +26,7 @@ import type { Type } from "./types";
 const nameEq = (a: Name, b: Name): boolean => a.id === b.id;
 
 /** Get a string key for a Name (for use in Maps/Sets) */
-const nameKey = (name: Name): string => `${name.id}:${name.original}`;
+const nameKey = (name: Name): string => `${name.id}:${name.text}`;
 
 // =============================================================================
 // Alpha Renaming (for safe beta reduction)
@@ -49,7 +49,7 @@ const alphaRenameExpr = (expr: IR.IRExpr, env: RenameEnv): IR.IRExpr => {
     case "IRLet": {
       const newBinding = alphaRenameBinding(expr.binding, env);
       // Create fresh name for this binding
-      const freshN = freshName(expr.name.original);
+      const freshN = freshName(expr.name.text, expr.name.span);
       const newEnv = new Map(env);
       newEnv.set(nameKey(expr.name), freshN);
       const newBody = alphaRenameExpr(expr.body, newEnv);
@@ -61,7 +61,7 @@ const alphaRenameExpr = (expr: IR.IRExpr, env: RenameEnv): IR.IRExpr => {
       const newEnv = new Map(env);
       const freshNames: Name[] = [];
       for (const b of expr.bindings) {
-        const freshN = freshName(b.name.original);
+        const freshN = freshName(b.name.text, b.name.span);
         freshNames.push(freshN);
         newEnv.set(nameKey(b.name), freshN);
       }
@@ -136,7 +136,7 @@ const alphaRenameBinding = (binding: IR.IRBinding, env: RenameEnv): IR.IRBinding
 
     case "IRBLambda": {
       // Create fresh name for lambda parameter
-      const freshParam = freshName(binding.param.original);
+      const freshParam = freshName(binding.param.text, binding.param.span);
       const newEnv = new Map(env);
       newEnv.set(nameKey(binding.param), freshParam);
       const newBody = alphaRenameExpr(binding.body, newEnv);
@@ -176,7 +176,7 @@ const alphaRenamePattern = (pattern: IR.IRPattern, env: RenameEnv): IR.IRPattern
       return pattern;
 
     case "IRPVar": {
-      const freshN = freshName(pattern.name.original);
+      const freshN = freshName(pattern.name.text, pattern.name.span);
       env.set(nameKey(pattern.name), freshN);
       return IR.irpvar(freshN, pattern.type);
     }
@@ -197,7 +197,7 @@ const alphaRenamePattern = (pattern: IR.IRPattern, env: RenameEnv): IR.IRPattern
       );
 
     case "IRPAs": {
-      const freshN = freshName(pattern.name.original);
+      const freshN = freshName(pattern.name.text, pattern.name.span);
       env.set(nameKey(pattern.name), freshN);
       const newSubPattern = alphaRenamePattern(pattern.pattern, env);
       return IR.irpas(freshN, newSubPattern, pattern.type);
@@ -310,7 +310,7 @@ const foldExpr = (expr: IR.IRExpr, env: ExtendedEnv): IR.IRExpr => {
           // when the same lambda is inlined multiple times.
           // We create a fresh name for the parameter and rename the body
           // so that the parameter references match.
-          const freshParam = freshName(lambdaVal.param.original);
+          const freshParam = freshName(lambdaVal.param.text, lambdaVal.param.span);
           const renameEnv: RenameEnv = new Map();
           renameEnv.set(nameKey(lambdaVal.param), freshParam);
           const renamedBody = alphaRenameExpr(lambdaVal.body, renameEnv);
@@ -1655,7 +1655,7 @@ const inlineFunctionsBinding = (
           // Inline the function: (λx. body) arg → let x = arg in body
           // Use alpha-renaming to avoid name conflicts
           const lambda = funcInfo.binding;
-          const freshParam = freshName(lambda.param.original);
+          const freshParam = freshName(lambda.param.text, lambda.param.span);
           const renameEnv: RenameEnv = new Map();
           renameEnv.set(nameKey(lambda.param), freshParam);
           const renamedBody = alphaRenameExpr(lambda.body, renameEnv);
@@ -2560,7 +2560,7 @@ const collectGlobalInlines = (decls: readonly IR.IRDecl[]): InlineEnv => {
   for (const decl of decls) {
     if (decl.kind === "IRDeclLet" && decl.binding.kind === "IRBAtom") {
       // Never inline 'main' - it's the entry point
-      if (decl.name.original === "main") continue;
+      if (decl.name.text === "main") continue;
       env.set(nameKey(decl.name), decl.binding.atom);
     }
   }

@@ -37,7 +37,7 @@ import {
   type RequestMessage,
   type NotificationMessage,
 } from "./protocol";
-import { pathToUri, uriToPath } from "./workspace";
+import { getFileById, globalToLocal, pathToUri, uriToPath } from "./workspace";
 
 // =============================================================================
 // LSP Types
@@ -58,7 +58,8 @@ type CompletionItemKind =
   | 3 // Function
   | 4 // Constructor
   | 5 // Field
-  | 6; // Variable
+  | 6 // Variable
+  | 9; // Module
 
 type SymbolKind =
   | 5 // Class (for types)
@@ -277,16 +278,23 @@ const reanalyzeAndPublishDiagnostics = (server: LSPServer): void => {
 
   // Convert compiler diagnostics to LSP diagnostics
   for (const diag of result.diagnostics) {
-    // Find which file this diagnostic belongs to
-    // For now, assume single file or use first open document
-    const docs = Array.from(server.documents.documents.values());
-    if (docs.length === 0) continue;
+    // Map global offset to file-local offset
+    const localStart = globalToLocal(result.fileRegistry, diag.start);
+    if (!localStart) continue;
 
-    const doc = docs[0]!;
-    const lineIndex = result.lineIndices.get(doc.path);
+    const file = getFileById(result.fileRegistry, localStart.fileId);
+    if (!file) continue;
+
+    // Skip diagnostics from prelude
+    if (file.path === "<prelude>") continue;
+
+    const lineIndex = result.lineIndices.get(file.path);
     if (!lineIndex) continue;
 
-    const range = spanToRange(lineIndex, { start: diag.start, end: diag.end });
+    // Calculate local end offset
+    const localEnd = diag.end - diag.start + localStart.localOffset;
+
+    const range = spanToRange(lineIndex, { start: localStart.localOffset, end: localEnd });
     const severity: DiagnosticSeverity = diag.severity === "error" ? 1 : 2;
 
     const lspDiag: LSPDiagnostic = {
@@ -296,9 +304,10 @@ const reanalyzeAndPublishDiagnostics = (server: LSPServer): void => {
       source: "algow",
     };
 
-    const existing = diagnosticsByFile.get(doc.uri) ?? [];
+    const uri = pathToUri(file.path);
+    const existing = diagnosticsByFile.get(uri) ?? [];
     existing.push(lspDiag);
-    diagnosticsByFile.set(doc.uri, existing);
+    diagnosticsByFile.set(uri, existing);
   }
 
   // Publish diagnostics for each file
@@ -468,13 +477,15 @@ const handleCompletion = (server: LSPServer, id: number | string, params: unknow
 const kindToCompletionItemKind = (kind: string): CompletionItemKind => {
   switch (kind) {
     case "Function":
-      return 3;
+      return 3; // Function
     case "Variable":
-      return 6;
+      return 6; // Variable
     case "Constructor":
-      return 4;
+      return 4; // Constructor
+    case "Module":
+      return 9; // Module
     default:
-      return 1;
+      return 6; // Variable as default
   }
 };
 

@@ -18,6 +18,10 @@ const resetTempCounter = (): void => {
 };
 const freshTemp = (): string => `$t${_tempCounter++}`;
 
+// Helper to create unresolved Name (with placeholder ID -1)
+// ID will be assigned during name resolution
+const unresolvedName = (text: string, span: S.Span): C.Name => ({ id: -1, text, span });
+
 // =============================================================================
 // Expression Desugaring (Section 6.1)
 // =============================================================================
@@ -27,7 +31,7 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
     case "SVar":
       // D⟦ SVar x ⟧ = CVar x
       // Note: Name ID will be assigned during resolution
-      return C.cvar({ id: -1, original: expr.name }, expr.span);
+      return C.cvar(unresolvedName(expr.name.text, expr.name.span), expr.span);
 
     case "SLit":
       // D⟦ SLit l ⟧ = CLit l
@@ -45,20 +49,18 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
     case "SLet":
       // D⟦ SLet x e1 e2 ⟧ = CLet x (D⟦e1⟧) (D⟦e2⟧)
       return C.clet(
-        { id: -1, original: expr.name },
+        unresolvedName(expr.name.text, expr.name.span),
         desugarExpr(expr.value),
         desugarExpr(expr.body),
         expr.span,
-        expr.nameSpan,
       );
 
     case "SLetRec":
       // D⟦ SLetRec bs e ⟧ = CLetRec (map (λ(n,e) -> (n, D⟦e⟧)) bs) (D⟦e⟧)
       return C.cletrec(
         expr.bindings.map((b) => ({
-          name: { id: -1, original: b.name },
+          name: unresolvedName(b.name.text, b.name.span),
           value: desugarExpr(b.value),
-          nameSpan: b.nameSpan,
         })),
         desugarExpr(expr.body),
         expr.span,
@@ -73,12 +75,12 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
         desugarExpr(expr.cond),
         [
           {
-            pattern: C.cplit({ kind: "bool", value: true }),
+            pattern: C.cplit({ kind: "bool", value: true }, expr.cond.span),
             guard: null,
             body: desugarExpr(expr.thenBranch),
           },
           {
-            pattern: C.cplit({ kind: "bool", value: false }),
+            pattern: C.cplit({ kind: "bool", value: false }, expr.cond.span),
             guard: null,
             body: desugarExpr(expr.elseBranch),
           },
@@ -124,7 +126,7 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
         }
         // Pass module span (from the constructor) and member span (from the field)
         return C.cvar(
-          { id: -1, original: qualifiedName },
+          unresolvedName(qualifiedName, expr.fieldSpan),
           expr.span,
           expr.record.span,
           expr.fieldSpan,
@@ -145,7 +147,7 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
     case "SCons":
       // D⟦ SCons e1 e2 ⟧ = CApp (CApp (CCon "Cons") (D⟦e1⟧)) (D⟦e2⟧)
       return C.capp(
-        C.capp(C.ccon("Cons"), desugarExpr(expr.head)),
+        C.capp(C.ccon("Cons", expr.span), desugarExpr(expr.head), expr.span),
         desugarExpr(expr.tail),
         expr.span,
       );
@@ -158,14 +160,14 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
           desugarExpr(expr.left),
           [
             {
-              pattern: C.cplit({ kind: "bool", value: true }),
+              pattern: C.cplit({ kind: "bool", value: true }, expr.left.span),
               guard: null,
               body: desugarExpr(expr.right),
             },
             {
-              pattern: C.cplit({ kind: "bool", value: false }),
+              pattern: C.cplit({ kind: "bool", value: false }, expr.left.span),
               guard: null,
-              body: C.clit({ kind: "bool", value: false }),
+              body: C.clit({ kind: "bool", value: false }, expr.span),
             },
           ],
           expr.span,
@@ -177,12 +179,12 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
           desugarExpr(expr.left),
           [
             {
-              pattern: C.cplit({ kind: "bool", value: true }),
+              pattern: C.cplit({ kind: "bool", value: true }, expr.left.span),
               guard: null,
-              body: C.clit({ kind: "bool", value: true }),
+              body: C.clit({ kind: "bool", value: true }, expr.span),
             },
             {
-              pattern: C.cplit({ kind: "bool", value: false }),
+              pattern: C.cplit({ kind: "bool", value: false }, expr.left.span),
               guard: null,
               body: desugarExpr(expr.right),
             },
@@ -208,7 +210,7 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
 // Helper Functions
 // =============================================================================
 
-const desugarAbs = (params: readonly S.SParam[], body: S.SExpr, span?: S.Span): C.CExpr => {
+const desugarAbs = (params: readonly S.SParam[], body: S.SExpr, span: S.Span): C.CExpr => {
   if (params.length === 0) {
     return desugarExpr(body);
   }
@@ -217,20 +219,23 @@ const desugarAbs = (params: readonly S.SParam[], body: S.SExpr, span?: S.Span): 
   let result = desugarExpr(body);
   for (let i = params.length - 1; i >= 0; i--) {
     const param = params[i]!;
+    // For nested lambdas, use body's span; for outermost, use provided span
+    const lambdaSpan = i === 0 ? span : body.span;
     result = C.cabs(
-      { id: -1, original: param.name },
+      unresolvedName(param.name.text, param.name.span),
       result,
-      i === 0 ? span : undefined,
-      param.span,
+      lambdaSpan,
+      param.name.span,
     );
   }
   return result;
 };
 
-const desugarList = (elements: readonly S.SExpr[], span?: S.Span): C.CExpr => {
+const desugarList = (elements: readonly S.SExpr[], span: S.Span): C.CExpr => {
   let result: C.CExpr = C.ccon("Nil", span);
   for (let i = elements.length - 1; i >= 0; i--) {
-    result = C.capp(C.capp(C.ccon("Cons"), desugarExpr(elements[i]!)), result);
+    const elem = elements[i]!;
+    result = C.capp(C.capp(C.ccon("Cons", span), desugarExpr(elem), elem.span), result, span);
   }
   return result;
 };
@@ -245,7 +250,7 @@ const desugarCase = (c: S.SCase): C.CCase => ({
 // Do-Notation Desugaring (Section 6.2)
 // =============================================================================
 
-const desugarDo = (stmts: readonly S.SDoStmt[], span?: S.Span): C.CExpr => {
+const desugarDo = (stmts: readonly S.SDoStmt[], span: S.Span): C.CExpr => {
   if (stmts.length === 0) {
     // Empty do block - should have been caught by parser
     return C.clit({ kind: "int", value: 0 }, span);
@@ -260,10 +265,13 @@ const desugarDo = (stmts: readonly S.SDoStmt[], span?: S.Span): C.CExpr => {
 
   // Desugar from right to left
   let result =
-    lastStmt.kind === "DoExpr" ? desugarExpr(lastStmt.expr) : C.clit({ kind: "int", value: 0 }); // Shouldn't happen
+    lastStmt.kind === "DoExpr"
+      ? desugarExpr(lastStmt.expr)
+      : C.clit({ kind: "int", value: 0 }, span); // Shouldn't happen
 
   for (let i = stmts.length - 2; i >= 0; i--) {
     const stmt = stmts[i]!;
+    const stmtSpan = stmt.expr.span;
 
     switch (stmt.kind) {
       case "DoBindPattern": {
@@ -272,10 +280,16 @@ const desugarDo = (stmts: readonly S.SDoStmt[], span?: S.Span): C.CExpr => {
         if (stmt.pattern.kind === "SPVar") {
           result = C.capp(
             C.capp(
-              C.cvar({ id: -1, original: "flatMap" }),
-              C.cabs({ id: -1, original: stmt.pattern.name }, result),
+              C.cvar(unresolvedName("flatMap", stmtSpan), stmtSpan),
+              C.cabs(
+                unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+                result,
+                stmtSpan,
+              ),
+              stmtSpan,
             ),
             desugarExpr(stmt.expr),
+            stmtSpan,
           );
         } else {
           // D_do⟦ DoBindPattern p e : rest ⟧
@@ -285,15 +299,20 @@ const desugarDo = (stmts: readonly S.SDoStmt[], span?: S.Span): C.CExpr => {
           const tmp = freshTemp();
           result = C.capp(
             C.capp(
-              C.cvar({ id: -1, original: "flatMap" }),
+              C.cvar(unresolvedName("flatMap", stmtSpan), stmtSpan),
               C.cabs(
-                { id: -1, original: tmp },
-                C.cmatch(C.cvar({ id: -1, original: tmp }), [
-                  { pattern: desugarPattern(stmt.pattern), guard: null, body: result },
-                ]),
+                unresolvedName(tmp, stmtSpan),
+                C.cmatch(
+                  C.cvar(unresolvedName(tmp, stmtSpan), stmtSpan),
+                  [{ pattern: desugarPattern(stmt.pattern), guard: null, body: result }],
+                  stmtSpan,
+                ),
+                stmtSpan,
               ),
+              stmtSpan,
             ),
             desugarExpr(stmt.expr),
+            stmtSpan,
           );
         }
         break;
@@ -302,12 +321,19 @@ const desugarDo = (stmts: readonly S.SDoStmt[], span?: S.Span): C.CExpr => {
       case "DoLet": {
         // D_do⟦ DoLet (SPVar x) e : rest ⟧ = CLet x (D⟦e⟧) (D_do⟦rest⟧)
         if (stmt.pattern.kind === "SPVar") {
-          result = C.clet({ id: -1, original: stmt.pattern.name }, desugarExpr(stmt.expr), result);
+          result = C.clet(
+            unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+            desugarExpr(stmt.expr),
+            result,
+            stmtSpan,
+          );
         } else {
           // D_do⟦ DoLet p e : rest ⟧ = CMatch (D⟦e⟧) [Case (D_pat⟦p⟧) Nothing (D_do⟦rest⟧)]
-          result = C.cmatch(desugarExpr(stmt.expr), [
-            { pattern: desugarPattern(stmt.pattern), guard: null, body: result },
-          ]);
+          result = C.cmatch(
+            desugarExpr(stmt.expr),
+            [{ pattern: desugarPattern(stmt.pattern), guard: null, body: result }],
+            stmtSpan,
+          );
         }
         break;
       }
@@ -317,10 +343,12 @@ const desugarDo = (stmts: readonly S.SDoStmt[], span?: S.Span): C.CExpr => {
         const tmp = freshTemp();
         result = C.capp(
           C.capp(
-            C.cvar({ id: -1, original: "flatMap" }),
-            C.cabs({ id: -1, original: tmp }, result),
+            C.cvar(unresolvedName("flatMap", stmtSpan), stmtSpan),
+            C.cabs(unresolvedName(tmp, stmtSpan), result, stmtSpan),
+            stmtSpan,
           ),
           desugarExpr(stmt.expr),
+          stmtSpan,
         );
         break;
       }
@@ -347,7 +375,7 @@ const collectPatternBindings = (pattern: S.SPattern): Set<string> => {
       case "SPLit":
         break;
       case "SPVar":
-        bindings.add(p.name);
+        bindings.add(p.name.text);
         break;
       case "SPCon":
         for (const arg of p.args) collect(arg);
@@ -359,7 +387,7 @@ const collectPatternBindings = (pattern: S.SPattern): Set<string> => {
         for (const f of p.fields) collect(f.pattern);
         break;
       case "SPAs":
-        bindings.add(p.name);
+        bindings.add(p.name.text);
         collect(p.pattern);
         break;
       case "SPOr":
@@ -386,7 +414,7 @@ const desugarPattern = (pattern: S.SPattern): C.CPattern => {
       return C.cpwild(pattern.span);
 
     case "SPVar":
-      return C.cpvar({ id: -1, original: pattern.name }, pattern.span);
+      return C.cpvar(unresolvedName(pattern.name.text, pattern.name.span), pattern.span);
 
     case "SPLit":
       return C.cplit(pattern.value, pattern.span);
@@ -405,7 +433,7 @@ const desugarPattern = (pattern: S.SPattern): C.CPattern => {
 
     case "SPAs":
       return C.cpas(
-        { id: -1, original: pattern.name },
+        unresolvedName(pattern.name.text, pattern.name.span),
         desugarPattern(pattern.pattern),
         pattern.span,
       );
@@ -428,14 +456,14 @@ const desugarPattern = (pattern: S.SPattern): C.CPattern => {
   }
 };
 
-const desugarListPattern = (elements: readonly S.SPattern[], span?: S.Span): C.CPattern => {
+const desugarListPattern = (elements: readonly S.SPattern[], span: S.Span): C.CPattern => {
   if (elements.length === 0) {
     return C.cpcon("Nil", [], span);
   }
 
-  let result: C.CPattern = C.cpcon("Nil", []);
+  let result: C.CPattern = C.cpcon("Nil", [], span);
   for (let i = elements.length - 1; i >= 0; i--) {
-    result = C.cpcon("Cons", [desugarPattern(elements[i]!), result]);
+    result = C.cpcon("Cons", [desugarPattern(elements[i]!), result], span);
   }
   return result;
 };
@@ -474,7 +502,7 @@ const desugarPatternInModuleWithImports = (
       return C.cpwild(pattern.span);
 
     case "SPVar":
-      return C.cpvar({ id: -1, original: pattern.name }, pattern.span);
+      return C.cpvar(unresolvedName(pattern.name.text, pattern.name.span), pattern.span);
 
     case "SPLit":
       return C.cplit(pattern.value, pattern.span);
@@ -492,7 +520,11 @@ const desugarPatternInModuleWithImports = (
       );
 
     case "SPAs":
-      return C.cpas({ id: -1, original: pattern.name }, recurse(pattern.pattern), pattern.span);
+      return C.cpas(
+        unresolvedName(pattern.name.text, pattern.name.span),
+        recurse(pattern.pattern),
+        pattern.span,
+      );
 
     case "SPOr":
       return C.cpor(recurse(pattern.left), recurse(pattern.right), pattern.span);
@@ -506,9 +538,9 @@ const desugarPatternInModuleWithImports = (
       if (pattern.elements.length === 0) {
         return C.cpcon("Nil", [], pattern.span);
       }
-      let result: C.CPattern = C.cpcon("Nil", []);
+      let result: C.CPattern = C.cpcon("Nil", [], pattern.span);
       for (let i = pattern.elements.length - 1; i >= 0; i--) {
-        result = C.cpcon("Cons", [recurse(pattern.elements[i]!), result]);
+        result = C.cpcon("Cons", [recurse(pattern.elements[i]!), result], pattern.span);
       }
       return result;
     }
@@ -561,31 +593,28 @@ const desugarDecl = (decl: S.SDecl): C.CDecl | C.CDecl[] | null => {
 
     case "SDeclLet":
       return C.cdecllet(
-        { id: -1, original: decl.name },
+        unresolvedName(decl.name.text, decl.name.span),
         desugarExpr(decl.value),
         decl.span,
-        decl.nameSpan,
       );
 
     case "SDeclLetRec":
       return C.cdeclletrec(
         decl.bindings.map((b) => ({
-          name: { id: -1, original: b.name },
+          name: unresolvedName(b.name.text, b.name.span),
           value: desugarExpr(b.value),
-          nameSpan: b.nameSpan,
         })),
         decl.span,
       );
 
     case "SDeclForeign":
       return C.cdeclforeign(
-        { id: -1, original: decl.name },
+        unresolvedName(decl.name.text, decl.name.span),
         "", // module - to be filled during resolution
-        decl.name, // jsName - same as name by default
+        decl.name.text, // jsName - same as name by default
         desugarType(decl.type),
         decl.isAsync,
         decl.span,
-        decl.nameSpan,
       );
 
     case "SDeclUse": {
@@ -605,10 +634,10 @@ const desugarDecl = (decl: S.SDecl): C.CDecl | C.CDecl[] | null => {
         const isConstructor = name[0] === name[0]?.toUpperCase();
         bindings.push(
           C.cdecllet(
-            { id: -1, original: name },
+            unresolvedName(name, decl.span),
             isConstructor
               ? C.ccon(qualifiedName, decl.span)
-              : C.cvar({ id: -1, original: qualifiedName }, decl.span),
+              : C.cvar(unresolvedName(qualifiedName, decl.span), decl.span),
             decl.span,
           ),
         );
@@ -665,14 +694,14 @@ const collectModuleNames = (decls: readonly S.SDecl[]): Set<string> => {
         }
         break;
       case "SDeclForeign":
-        names.add(decl.name);
+        names.add(decl.name.text);
         break;
       case "SDeclLet":
-        names.add(decl.name);
+        names.add(decl.name.text);
         break;
       case "SDeclLetRec":
         for (const b of decl.bindings) {
-          names.add(b.name);
+          names.add(b.name.text);
         }
         break;
     }
@@ -699,16 +728,19 @@ const desugarExprInModuleWithImports = (
   switch (expr.kind) {
     case "SVar": {
       // First check if defined in current module
-      if (moduleNames.has(expr.name)) {
-        return C.cvar({ id: -1, original: `${moduleName}.${expr.name}` }, expr.span);
+      if (moduleNames.has(expr.name.text)) {
+        return C.cvar(unresolvedName(`${moduleName}.${expr.name.text}`, expr.name.span), expr.span);
       }
       // Then check if imported via `use`
-      const sourceModule = importedNames.get(expr.name);
+      const sourceModule = importedNames.get(expr.name.text);
       if (sourceModule) {
-        return C.cvar({ id: -1, original: `${sourceModule}.${expr.name}` }, expr.span);
+        return C.cvar(
+          unresolvedName(`${sourceModule}.${expr.name.text}`, expr.name.span),
+          expr.span,
+        );
       }
       // Otherwise leave unqualified
-      return C.cvar({ id: -1, original: expr.name }, expr.span);
+      return C.cvar(unresolvedName(expr.name.text, expr.name.span), expr.span);
     }
 
     case "SLit":
@@ -731,10 +763,10 @@ const desugarExprInModuleWithImports = (
       // The bound name shadows module names in the body
       const shadowedModuleNames = new Set(moduleNames);
       const shadowedImportedNames = new Map(importedNames);
-      shadowedModuleNames.delete(expr.name);
-      shadowedImportedNames.delete(expr.name);
+      shadowedModuleNames.delete(expr.name.text);
+      shadowedImportedNames.delete(expr.name.text);
       return C.clet(
-        { id: -1, original: expr.name },
+        unresolvedName(expr.name.text, expr.name.span),
         recurse(expr.value),
         desugarExprInModuleWithImports(
           expr.body,
@@ -743,7 +775,6 @@ const desugarExprInModuleWithImports = (
           shadowedImportedNames,
         ),
         expr.span,
-        expr.nameSpan,
       );
     }
 
@@ -752,16 +783,15 @@ const desugarExprInModuleWithImports = (
       const shadowedModuleNames = new Set(moduleNames);
       const shadowedImportedNames = new Map(importedNames);
       for (const b of expr.bindings) {
-        shadowedModuleNames.delete(b.name);
-        shadowedImportedNames.delete(b.name);
+        shadowedModuleNames.delete(b.name.text);
+        shadowedImportedNames.delete(b.name.text);
       }
       const recurseWithShadow = (e: S.SExpr): C.CExpr =>
         desugarExprInModuleWithImports(e, moduleName, shadowedModuleNames, shadowedImportedNames);
       return C.cletrec(
         expr.bindings.map((b) => ({
-          name: { id: -1, original: b.name },
+          name: unresolvedName(b.name.text, b.name.span),
           value: recurseWithShadow(b.value),
-          nameSpan: b.nameSpan,
         })),
         recurseWithShadow(expr.body),
         expr.span,
@@ -773,12 +803,12 @@ const desugarExprInModuleWithImports = (
         recurse(expr.cond),
         [
           {
-            pattern: C.cplit({ kind: "bool", value: true }),
+            pattern: C.cplit({ kind: "bool", value: true }, expr.cond.span),
             guard: null,
             body: recurse(expr.thenBranch),
           },
           {
-            pattern: C.cplit({ kind: "bool", value: false }),
+            pattern: C.cplit({ kind: "bool", value: false }, expr.cond.span),
             guard: null,
             body: recurse(expr.elseBranch),
           },
@@ -858,7 +888,7 @@ const desugarExprInModuleWithImports = (
         }
         // Pass module span (from the constructor) and member span (from the field)
         return C.cvar(
-          { id: -1, original: qualifiedName },
+          unresolvedName(qualifiedName, expr.fieldSpan),
           expr.span,
           expr.record.span,
           expr.fieldSpan,
@@ -879,7 +909,11 @@ const desugarExprInModuleWithImports = (
       return C.capp(recurse(expr.right), recurse(expr.left), expr.span);
 
     case "SCons":
-      return C.capp(C.capp(C.ccon("Cons"), recurse(expr.head)), recurse(expr.tail), expr.span);
+      return C.capp(
+        C.capp(C.ccon("Cons", expr.span), recurse(expr.head), expr.span),
+        recurse(expr.tail),
+        expr.span,
+      );
 
     case "SBinOp":
       if (expr.op === "&&") {
@@ -887,14 +921,14 @@ const desugarExprInModuleWithImports = (
           recurse(expr.left),
           [
             {
-              pattern: C.cplit({ kind: "bool", value: true }),
+              pattern: C.cplit({ kind: "bool", value: true }, expr.left.span),
               guard: null,
               body: recurse(expr.right),
             },
             {
-              pattern: C.cplit({ kind: "bool", value: false }),
+              pattern: C.cplit({ kind: "bool", value: false }, expr.left.span),
               guard: null,
-              body: C.clit({ kind: "bool", value: false }),
+              body: C.clit({ kind: "bool", value: false }, expr.span),
             },
           ],
           expr.span,
@@ -905,12 +939,12 @@ const desugarExprInModuleWithImports = (
           recurse(expr.left),
           [
             {
-              pattern: C.cplit({ kind: "bool", value: true }),
+              pattern: C.cplit({ kind: "bool", value: true }, expr.left.span),
               guard: null,
-              body: C.clit({ kind: "bool", value: true }),
+              body: C.clit({ kind: "bool", value: true }, expr.span),
             },
             {
-              pattern: C.cplit({ kind: "bool", value: false }),
+              pattern: C.cplit({ kind: "bool", value: false }, expr.left.span),
               guard: null,
               body: recurse(expr.right),
             },
@@ -941,7 +975,7 @@ const desugarAbsInModuleWithImports = (
   moduleName: string,
   moduleNames: Set<string>,
   importedNames: Map<string, string>,
-  span?: S.Span,
+  span: S.Span,
 ): C.CExpr => {
   if (params.length === 0) {
     return desugarExprInModuleWithImports(body, moduleName, moduleNames, importedNames);
@@ -951,8 +985,8 @@ const desugarAbsInModuleWithImports = (
   const shadowedModuleNames = new Set(moduleNames);
   const shadowedImportedNames = new Map(importedNames);
   for (const param of params) {
-    shadowedModuleNames.delete(param.name);
-    shadowedImportedNames.delete(param.name);
+    shadowedModuleNames.delete(param.name.text);
+    shadowedImportedNames.delete(param.name.text);
   }
 
   let result = desugarExprInModuleWithImports(
@@ -963,11 +997,13 @@ const desugarAbsInModuleWithImports = (
   );
   for (let i = params.length - 1; i >= 0; i--) {
     const param = params[i]!;
+    // For nested lambdas, use body's span; for outermost, use provided span
+    const lambdaSpan = i === 0 ? span : body.span;
     result = C.cabs(
-      { id: -1, original: param.name },
+      unresolvedName(param.name.text, param.name.span),
       result,
-      i === 0 ? span : undefined,
-      param.span,
+      lambdaSpan,
+      param.name.span,
     );
   }
   return result;
@@ -978,17 +1014,18 @@ const desugarListInModuleWithImports = (
   moduleName: string,
   moduleNames: Set<string>,
   importedNames: Map<string, string>,
-  span?: S.Span,
+  span: S.Span,
 ): C.CExpr => {
   let result: C.CExpr = C.ccon("Nil", span);
   for (let i = elements.length - 1; i >= 0; i--) {
-    result = C.capp(
-      C.capp(
-        C.ccon("Cons"),
-        desugarExprInModuleWithImports(elements[i]!, moduleName, moduleNames, importedNames),
-      ),
-      result,
+    const elem = elements[i]!;
+    const elemDesugared = desugarExprInModuleWithImports(
+      elem,
+      moduleName,
+      moduleNames,
+      importedNames,
     );
+    result = C.capp(C.capp(C.ccon("Cons", span), elemDesugared, elem.span), result, span);
   }
   return result;
 };
@@ -998,7 +1035,7 @@ const desugarDoInModuleWithImports = (
   moduleName: string,
   moduleNames: Set<string>,
   importedNames: Map<string, string>,
-  span?: S.Span,
+  span: S.Span,
 ): C.CExpr => {
   const recurse = (e: S.SExpr): C.CExpr =>
     desugarExprInModuleWithImports(e, moduleName, moduleNames, importedNames);
@@ -1014,43 +1051,57 @@ const desugarDoInModuleWithImports = (
   }
 
   let result =
-    lastStmt.kind === "DoExpr" ? recurse(lastStmt.expr) : C.clit({ kind: "int", value: 0 });
+    lastStmt.kind === "DoExpr" ? recurse(lastStmt.expr) : C.clit({ kind: "int", value: 0 }, span);
 
   for (let i = stmts.length - 2; i >= 0; i--) {
     const stmt = stmts[i]!;
+    const stmtSpan = stmt.expr.span;
 
     switch (stmt.kind) {
       case "DoBindPattern": {
         if (stmt.pattern.kind === "SPVar") {
           result = C.capp(
             C.capp(
-              C.cvar({ id: -1, original: "flatMap" }),
-              C.cabs({ id: -1, original: stmt.pattern.name }, result),
+              C.cvar(unresolvedName("flatMap", stmtSpan), stmtSpan),
+              C.cabs(
+                unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+                result,
+                stmtSpan,
+              ),
+              stmtSpan,
             ),
             recurse(stmt.expr),
+            stmtSpan,
           );
         } else {
           const tmp = freshTemp();
           result = C.capp(
             C.capp(
-              C.cvar({ id: -1, original: "flatMap" }),
+              C.cvar(unresolvedName("flatMap", stmtSpan), stmtSpan),
               C.cabs(
-                { id: -1, original: tmp },
-                C.cmatch(C.cvar({ id: -1, original: tmp }), [
-                  {
-                    pattern: desugarPatternInModuleWithImports(
-                      stmt.pattern,
-                      moduleName,
-                      moduleNames,
-                      importedNames,
-                    ),
-                    guard: null,
-                    body: result,
-                  },
-                ]),
+                unresolvedName(tmp, stmtSpan),
+                C.cmatch(
+                  C.cvar(unresolvedName(tmp, stmtSpan), stmtSpan),
+                  [
+                    {
+                      pattern: desugarPatternInModuleWithImports(
+                        stmt.pattern,
+                        moduleName,
+                        moduleNames,
+                        importedNames,
+                      ),
+                      guard: null,
+                      body: result,
+                    },
+                  ],
+                  stmtSpan,
+                ),
+                stmtSpan,
               ),
+              stmtSpan,
             ),
             recurse(stmt.expr),
+            stmtSpan,
           );
         }
         break;
@@ -1058,20 +1109,29 @@ const desugarDoInModuleWithImports = (
 
       case "DoLet": {
         if (stmt.pattern.kind === "SPVar") {
-          result = C.clet({ id: -1, original: stmt.pattern.name }, recurse(stmt.expr), result);
+          result = C.clet(
+            unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+            recurse(stmt.expr),
+            result,
+            stmtSpan,
+          );
         } else {
-          result = C.cmatch(recurse(stmt.expr), [
-            {
-              pattern: desugarPatternInModuleWithImports(
-                stmt.pattern,
-                moduleName,
-                moduleNames,
-                importedNames,
-              ),
-              guard: null,
-              body: result,
-            },
-          ]);
+          result = C.cmatch(
+            recurse(stmt.expr),
+            [
+              {
+                pattern: desugarPatternInModuleWithImports(
+                  stmt.pattern,
+                  moduleName,
+                  moduleNames,
+                  importedNames,
+                ),
+                guard: null,
+                body: result,
+              },
+            ],
+            stmtSpan,
+          );
         }
         break;
       }
@@ -1080,10 +1140,12 @@ const desugarDoInModuleWithImports = (
         const tmp = freshTemp();
         result = C.capp(
           C.capp(
-            C.cvar({ id: -1, original: "flatMap" }),
-            C.cabs({ id: -1, original: tmp }, result),
+            C.cvar(unresolvedName("flatMap", stmtSpan), stmtSpan),
+            C.cabs(unresolvedName(tmp, stmtSpan), result, stmtSpan),
+            stmtSpan,
           ),
           recurse(stmt.expr),
+          stmtSpan,
         );
         break;
       }
@@ -1119,26 +1181,24 @@ const desugarDeclInModuleWithImports = (
   switch (decl.kind) {
     case "SDeclForeign": {
       // Qualify the name with module prefix (e.g., "length" in String -> "String.length")
-      const qualifiedName = `${moduleName}.${decl.name}`;
+      const qualifiedName = `${moduleName}.${decl.name.text}`;
       return C.cdeclforeign(
-        { id: -1, original: qualifiedName },
+        unresolvedName(qualifiedName, decl.name.span),
         moduleName,
-        decl.name, // jsName is the unqualified name
+        decl.name.text, // jsName is the unqualified name
         desugarType(decl.type),
         decl.isAsync,
         decl.span,
-        decl.nameSpan,
       );
     }
 
     case "SDeclLet": {
       // Qualify the name with module prefix
-      const qualifiedName = `${moduleName}.${decl.name}`;
+      const qualifiedName = `${moduleName}.${decl.name.text}`;
       return C.cdecllet(
-        { id: -1, original: qualifiedName },
+        unresolvedName(qualifiedName, decl.name.span),
         desugarExprInModuleWithImports(decl.value, moduleName, moduleNames, importedNames),
         decl.span,
-        decl.nameSpan,
       );
     }
 
@@ -1146,9 +1206,8 @@ const desugarDeclInModuleWithImports = (
       // Qualify names with module prefix
       return C.cdeclletrec(
         decl.bindings.map((b) => ({
-          name: { id: -1, original: `${moduleName}.${b.name}` },
+          name: unresolvedName(`${moduleName}.${b.name.text}`, b.name.span),
           value: desugarExprInModuleWithImports(b.value, moduleName, moduleNames, importedNames),
-          nameSpan: b.nameSpan,
         })),
         decl.span,
       );
@@ -1245,10 +1304,10 @@ const desugarDeclWithModuleInfo = (
         const isConstructor = name[0] === name[0]?.toUpperCase();
         bindings.push(
           C.cdecllet(
-            { id: -1, original: name },
+            unresolvedName(name, decl.span),
             isConstructor
               ? C.ccon(qualifiedName, decl.span)
-              : C.cvar({ id: -1, original: qualifiedName }, decl.span),
+              : C.cvar(unresolvedName(qualifiedName, decl.span), decl.span),
             decl.span,
           ),
         );

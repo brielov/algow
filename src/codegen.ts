@@ -113,7 +113,7 @@ const JS_RESERVED = new Set([
 /** Convert a Name to a valid JavaScript identifier */
 const nameToJs = (name: Name): string => {
   // Use both id and original to create unique name
-  const base = name.original.replace(/[^a-zA-Z0-9_$]/g, "_");
+  const base = name.text.replace(/[^a-zA-Z0-9_$]/g, "_");
   // For negative IDs (temporaries from lowering), use absolute value
   const suffix = name.id < 0 ? `$${-name.id}` : `$${name.id}`;
   const result = `${base}${suffix}`;
@@ -761,12 +761,12 @@ export type CodeGenOutput = {
  */
 const findMainName = (decls: readonly IR.IRDecl[]): string | null => {
   for (const decl of decls) {
-    if (decl.kind === "IRDeclLet" && decl.name.original === "main") {
+    if (decl.kind === "IRDeclLet" && decl.name.text === "main") {
       return nameToJs(decl.name);
     }
     if (decl.kind === "IRDeclLetRec") {
       for (const b of decl.bindings) {
-        if (b.name.original === "main") {
+        if (b.name.text === "main") {
           return nameToJs(b.name);
         }
       }

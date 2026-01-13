@@ -145,14 +145,13 @@ const parseLambda = (state: ParserState): S.SAbs => {
 
   while (at(state, TokenKind.Lower) && !at(state, TokenKind.Arrow)) {
     const token = advance(state);
-    params.push({ name: text(state, token), span: tokenSpan(token) });
+    params.push(S.sparam(S.unresolvedName(text(state, token), tokenSpan(token))));
   }
 
   expect(state, TokenKind.Arrow, "expected '->'");
   const body = parseExpr(state);
-  const end = body.span?.end ?? state.current[1];
 
-  return S.sabs(params, body, span(start, end));
+  return S.sabs(params, body, span(start, body.span.end));
 };
 
 // =============================================================================
@@ -411,8 +410,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
     advance(state); // 'async'
   }
 
-  let name: string;
-  let nameSpan: S.Span | undefined;
+  let foreignName: S.UnresolvedName;
 
   // Support operator syntax: foreign (+) : type
   if (at(state, TokenKind.LParen)) {
@@ -420,8 +418,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
     const opToken = state.current;
     if (isOperatorToken(opToken[0])) {
       advance(state);
-      name = text(state, opToken);
-      nameSpan = tokenSpan(opToken);
+      foreignName = S.unresolvedName(text(state, opToken), tokenSpan(opToken));
     } else {
       error(state, "expected operator in parentheses");
       synchronize(state);
@@ -444,17 +441,15 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
       synchronize(state);
       return null;
     }
-    name = `${moduleName}.${text(state, funcToken)}`;
     // For qualified names, use the func token span (that's the key identifier)
-    nameSpan = tokenSpan(funcToken);
+    foreignName = S.unresolvedName(`${moduleName}.${text(state, funcToken)}`, tokenSpan(funcToken));
   } else {
     const nameToken = expect(state, TokenKind.Lower, "expected foreign function name");
     if (!nameToken) {
       synchronize(state);
       return null;
     }
-    name = text(state, nameToken);
-    nameSpan = tokenSpan(nameToken);
+    foreignName = S.unresolvedName(text(state, nameToken), tokenSpan(nameToken));
   }
 
   if (!expect(state, TokenKind.Colon, "expected ':' after foreign function name")) {
@@ -469,7 +464,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
     return null;
   }
 
-  return S.sdeclforeign(name, type, isAsync, span(start, state.current[1]), nameSpan);
+  return S.sdeclforeign(foreignName, type, isAsync, span(start, state.current[1]));
 };
 
 const isOperatorToken = (kind: TokenKind): boolean =>
@@ -503,15 +498,14 @@ const parseLetPattern = (state: ParserState, start: number, _recursive: boolean)
   // Must have 'in' for pattern destructuring (always an expression, not a declaration)
   if (!at(state, TokenKind.In)) {
     error(state, "expected 'in' after pattern binding value");
-    return { kind: "expr", expr: S.sint(0) };
+    return { kind: "expr", expr: S.sint(0, span(start, state.current[1])) };
   }
   advance(state); // 'in'
 
   const body = parseExpr(state);
-  const end = body.span?.end ?? state.current[1];
 
   // Desugar to match expression: match value when pattern -> body end
-  const matchExpr = S.smatch(value, [{ pattern, guard: null, body }], span(start, end));
+  const matchExpr = S.smatch(value, [{ pattern, guard: null, body }], span(start, body.span.end));
   return { kind: "expr", expr: matchExpr };
 };
 
@@ -530,10 +524,9 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
   const nameToken = expect(state, TokenKind.Lower, "expected binding name");
   if (!nameToken) {
     synchronize(state);
-    return { kind: "expr", expr: S.sint(0) };
+    return { kind: "expr", expr: S.sint(0, span(start, state.current[1])) };
   }
-  const firstName = text(state, nameToken);
-  const firstNameSpan = tokenSpan(nameToken);
+  const firstName = S.unresolvedName(text(state, nameToken), tokenSpan(nameToken));
 
   // Parse parameters
   const params: S.SParam[] = [];
@@ -542,7 +535,8 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
       // Skip typed parameter for now
       advance(state);
       const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-      if (paramToken) params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+      if (paramToken)
+        params.push(S.sparam(S.unresolvedName(text(state, paramToken), tokenSpan(paramToken))));
       if (at(state, TokenKind.Colon)) {
         advance(state);
         parseType(state); // Skip type annotation
@@ -550,7 +544,7 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
       expect(state, TokenKind.RParen, "expected ')'");
     } else {
       const paramToken = advance(state);
-      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+      params.push(S.sparam(S.unresolvedName(text(state, paramToken), tokenSpan(paramToken))));
     }
   }
 
@@ -565,21 +559,20 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
   const value = parseExpr(state);
 
   // Wrap in lambda if there are parameters
-  const wrappedValue = params.length > 0 ? S.sabs(params, value) : value;
+  const wrappedValue = params.length > 0 ? S.sabs(params, value, value.span) : value;
 
   // Check for 'and' (mutual recursion) or 'in' (let expression)
   if (at(state, TokenKind.AndKw)) {
     // Mutual recursion: let rec f = ... and g = ...
-    const bindings: { name: string; value: S.SExpr; nameSpan?: S.Span }[] = [
-      { name: firstName, value: wrappedValue, nameSpan: firstNameSpan },
+    const bindings: { name: S.UnresolvedName; value: S.SExpr }[] = [
+      { name: firstName, value: wrappedValue },
     ];
 
     while (at(state, TokenKind.AndKw)) {
       advance(state); // 'and'
       const andNameToken = expect(state, TokenKind.Lower, "expected binding name");
       if (!andNameToken) break;
-      const andName = text(state, andNameToken);
-      const andNameSpan = tokenSpan(andNameToken);
+      const andName = S.unresolvedName(text(state, andNameToken), tokenSpan(andNameToken));
 
       const andParams: S.SParam[] = [];
       while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
@@ -587,7 +580,9 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
           advance(state);
           const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
           if (paramToken)
-            andParams.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+            andParams.push(
+              S.sparam(S.unresolvedName(text(state, paramToken), tokenSpan(paramToken))),
+            );
           if (at(state, TokenKind.Colon)) {
             advance(state);
             parseType(state);
@@ -595,7 +590,9 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
           expect(state, TokenKind.RParen, "expected ')'");
         } else {
           const paramToken = advance(state);
-          andParams.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+          andParams.push(
+            S.sparam(S.unresolvedName(text(state, paramToken), tokenSpan(paramToken))),
+          );
         }
       }
 
@@ -606,8 +603,9 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
 
       expect(state, TokenKind.Eq, "expected '=' after parameters");
       const andValue = parseExpr(state);
-      const wrappedAndValue = andParams.length > 0 ? S.sabs(andParams, andValue) : andValue;
-      bindings.push({ name: andName, value: wrappedAndValue, nameSpan: andNameSpan });
+      const wrappedAndValue =
+        andParams.length > 0 ? S.sabs(andParams, andValue, andValue.span) : andValue;
+      bindings.push({ name: andName, value: wrappedAndValue });
     }
 
     // Check for 'in' to make it an expression
@@ -616,7 +614,7 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
       const body = parseExpr(state);
       return {
         kind: "expr",
-        expr: S.sletrec(bindings, body, span(start, body.span?.end ?? state.current[1])),
+        expr: S.sletrec(bindings, body, span(start, body.span.end)),
       };
     }
 
@@ -630,21 +628,15 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
       return {
         kind: "expr",
         expr: S.sletrec(
-          [{ name: firstName, value: wrappedValue, nameSpan: firstNameSpan }],
+          [{ name: firstName, value: wrappedValue }],
           body,
-          span(start, body.span?.end ?? state.current[1]),
+          span(start, body.span.end),
         ),
       };
     }
     return {
       kind: "expr",
-      expr: S.slet(
-        firstName,
-        wrappedValue,
-        body,
-        span(start, body.span?.end ?? state.current[1]),
-        firstNameSpan,
-      ),
+      expr: S.slet(firstName, wrappedValue, body, span(start, body.span.end)),
     };
   }
 
@@ -653,14 +645,14 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
     return {
       kind: "decl",
       decl: S.sdeclletrec(
-        [{ name: firstName, value: wrappedValue, nameSpan: firstNameSpan }],
+        [{ name: firstName, value: wrappedValue }],
         span(start, state.current[1]),
       ),
     };
   }
   return {
     kind: "decl",
-    decl: S.sdecllet(firstName, wrappedValue, span(start, state.current[1]), firstNameSpan),
+    decl: S.sdecllet(firstName, wrappedValue, span(start, state.current[1])),
   };
 };
 
@@ -679,7 +671,7 @@ const parseType = (state: ParserState): S.SType | null => {
       error(state, "expected type after '->'");
       return left;
     }
-    return S.stfun(left, right);
+    return S.stfun(left, right, span(left.span.start, right.span.end));
   }
 
   return left;
@@ -695,7 +687,7 @@ const parseTypeApp = (state: ParserState): S.SType | null => {
   ) {
     const arg = parseTypeAtom(state);
     if (!arg) break;
-    left = S.stapp(left, arg);
+    left = S.stapp(left, arg, span(left.span.start, arg.span.end));
   }
 
   return left;
@@ -721,6 +713,7 @@ const parseTypeAtom = (state: ParserState): S.SType | null => {
   }
 
   if (at(state, TokenKind.LParen)) {
+    const start = state.current[1];
     advance(state);
     const first = parseType(state);
     if (!first) {
@@ -735,8 +728,9 @@ const parseTypeAtom = (state: ParserState): S.SType | null => {
         const elem = parseType(state);
         if (elem) elements.push(elem);
       }
+      const end = state.current[2];
       expect(state, TokenKind.RParen, "expected ')'");
-      return S.sttuple(elements);
+      return S.sttuple(elements, span(start, end));
     }
 
     expect(state, TokenKind.RParen, "expected ')'");
@@ -744,6 +738,7 @@ const parseTypeAtom = (state: ParserState): S.SType | null => {
   }
 
   if (at(state, TokenKind.LBrace)) {
+    const start = state.current[1];
     advance(state);
     const fields: { name: string; type: S.SType }[] = [];
 
@@ -766,8 +761,9 @@ const parseTypeAtom = (state: ParserState): S.SType | null => {
       }
     }
 
+    const end = state.current[2];
     expect(state, TokenKind.RBrace, "expected '}'");
-    return S.strecord(fields);
+    return S.strecord(fields, span(start, end));
   }
 
   return null;
@@ -831,7 +827,7 @@ const parsePrefixImpl = (state: ParserState, allowLambda: boolean): S.SExpr => {
         return parseLambda(state);
       }
       advance(state);
-      return S.svar(text(state, token), tokenSpan(token));
+      return S.svar(S.unresolvedName(text(state, token), tokenSpan(token)));
     }
 
     case TokenKind.Upper: {
@@ -845,9 +841,8 @@ const parsePrefixImpl = (state: ParserState, allowLambda: boolean): S.SExpr => {
     case TokenKind.Minus: {
       advance(state);
       const operand = parsePrecedence(state, Bp.Multiplicative + 1, false);
-      const end = operand.span?.end ?? state.current[1];
       // Unary negation: -x is SBinOp("-", 0, x)
-      return S.sbinop("-", S.sint(0, span(start, start)), operand, span(start, end));
+      return S.sbinop("-", S.sint(0, span(start, start)), operand, span(start, operand.span.end));
     }
 
     case TokenKind.LBrace:
@@ -870,8 +865,9 @@ const parsePrefixImpl = (state: ParserState, allowLambda: boolean): S.SExpr => {
 
     default: {
       error(state, `unexpected token: ${TokenKind[kind]}`);
+      const errorSpan = tokenSpan(state.current);
       advance(state);
-      return S.sint(0);
+      return S.sint(0, errorSpan);
     }
   }
 };
@@ -886,7 +882,7 @@ const parseInfix = (
   allowLambda: boolean,
 ): S.SExpr => {
   const kind = state.current[0];
-  const start = left.span?.start ?? 0;
+  const start = left.span.start;
 
   switch (kind) {
     case TokenKind.Plus:
@@ -904,23 +900,20 @@ const parseInfix = (
       const opToken = advance(state);
       const op = text(state, opToken);
       const right = parsePrecedence(state, bp, allowLambda);
-      const end = right.span?.end ?? state.current[1];
-      return S.sbinop(op, left, right, span(start, end));
+      return S.sbinop(op, left, right, span(start, right.span.end));
     }
 
     case TokenKind.Pipe: {
       advance(state);
       const right = parsePrecedence(state, bp, allowLambda);
-      const end = right.span?.end ?? state.current[1];
-      return S.spipe(left, right, span(start, end));
+      return S.spipe(left, right, span(start, right.span.end));
     }
 
     case TokenKind.ColonColon: {
       advance(state);
       // Right-associative
       const right = parsePrecedence(state, bp - 1, allowLambda);
-      const end = right.span?.end ?? state.current[1];
-      return S.scons(left, right, span(start, end));
+      return S.scons(left, right, span(start, right.span.end));
     }
 
     case TokenKind.Dot: {
@@ -946,15 +939,16 @@ const parseInfix = (
       }
       const field = fieldToken ? text(state, fieldToken) : "?";
       const end = fieldToken ? fieldToken[2] : state.current[1];
-      const fieldSpan = fieldToken ? tokenSpan(fieldToken) : undefined;
+      const fieldSpan = fieldToken
+        ? tokenSpan(fieldToken)
+        : span(state.current[1], state.current[1]);
       return S.sfield(left, field, span(start, end), fieldSpan);
     }
 
     default: {
       // Function application
       const right = parsePrecedence(state, bp, false);
-      const end = right.span?.end ?? state.current[1];
-      return S.sapp(left, right, span(start, end));
+      return S.sapp(left, right, span(start, right.span.end));
     }
   }
 };
@@ -1087,7 +1081,11 @@ const parseRecord = (state: ParserState): S.SExpr => {
 
       const endToken = expect(state, TokenKind.RBrace, "expected '}'");
       const end = endToken ? endToken[2] : state.current[1];
-      return S.srecordUpdate(S.svar(firstName, tokenSpan(firstToken)), fields, span(start, end));
+      return S.srecordUpdate(
+        S.svar(S.unresolvedName(firstName, tokenSpan(firstToken))),
+        fields,
+        span(start, end),
+      );
     }
 
     // Regular record starting with a field
@@ -1099,7 +1097,10 @@ const parseRecord = (state: ParserState): S.SExpr => {
       fields.push({ name: firstName, value: firstValue });
     } else {
       // Punning: { x } means { x = x }
-      fields.push({ name: firstName, value: S.svar(firstName, tokenSpan(firstToken)) });
+      fields.push({
+        name: firstName,
+        value: S.svar(S.unresolvedName(firstName, tokenSpan(firstToken))),
+      });
     }
 
     while (at(state, TokenKind.Comma)) {
@@ -1115,7 +1116,7 @@ const parseRecord = (state: ParserState): S.SExpr => {
         // Punning
         fields.push({
           name: text(state, fieldName),
-          value: S.svar(text(state, fieldName), tokenSpan(fieldName)),
+          value: S.svar(S.unresolvedName(text(state, fieldName), tokenSpan(fieldName))),
         });
       }
     }
@@ -1157,9 +1158,8 @@ const parseIf = (state: ParserState): S.SIf => {
   const thenBranch = parseExpr(state);
   expect(state, TokenKind.Else, "expected 'else'");
   const elseBranch = parseExpr(state);
-  const end = elseBranch.span?.end ?? state.current[1];
 
-  return S.sif(cond, thenBranch, elseBranch, span(start, end));
+  return S.sif(cond, thenBranch, elseBranch, span(start, elseBranch.span.end));
 };
 
 const parseMatch = (state: ParserState): S.SMatch => {
@@ -1177,7 +1177,7 @@ const parseMatch = (state: ParserState): S.SMatch => {
     while (at(state, TokenKind.Bar)) {
       advance(state);
       const right = parsePattern(state);
-      pattern = S.spor(pattern, right);
+      pattern = S.spor(pattern, right, span(pattern.span.start, right.span.end));
     }
 
     // Guard: when pattern if condition -> body
@@ -1259,7 +1259,7 @@ const parseLetExpr = (state: ParserState): S.SExpr => {
   }
   // Should not happen in expression context, but handle gracefully
   error(state, "expected 'in' after let binding");
-  return S.sint(0);
+  return S.sint(0, span(state.current[1], state.current[2]));
 };
 
 // =============================================================================
@@ -1273,7 +1273,7 @@ const parsePattern = (state: ParserState): S.SPattern => {
   if (at(state, TokenKind.ColonColon)) {
     advance(state);
     const right = parsePattern(state);
-    return S.spcons(left, right);
+    return S.spcons(left, right, span(left.span.start, right.span.end));
   }
 
   // As pattern: pattern as name
@@ -1281,7 +1281,11 @@ const parsePattern = (state: ParserState): S.SPattern => {
     advance(state);
     const nameToken = expect(state, TokenKind.Lower, "expected name after 'as'");
     if (nameToken) {
-      return S.spas(text(state, nameToken), left, span(left.span?.start ?? 0, nameToken[2]));
+      return S.spas(
+        S.unresolvedName(text(state, nameToken), tokenSpan(nameToken)),
+        left,
+        span(left.span.start, nameToken[2]),
+      );
     }
   }
 
@@ -1318,7 +1322,7 @@ const parsePatternAtom = (state: ParserState): S.SPattern => {
 
     case TokenKind.Lower:
       advance(state);
-      return S.spvar(text(state, token), tokenSpan(token));
+      return S.spvar(S.unresolvedName(text(state, token), tokenSpan(token)));
 
     case TokenKind.Upper: {
       advance(state);
@@ -1425,7 +1429,7 @@ const parsePatternAtom = (state: ParserState): S.SPattern => {
             fields.push({ name, pattern });
           } else {
             // Punning: { x } means { x = x }
-            fields.push({ name, pattern: S.spvar(name, tokenSpan(fieldName)) });
+            fields.push({ name, pattern: S.spvar(S.unresolvedName(name, tokenSpan(fieldName))) });
           }
         } while (at(state, TokenKind.Comma));
       }
@@ -1451,10 +1455,12 @@ const parsePatternAtom = (state: ParserState): S.SPattern => {
       return S.splist(elements, span(start, endToken ? endToken[2] : state.current[1]));
     }
 
-    default:
+    default: {
       error(state, `unexpected token in pattern: ${TokenKind[kind]}`);
+      const errorSpan = tokenSpan(state.current);
       advance(state);
-      return S.spwild();
+      return S.spwild(errorSpan);
+    }
   }
 };
 

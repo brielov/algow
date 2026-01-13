@@ -6,6 +6,7 @@
 
 import type { Diagnostic } from "./diagnostics";
 import { error as diagError, typeMismatch } from "./diagnostics";
+import type { Span } from "./surface";
 import * as C from "./core";
 import type { Name } from "./core";
 import {
@@ -83,10 +84,8 @@ const recordType = (ctx: CheckContext, name: Name, type: Type): void => {
 };
 
 /** Record the instantiated type of an expression by its span position */
-const recordExprType = (ctx: CheckContext, span: C.CExpr["span"], type: Type): void => {
-  if (span) {
-    ctx.exprTypeMap.set(span.start, type);
-  }
+const recordExprType = (ctx: CheckContext, span: Span, type: Type): void => {
+  ctx.exprTypeMap.set(span.start, type);
 };
 
 /**
@@ -145,7 +144,7 @@ const resolveTupleProjections = (ctx: CheckContext, typeVarName: string, subst: 
 // Unification (Section 8.4)
 // =============================================================================
 
-const unify = (ctx: CheckContext, t1: Type, t2: Type, span?: C.CExpr["span"]): Subst => {
+const unify = (ctx: CheckContext, t1: Type, t2: Type, span?: Span): Subst => {
   if (t1.kind === "TVar" && t2.kind === "TVar" && t1.name === t2.name) {
     return new Map();
   }
@@ -308,11 +307,11 @@ const inferExpr = (ctx: CheckContext, env: TypeEnv, expr: C.CExpr): InferResult 
 
 const inferVar = (ctx: CheckContext, env: TypeEnv, expr: C.CVar): InferResult => {
   // Look up by name ID
-  const key = `${expr.name.id}:${expr.name.original}`;
-  const s = env.get(key) ?? env.get(expr.name.original);
+  const key = `${expr.name.id}:${expr.name.text}`;
+  const s = env.get(key) ?? env.get(expr.name.text);
 
   if (!s) {
-    addError(ctx, `Unbound variable: ${expr.name.original}`, expr.span);
+    addError(ctx, `Unbound variable: ${expr.name.text}`, expr.span);
     return [new Map(), freshTypeVar(), []];
   }
 
@@ -353,7 +352,7 @@ const inferApp = (ctx: CheckContext, env: TypeEnv, expr: C.CApp): InferResult =>
 
 const inferAbs = (ctx: CheckContext, env: TypeEnv, expr: C.CAbs): InferResult => {
   const paramType = freshTypeVar();
-  const key = `${expr.param.id}:${expr.param.original}`;
+  const key = `${expr.param.id}:${expr.param.text}`;
   const newEnv = new Map(env);
   newEnv.set(key, mono(paramType));
 
@@ -379,7 +378,7 @@ const inferLet = (ctx: CheckContext, env: TypeEnv, expr: C.CLet): InferResult =>
   const env1 = applySubstEnv(s1, env);
   const generalizedScheme = generalize(env1, t1);
 
-  const key = `${expr.name.id}:${expr.name.original}`;
+  const key = `${expr.name.id}:${expr.name.text}`;
   const newEnv = new Map(env1);
   newEnv.set(key, generalizedScheme);
 
@@ -397,7 +396,7 @@ const inferLetRec = (ctx: CheckContext, env: TypeEnv, expr: C.CLetRec): InferRes
 
   for (const b of expr.bindings) {
     const tv = freshTypeVar();
-    const key = `${b.name.id}:${b.name.original}`;
+    const key = `${b.name.id}:${b.name.text}`;
     bindingTypes.set(key, tv);
     newEnv.set(key, mono(tv));
   }
@@ -407,7 +406,7 @@ const inferLetRec = (ctx: CheckContext, env: TypeEnv, expr: C.CLetRec): InferRes
   const allConstraints: Constraint[] = [];
 
   for (const b of expr.bindings) {
-    const key = `${b.name.id}:${b.name.original}`;
+    const key = `${b.name.id}:${b.name.text}`;
     const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, newEnv), b.value);
     subst = composeSubst(subst, s);
     allConstraints.push(...c);
@@ -420,7 +419,7 @@ const inferLetRec = (ctx: CheckContext, env: TypeEnv, expr: C.CLetRec): InferRes
   // Generalize and update environment
   const finalEnv = applySubstEnv(subst, newEnv);
   for (const b of expr.bindings) {
-    const key = `${b.name.id}:${b.name.original}`;
+    const key = `${b.name.id}:${b.name.text}`;
     const t = applySubst(subst, bindingTypes.get(key)!);
     const generalizedScheme = generalize(finalEnv, t);
     finalEnv.set(key, generalizedScheme);
@@ -803,7 +802,7 @@ const inferPattern = (
         return new Map();
 
       case "CPVar": {
-        const key = `${pat.name.id}:${pat.name.original}`;
+        const key = `${pat.name.id}:${pat.name.text}`;
         bindings.set(key, expected);
         return new Map();
       }
@@ -916,7 +915,7 @@ const inferPattern = (
       }
 
       case "CPAs": {
-        const key = `${pat.name.id}:${pat.name.original}`;
+        const key = `${pat.name.id}:${pat.name.text}`;
         bindings.set(key, expected);
         return infer(expected, pat.pattern);
       }
@@ -1071,7 +1070,7 @@ export const checkProgram = (
   for (const decl of program.decls) {
     if (decl.kind === "CDeclForeign") {
       const type = convertCoreType(decl.type);
-      const key = `${decl.name.id}:${decl.name.original}`;
+      const key = `${decl.name.id}:${decl.name.text}`;
       // Generalize foreign function types to allow polymorphic usage
       // e.g., `encode : a -> string` should instantiate fresh `a` each time
       const freeVars = [...ftv(type)];
@@ -1091,14 +1090,14 @@ export const checkProgram = (
     if (decl.kind === "CDeclLet") {
       const info: BindingInfo = { name: decl.name, value: decl.value, span: decl.span };
       allBindings.push(info);
-      bindingByName.set(decl.name.original, info);
+      bindingByName.set(decl.name.text, info);
     } else if (decl.kind === "CDeclLetRec") {
       // Explicit let rec bindings are already known to be mutually recursive
       // We'll handle them separately to preserve their grouping
       for (const b of decl.bindings) {
         const info: BindingInfo = { name: b.name, value: b.value, span: decl.span };
         allBindings.push(info);
-        bindingByName.set(b.name.original, info);
+        bindingByName.set(b.name.text, info);
       }
     }
   }
@@ -1116,7 +1115,7 @@ export const checkProgram = (
       subst = composeSubst(subst, s);
       allConstraints.push(...c);
 
-      const key = `${binding.name.id}:${binding.name.original}`;
+      const key = `${binding.name.id}:${binding.name.text}`;
       const generalizedScheme = generalize(applySubstEnv(subst, env), t);
       env.set(key, generalizedScheme);
       recordType(ctx, binding.name, applySubst(subst, t));
@@ -1128,14 +1127,14 @@ export const checkProgram = (
       const bindingTypes = new Map<string, Type>();
       for (const b of sccBindings) {
         const tv = freshTypeVar();
-        const key = `${b.name.id}:${b.name.original}`;
+        const key = `${b.name.id}:${b.name.text}`;
         bindingTypes.set(key, tv);
         env.set(key, mono(tv));
       }
 
       // Infer types for all bindings
       for (const b of sccBindings) {
-        const key = `${b.name.id}:${b.name.original}`;
+        const key = `${b.name.id}:${b.name.text}`;
         const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), b.value);
         subst = composeSubst(subst, s);
         allConstraints.push(...c);
@@ -1148,11 +1147,11 @@ export const checkProgram = (
       // Generalize: remove current bindings from env to allow proper generalization
       const outerEnv = applySubstEnv(subst, env);
       for (const b of sccBindings) {
-        const key = `${b.name.id}:${b.name.original}`;
+        const key = `${b.name.id}:${b.name.text}`;
         outerEnv.delete(key);
       }
       for (const b of sccBindings) {
-        const key = `${b.name.id}:${b.name.original}`;
+        const key = `${b.name.id}:${b.name.text}`;
         const t = applySubst(subst, bindingTypes.get(key)!);
         const generalizedScheme = generalize(outerEnv, t);
         env.set(key, generalizedScheme);
@@ -1507,8 +1506,8 @@ const collectFreeVars = (expr: C.CExpr, bound: Set<string> = new Set()): Set<str
   const collect = (e: C.CExpr, localBound: Set<string>): void => {
     switch (e.kind) {
       case "CVar":
-        if (!localBound.has(e.name.original)) {
-          freeVars.add(e.name.original);
+        if (!localBound.has(e.name.text)) {
+          freeVars.add(e.name.text);
         }
         break;
 
@@ -1522,7 +1521,7 @@ const collectFreeVars = (expr: C.CExpr, bound: Set<string> = new Set()): Set<str
 
       case "CAbs": {
         const newBound = new Set(localBound);
-        newBound.add(e.param.original);
+        newBound.add(e.param.text);
         collect(e.body, newBound);
         break;
       }
@@ -1530,7 +1529,7 @@ const collectFreeVars = (expr: C.CExpr, bound: Set<string> = new Set()): Set<str
       case "CLet": {
         collect(e.value, localBound);
         const newBound = new Set(localBound);
-        newBound.add(e.name.original);
+        newBound.add(e.name.text);
         collect(e.body, newBound);
         break;
       }
@@ -1538,7 +1537,7 @@ const collectFreeVars = (expr: C.CExpr, bound: Set<string> = new Set()): Set<str
       case "CLetRec": {
         const newBound = new Set(localBound);
         for (const b of e.bindings) {
-          newBound.add(b.name.original);
+          newBound.add(b.name.text);
         }
         for (const b of e.bindings) {
           collect(b.value, newBound);
@@ -1604,7 +1603,7 @@ const collectPatternBindings = (pattern: C.CPattern, bound: Set<string>): void =
     case "CPLit":
       break;
     case "CPVar":
-      bound.add(pattern.name.original);
+      bound.add(pattern.name.text);
       break;
     case "CPCon":
       for (const arg of pattern.args) {
@@ -1622,7 +1621,7 @@ const collectPatternBindings = (pattern: C.CPattern, bound: Set<string>): void =
       }
       break;
     case "CPAs":
-      bound.add(pattern.name.original);
+      bound.add(pattern.name.text);
       collectPatternBindings(pattern.pattern, bound);
       break;
     case "CPOr":
@@ -1636,14 +1635,14 @@ const collectPatternBindings = (pattern: C.CPattern, bound: Set<string>): void =
  * Returns a map from binding name to the set of binding names it depends on.
  */
 const buildDependencyGraph = (bindings: readonly BindingInfo[]): Map<string, Set<string>> => {
-  const bindingNames = new Set(bindings.map((b) => b.name.original));
+  const bindingNames = new Set(bindings.map((b) => b.name.text));
   const graph = new Map<string, Set<string>>();
 
   for (const binding of bindings) {
     const freeVars = collectFreeVars(binding.value);
     // Only include dependencies on other bindings in this group
     const deps = new Set([...freeVars].filter((v) => bindingNames.has(v)));
-    graph.set(binding.name.original, deps);
+    graph.set(binding.name.text, deps);
   }
 
   return graph;
@@ -1728,7 +1727,7 @@ const collectPatternVars = (pattern: C.CPattern): Set<string> => {
       case "CPWild":
         break;
       case "CPVar":
-        vars.add(p.name.original);
+        vars.add(p.name.text);
         break;
       case "CPLit":
         break;
@@ -1748,7 +1747,7 @@ const collectPatternVars = (pattern: C.CPattern): Set<string> => {
         }
         break;
       case "CPAs":
-        vars.add(p.name.original);
+        vars.add(p.name.text);
         collect(p.pattern);
         break;
       case "CPOr":

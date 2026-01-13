@@ -11,7 +11,7 @@
 
 import * as C from "./core";
 import type { Name } from "./core";
-import type { Literal } from "./surface";
+import type { Literal, Span } from "./surface";
 import * as IR from "./ir";
 import {
   type Type,
@@ -63,9 +63,10 @@ const createContext = (
 });
 
 /** Generate a fresh name for temporaries */
+const syntheticSpan: Span = { start: 0, end: 0 };
 const freshName = (ctx: LowerContext, prefix = "_t"): Name => {
   const id = --ctx.varCounter; // Use negative IDs to avoid collision
-  return { id, original: `${prefix}${-id}` };
+  return { id, text: `${prefix}${-id}`, span: syntheticSpan };
 };
 
 // =============================================================================
@@ -79,12 +80,12 @@ const lookupType = (ctx: LowerContext, name: Name): Type => {
     return applySubst(ctx.subst, type);
   }
   // Fallback to type environment
-  const scheme = ctx.typeEnv.get(`${name.id}:${name.original}`);
+  const scheme = ctx.typeEnv.get(`${name.id}:${name.text}`);
   if (scheme) {
     return applySubst(ctx.subst, scheme.type);
   }
   // Unknown type - use a type variable
-  return { kind: "TVar", name: `?${name.original}` };
+  return { kind: "TVar", name: `?${name.text}` };
 };
 
 /** Look up the instantiated type of an expression by its span */
@@ -539,7 +540,7 @@ const collectPatternBindings = (pattern: C.CPattern): Map<string, Name> => {
   const collect = (p: C.CPattern): void => {
     switch (p.kind) {
       case "CPVar":
-        bindings.set(p.name.original, p.name);
+        bindings.set(p.name.text, p.name);
         break;
       case "CPCon":
         p.args.forEach(collect);
@@ -551,7 +552,7 @@ const collectPatternBindings = (pattern: C.CPattern): Map<string, Name> => {
         p.fields.forEach((f) => collect(f.pattern));
         break;
       case "CPAs":
-        bindings.set(p.name.original, p.name);
+        bindings.set(p.name.text, p.name);
         collect(p.pattern);
         break;
       case "CPOr":
@@ -577,7 +578,7 @@ const rewritePatternVars = (pattern: C.CPattern, nameMap: Map<string, Name>): C.
       return pattern;
 
     case "CPVar": {
-      const newName = nameMap.get(pattern.name.original);
+      const newName = nameMap.get(pattern.name.text);
       if (newName) {
         return C.cpvar(newName, pattern.span);
       }
@@ -607,7 +608,7 @@ const rewritePatternVars = (pattern: C.CPattern, nameMap: Map<string, Name>): C.
       );
 
     case "CPAs": {
-      const newName = nameMap.get(pattern.name.original);
+      const newName = nameMap.get(pattern.name.text);
       return C.cpas(
         newName ?? pattern.name,
         rewritePatternVars(pattern.pattern, nameMap),
@@ -1106,8 +1107,8 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
       let jsName = decl.jsName;
 
       // Handle qualified names like "String.length"
-      if (decl.name.original.includes(".")) {
-        const parts = decl.name.original.split(".");
+      if (decl.name.text.includes(".")) {
+        const parts = decl.name.text.split(".");
         module = parts[0]!;
         jsName = parts.slice(1).join(".");
       }

@@ -5,7 +5,8 @@
  * and providing access to symbol information.
  */
 
-import { compileForLSP, type SourceFile } from "../compile";
+import { compileForLSP, type ModuleInfo, type SourceFile } from "../compile";
+import type { CheckOutput } from "../checker";
 import type { Diagnostic } from "../diagnostics";
 import { typeToString } from "../checker";
 import type { DocumentManager } from "./documents";
@@ -41,6 +42,8 @@ export type AnalysisResult = {
   readonly symbolTable: SymbolTable | null;
   readonly fileRegistry: FileRegistry;
   readonly lineIndices: ReadonlyMap<string, LineIndex>;
+  readonly modules: ModuleInfo;
+  readonly checkOutput: CheckOutput | null;
 };
 
 /** Analyzer that maintains analysis state */
@@ -82,6 +85,8 @@ export const analyze = (analyzer: Analyzer, documents: DocumentManager): Analysi
     symbolTable: compileResult.symbolTable,
     fileRegistry: compileResult.fileRegistry,
     lineIndices,
+    modules: compileResult.modules,
+    checkOutput: compileResult.checkOutput,
   };
 
   analyzer.lastResult = result;
@@ -264,14 +269,93 @@ export const getHoverAtPosition = (
   return { contents, range };
 };
 
+/** Get the word before a position (for detecting Module. completions) */
+const getWordBeforeDot = (content: string, offset: number): string | null => {
+  // Look backwards for a dot
+  if (offset <= 0 || content[offset - 1] !== ".") return null;
+
+  // Find the start of the word before the dot
+  let start = offset - 2;
+  while (start >= 0 && /[a-zA-Z0-9_]/.test(content[start]!)) {
+    start--;
+  }
+  start++;
+
+  const word = content.slice(start, offset - 1);
+  // Module names start with uppercase
+  if (word.length > 0 && /^[A-Z]/.test(word)) {
+    return word;
+  }
+  return null;
+};
+
+/** Check if we're in a pattern context (after 'when' in a match expression) */
+const isInPatternContext = (content: string, offset: number): boolean => {
+  // Look backwards for 'when' keyword, skipping whitespace
+  let pos = offset - 1;
+
+  // Skip any partial identifier being typed
+  while (pos >= 0 && /[a-zA-Z0-9_]/.test(content[pos]!)) {
+    pos--;
+  }
+
+  // Skip whitespace
+  while (pos >= 0 && /\s/.test(content[pos]!)) {
+    pos--;
+  }
+
+  // Check if we're right after 'when'
+  if (pos >= 3) {
+    const beforeCursor = content.slice(pos - 3, pos + 1);
+    if (beforeCursor === "when") {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/** Find the position after 'match' keyword, returns the start of the scrutinee */
+const findMatchScrutineeStart = (content: string, offset: number): number | null => {
+  // Search backwards for 'match' keyword
+  let pos = offset;
+  while (pos >= 5) {
+    // Check for 'match' followed by whitespace
+    if (
+      content.slice(pos - 5, pos) === "match" &&
+      (pos === 5 || /\s/.test(content[pos - 6]!)) &&
+      /\s/.test(content[pos]!)
+    ) {
+      // Skip whitespace after 'match'
+      let scrutineeStart = pos;
+      while (scrutineeStart < content.length && /\s/.test(content[scrutineeStart]!)) {
+        scrutineeStart++;
+      }
+      return scrutineeStart;
+    }
+    pos--;
+  }
+  return null;
+};
+
+/** Extract the base type constructor name from a Type */
+const getTypeConstructorName = (type: import("../types").Type): string | null => {
+  switch (type.kind) {
+    case "TCon":
+      return type.name;
+    case "TApp":
+      return getTypeConstructorName(type.con);
+    default:
+      return null;
+  }
+};
+
 /** Get completions at position */
 export const getCompletionsAtPosition = (
   result: AnalysisResult,
   path: string,
   position: Position,
 ): { label: string; kind: string; detail?: string }[] => {
-  if (!result.symbolTable) return [];
-
   const file = getFileByPath(result.fileRegistry, path);
   if (!file) return [];
 
@@ -279,30 +363,98 @@ export const getCompletionsAtPosition = (
   if (!lineIndex) return [];
 
   const offset = positionToOffset(lineIndex, position);
-  const scope = getScopeAt(result.symbolTable, offset);
 
-  const completions: { label: string; kind: string; detail?: string }[] = [];
-
-  // Add bindings from scope
-  if (scope) {
-    for (const [name, nameId] of scope.bindings) {
-      const def = result.symbolTable.definitions.get(nameId);
-      const detail = def?.scheme ? typeToString(def.scheme.type) : undefined;
-      completions.push({
-        label: name,
-        kind: def?.kind === "function" ? "Function" : "Variable",
-        detail,
-      });
+  // Check if we're completing after "Module."
+  const moduleName = getWordBeforeDot(file.content, offset);
+  if (moduleName) {
+    const moduleMembers = result.modules.get(moduleName);
+    if (moduleMembers) {
+      return Array.from(moduleMembers).map((member) => ({
+        label: member,
+        kind: "Function",
+        detail: `${moduleName}.${member}`,
+      }));
     }
+    // Unknown module, return empty
+    return [];
   }
 
-  // Add constructors
-  for (const [name, ctor] of result.symbolTable.constructors) {
+  // Check if we're in a pattern context (after 'when')
+  if (isInPatternContext(file.content, offset)) {
+    const completions: { label: string; kind: string; detail?: string }[] = [];
+
+    // Try to find the scrutinee type to filter constructors
+    let allowedConstructors: ReadonlySet<string> | null = null;
+
+    if (result.checkOutput) {
+      const scrutineeStart = findMatchScrutineeStart(file.content, offset);
+      if (scrutineeStart !== null) {
+        // Convert local offset to global offset
+        const globalOffset = file.globalOffset + scrutineeStart;
+        const scrutineeType = result.checkOutput.exprTypeMap.get(globalOffset);
+
+        if (scrutineeType) {
+          const typeName = getTypeConstructorName(scrutineeType);
+          if (typeName) {
+            const ctors = result.checkOutput.constructorRegistry.get(typeName);
+            if (ctors) {
+              allowedConstructors = new Set(ctors);
+            }
+          }
+        }
+      }
+    }
+
+    // Add constructors (filtered if we know the type)
+    if (result.symbolTable) {
+      for (const [name, ctor] of result.symbolTable.constructors) {
+        if (allowedConstructors === null || allowedConstructors.has(name)) {
+          completions.push({
+            label: name,
+            kind: "Constructor",
+            detail: ctor.typeName,
+          });
+        }
+      }
+    }
+
+    return completions;
+  }
+
+  // Regular completions
+  const completions: { label: string; kind: string; detail?: string }[] = [];
+
+  // Add module names
+  for (const moduleName of result.modules.keys()) {
     completions.push({
-      label: name,
-      kind: "Constructor",
-      detail: ctor.typeName,
+      label: moduleName,
+      kind: "Module",
     });
+  }
+
+  // Add bindings from scope
+  if (result.symbolTable) {
+    const scope = getScopeAt(result.symbolTable, offset);
+    if (scope) {
+      for (const [name, nameId] of scope.bindings) {
+        const def = result.symbolTable.definitions.get(nameId);
+        const detail = def?.scheme ? typeToString(def.scheme.type) : undefined;
+        completions.push({
+          label: name,
+          kind: def?.kind === "function" ? "Function" : "Variable",
+          detail,
+        });
+      }
+    }
+
+    // Add constructors
+    for (const [name, ctor] of result.symbolTable.constructors) {
+      completions.push({
+        label: name,
+        kind: "Constructor",
+        detail: ctor.typeName,
+      });
+    }
   }
 
   return completions;

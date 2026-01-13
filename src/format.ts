@@ -151,22 +151,18 @@ const formatProgram = (ctx: FormatContext, program: SProgram): string => {
   const lines: string[] = [];
 
   for (const decl of program.decls) {
-    if (decl.span) {
-      const comments = getCommentsBefore(ctx, decl.span.start);
-      for (const c of comments) {
-        lines.push(c);
-      }
+    const comments = getCommentsBefore(ctx, decl.span.start);
+    for (const c of comments) {
+      lines.push(c);
     }
     lines.push(formatDecl(ctx, decl, 0));
     lines.push("");
   }
 
   if (program.expr) {
-    if (program.expr.span) {
-      const comments = getCommentsBefore(ctx, program.expr.span.start);
-      for (const c of comments) {
-        lines.push(c);
-      }
+    const comments = getCommentsBefore(ctx, program.expr.span.start);
+    for (const c of comments) {
+      lines.push(c);
     }
     lines.push(formatExpr(ctx, program.expr, 0, Prec.Lowest));
   }
@@ -215,23 +211,25 @@ const formatDecl = (ctx: FormatContext, decl: SDecl, level: number): string => {
     case "SDeclLet": {
       const value = formatExpr(ctx, decl.value, 0, Prec.Lowest);
       const indentedValue = indentLines(value, level + 1);
-      return `${ind(level)}let ${decl.name} =\n${ind(level + 1)}${indentedValue}`;
+      return `${ind(level)}let ${decl.name.text} =\n${ind(level + 1)}${indentedValue}`;
     }
 
     case "SDeclLetRec": {
       const [first, ...rest] = decl.bindings;
       if (!first) return "";
       const lines = [
-        `${ind(level)}let rec ${first.name} = ${formatExpr(ctx, first.value, level, Prec.Lowest)}`,
+        `${ind(level)}let rec ${first.name.text} = ${formatExpr(ctx, first.value, level, Prec.Lowest)}`,
       ];
       for (const b of rest) {
-        lines.push(`${ind(level)}and ${b.name} = ${formatExpr(ctx, b.value, level, Prec.Lowest)}`);
+        lines.push(
+          `${ind(level)}and ${b.name.text} = ${formatExpr(ctx, b.value, level, Prec.Lowest)}`,
+        );
       }
       return lines.join("\n");
     }
 
     case "SDeclForeign":
-      return `${ind(level)}foreign ${decl.name} : ${formatType(decl.type)}`;
+      return `${ind(level)}foreign ${decl.name.text} : ${formatType(decl.type)}`;
 
     case "SDeclModule": {
       const lines = [`${ind(level)}module ${decl.name}`];
@@ -317,7 +315,7 @@ const isMultilineExpr = (expr: SExpr): boolean => {
 const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string => {
   switch (expr.kind) {
     case "SVar":
-      return expr.name;
+      return expr.name.text;
 
     case "SLit":
       return formatLiteral(expr.value);
@@ -329,7 +327,7 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
       return formatApp(ctx, expr, level);
 
     case "SAbs": {
-      const params = expr.params.map((p) => p.name).join(" ");
+      const params = expr.params.map((p) => p.name.text).join(" ");
       // Put complex bodies on new line
       if (isMultilineExpr(expr.body)) {
         const body = formatExpr(ctx, expr.body, level + 1, Prec.Lowest);
@@ -341,20 +339,20 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
 
     case "SLet": {
       // Emit comments before the let binding's body
-      const bodyComments = emitCommentsBefore(ctx, expr.body.span?.start, level);
+      const bodyComments = emitCommentsBefore(ctx, expr.body.span.start, level);
       const value = formatExpr(ctx, expr.value, level, Prec.Lowest);
       const body = formatExpr(ctx, expr.body, level, Prec.Lowest);
-      return `let ${expr.name} = ${value} in\n${bodyComments}${ind(level)}${body}`;
+      return `let ${expr.name.text} = ${value} in\n${bodyComments}${ind(level)}${body}`;
     }
 
     case "SLetRec": {
       const [first, ...rest] = expr.bindings;
       if (!first) return formatExpr(ctx, expr.body, level, Prec.Lowest);
-      let result = `let rec ${first.name} = ${formatExpr(ctx, first.value, level, Prec.Lowest)}`;
+      let result = `let rec ${first.name.text} = ${formatExpr(ctx, first.value, level, Prec.Lowest)}`;
       for (const b of rest) {
-        result += `\n${ind(level)}and ${b.name} = ${formatExpr(ctx, b.value, level, Prec.Lowest)}`;
+        result += `\n${ind(level)}and ${b.name.text} = ${formatExpr(ctx, b.value, level, Prec.Lowest)}`;
       }
-      const bodyComments = emitCommentsBefore(ctx, expr.body.span?.start, level);
+      const bodyComments = emitCommentsBefore(ctx, expr.body.span.start, level);
       result += `\n${ind(level)}in\n${bodyComments}${ind(level)}${formatExpr(ctx, expr.body, level, Prec.Lowest)}`;
       return result;
     }
@@ -478,7 +476,7 @@ const formatPattern = (pat: SPattern): string => {
     case "SPWild":
       return "_";
     case "SPVar":
-      return pat.name;
+      return pat.name.text;
     case "SPLit":
       return formatLiteral(pat.value);
     case "SPCon":
@@ -490,7 +488,7 @@ const formatPattern = (pat: SPattern): string => {
       if (pat.fields.length === 0) return "{}";
       const fields = pat.fields
         .map((f) =>
-          f.pattern.kind === "SPVar" && f.pattern.name === f.name
+          f.pattern.kind === "SPVar" && f.pattern.name.text === f.name
             ? f.name
             : `${f.name} = ${formatPattern(f.pattern)}`,
         )
@@ -498,7 +496,7 @@ const formatPattern = (pat: SPattern): string => {
       return `{ ${fields} }`;
     }
     case "SPAs":
-      return `${formatPatternAtom(pat.pattern)} as ${pat.name}`;
+      return `${formatPatternAtom(pat.pattern)} as ${pat.name.text}`;
     case "SPOr":
       return `${formatPattern(pat.left)} | ${formatPattern(pat.right)}`;
     case "SPCons":

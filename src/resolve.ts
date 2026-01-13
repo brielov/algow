@@ -67,13 +67,15 @@ const createContext = (
   lsp,
 });
 
+const syntheticSpan: Span = { start: 0, end: 0 };
+
 const extendEnv = (
   ctx: ResolveContext,
   original: string,
   kind: SymbolKind = "variable",
-  span?: C.CExpr["span"],
+  span?: Span,
 ): [ResolveContext, Name] => {
-  const name = freshName(original);
+  const name = freshName(original, span ?? syntheticSpan);
   const newEnv = new Map(ctx.env);
   newEnv.set(original, name);
 
@@ -97,18 +99,18 @@ const extendEnvMany = (
   ctx: ResolveContext,
   originals: readonly string[],
   kind: SymbolKind = "variable",
-  spans?: readonly (C.CExpr["span"] | undefined)[],
+  spans?: readonly (Span | undefined)[],
 ): [ResolveContext, Name[]] => {
   const newEnv = new Map(ctx.env);
   const names: Name[] = [];
   for (let i = 0; i < originals.length; i++) {
     const original = originals[i]!;
-    const name = freshName(original);
+    const span = spans?.[i];
+    const name = freshName(original, span ?? syntheticSpan);
     newEnv.set(original, name);
     names.push(name);
 
     // Track definition for LSP
-    const span = spans?.[i];
     if (ctx.lsp && span) {
       const location = spanToLocation(ctx.lsp.fileRegistry, span);
       if (location) {
@@ -143,7 +145,7 @@ const lookup = (ctx: ResolveContext, original: string, span?: C.CExpr["span"]): 
   // Check if it's a constructor
   if (ctx.constructors.has(original)) {
     // Constructors don't need unique IDs, they're identified by name
-    return { id: -1, original };
+    return { id: -1, text: original, span: span ?? syntheticSpan };
   }
 
   // Unbound variable error
@@ -175,7 +177,7 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
       // For qualified names (Module.member), use memberSpan for reference tracking
       // This allows hovering over just the member part to show its type
       const lookupSpan = expr.memberSpan ?? expr.span;
-      const resolved = lookup(ctx, expr.name.original, lookupSpan);
+      const resolved = lookup(ctx, expr.name.text, lookupSpan);
       if (resolved) {
         return C.cvar(resolved, expr.span, expr.moduleSpan, expr.memberSpan);
       }
@@ -190,29 +192,28 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
       return C.capp(resolveExpr(ctx, expr.func), resolveExpr(ctx, expr.arg), expr.span);
 
     case "CAbs": {
-      const [newCtx, param] = extendEnv(ctx, expr.param.original, "parameter", expr.paramSpan);
+      const [newCtx, param] = extendEnv(ctx, expr.param.text, "parameter", expr.paramSpan);
       return C.cabs(param, resolveExpr(newCtx, expr.body), expr.span, expr.paramSpan);
     }
 
     case "CLet": {
       // Resolve value in current context
       const resolvedValue = resolveExpr(ctx, expr.value);
-      // Extend context with binding (pass nameSpan for LSP tracking)
-      const [newCtx, name] = extendEnv(ctx, expr.name.original, "variable", expr.nameSpan);
-      return C.clet(name, resolvedValue, resolveExpr(newCtx, expr.body), expr.span, expr.nameSpan);
+      // Extend context with binding (span embedded in name for LSP tracking)
+      const [newCtx, name] = extendEnv(ctx, expr.name.text, "variable", expr.name.span);
+      return C.clet(name, resolvedValue, resolveExpr(newCtx, expr.body), expr.span);
     }
 
     case "CLetRec": {
       // For recursive let, add all names first (enables mutual recursion)
-      const originals = expr.bindings.map((b) => b.name.original);
-      const nameSpans = expr.bindings.map((b) => b.nameSpan);
-      const [newCtx, names] = extendEnvMany(ctx, originals, "variable", nameSpans);
+      const originals = expr.bindings.map((b) => b.name.text);
+      const spans = expr.bindings.map((b) => b.name.span);
+      const [newCtx, names] = extendEnvMany(ctx, originals, "variable", spans);
 
       // Resolve all values in the extended context
       const resolvedBindings = expr.bindings.map((b, i) => ({
         name: names[i]!,
         value: resolveExpr(newCtx, b.value),
-        nameSpan: b.nameSpan,
       }));
 
       return C.cletrec(resolvedBindings, resolveExpr(newCtx, expr.body), expr.span);
@@ -277,7 +278,7 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
 
 type PatternBinding = {
   name: Name;
-  span?: Span;
+  span: Span;
 };
 
 type PatternResult = {
@@ -291,7 +292,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
       return { pattern, bindings: [] };
 
     case "CPVar": {
-      const name = freshName(pattern.name.original);
+      const name = freshName(pattern.name.text, pattern.name.span);
       return {
         pattern: C.cpvar(name, pattern.span),
         bindings: [{ name, span: pattern.span }],
@@ -309,7 +310,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
 
       // Track constructor reference for LSP
       const conId = ctx.constructorIds.get(resolvedName);
-      if (ctx.lsp && conId !== undefined && pattern.span) {
+      if (ctx.lsp && conId !== undefined) {
         const location = spanToLocation(ctx.lsp.fileRegistry, pattern.span);
         if (location) {
           addReference(ctx.lsp.builder, {
@@ -357,7 +358,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
     }
 
     case "CPAs": {
-      const name = freshName(pattern.name.original);
+      const name = freshName(pattern.name.text, pattern.name.span);
       const inner = resolvePattern(ctx, pattern.pattern);
       return {
         pattern: C.cpas(name, inner.pattern, pattern.span),
@@ -388,15 +389,15 @@ const resolveCase = (ctx: ResolveContext, c: C.CCase): C.CCase => {
   // Extend context with pattern bindings
   const newEnv = new Map(ctx.env);
   for (const binding of bindings) {
-    newEnv.set(binding.name.original, binding.name);
+    newEnv.set(binding.name.text, binding.name);
 
     // Track definition for LSP
-    if (ctx.lsp && binding.span) {
+    if (ctx.lsp) {
       const location = spanToLocation(ctx.lsp.fileRegistry, binding.span);
       if (location) {
         addDefinition(ctx.lsp.builder, {
           nameId: binding.name.id,
-          name: binding.name.original,
+          name: binding.name.text,
           kind: "pattern-binding",
           location,
         });
@@ -455,31 +456,24 @@ export const resolveProgram = (
         // Register constructors and types
         if (ctx.types.has(decl.name)) {
           ctx.diagnostics.push(
-            diagError(
-              decl.span?.start ?? 0,
-              decl.span?.end ?? 0,
-              `Duplicate type definition: ${decl.name}`,
-            ),
+            diagError(decl.span.start, decl.span.end, `Duplicate type definition: ${decl.name}`),
           );
         }
         const newConstructors = new Set(ctx.constructors);
         const newConstructorIds = new Map(ctx.constructorIds);
-        for (const con of decl.constructors) {
+        for (let tag = 0; tag < decl.constructors.length; tag++) {
+          const con = decl.constructors[tag]!;
           if (ctx.constructors.has(con.name)) {
             ctx.diagnostics.push(
-              diagError(
-                decl.span?.start ?? 0,
-                decl.span?.end ?? 0,
-                `Duplicate constructor: ${con.name}`,
-              ),
+              diagError(decl.span.start, decl.span.end, `Duplicate constructor: ${con.name}`),
             );
           }
           newConstructors.add(con.name);
 
           // Create nameId for constructor and track for LSP
-          const conName = freshName(con.name);
+          const conName = freshName(con.name, con.span);
           newConstructorIds.set(con.name, conName.id);
-          if (ctx.lsp && con.span) {
+          if (ctx.lsp) {
             const location = spanToLocation(ctx.lsp.fileRegistry, con.span);
             if (location) {
               addDefinition(ctx.lsp.builder, {
@@ -489,6 +483,15 @@ export const resolveProgram = (
                 location,
               });
             }
+            // Also add to constructors map for completions
+            ctx.lsp.builder.constructors.set(con.name, {
+              name: con.name,
+              qualifiedName: con.name,
+              typeName: decl.name,
+              tag,
+              arity: con.fields.length,
+              location: location ?? undefined,
+            });
           }
         }
         const newTypes = new Set(ctx.types);
@@ -503,16 +506,15 @@ export const resolveProgram = (
       }
 
       case "CDeclLet": {
-        const name = freshName(decl.name.original);
-        bindingNames.set(decl.name.original, name);
-        // Track definition for LSP (use nameSpan for precise hover, fallback to full span)
-        const letDefSpan = decl.nameSpan ?? decl.span;
-        if (ctx.lsp && letDefSpan) {
-          const location = spanToLocation(ctx.lsp.fileRegistry, letDefSpan);
+        const name = freshName(decl.name.text, decl.name.span);
+        bindingNames.set(decl.name.text, name);
+        // Track definition for LSP (name now includes span)
+        if (ctx.lsp) {
+          const location = spanToLocation(ctx.lsp.fileRegistry, decl.name.span);
           if (location) {
             addDefinition(ctx.lsp.builder, {
               nameId: name.id,
-              name: decl.name.original,
+              name: decl.name.text,
               kind: "function",
               location,
             });
@@ -523,16 +525,15 @@ export const resolveProgram = (
 
       case "CDeclLetRec":
         for (const b of decl.bindings) {
-          const name = freshName(b.name.original);
-          bindingNames.set(b.name.original, name);
-          // Track definition for LSP (use nameSpan for precise hover)
-          const recDefSpan = b.nameSpan ?? b.value.span;
-          if (ctx.lsp && recDefSpan) {
-            const location = spanToLocation(ctx.lsp.fileRegistry, recDefSpan);
+          const name = freshName(b.name.text, b.name.span);
+          bindingNames.set(b.name.text, name);
+          // Track definition for LSP (name now includes span)
+          if (ctx.lsp) {
+            const location = spanToLocation(ctx.lsp.fileRegistry, b.name.span);
             if (location) {
               addDefinition(ctx.lsp.builder, {
                 nameId: name.id,
-                name: b.name.original,
+                name: b.name.text,
                 kind: "function",
                 location,
               });
@@ -542,16 +543,15 @@ export const resolveProgram = (
         break;
 
       case "CDeclForeign": {
-        const name = freshName(decl.name.original);
-        bindingNames.set(decl.name.original, name);
-        // Track definition for LSP (use nameSpan for precise hover, fallback to full span)
-        const foreignDefSpan = decl.nameSpan ?? decl.span;
-        if (ctx.lsp && foreignDefSpan) {
-          const location = spanToLocation(ctx.lsp.fileRegistry, foreignDefSpan);
+        const name = freshName(decl.name.text, decl.name.span);
+        bindingNames.set(decl.name.text, name);
+        // Track definition for LSP (name now includes span)
+        if (ctx.lsp) {
+          const location = spanToLocation(ctx.lsp.fileRegistry, decl.name.span);
           if (location) {
             addDefinition(ctx.lsp.builder, {
               nameId: name.id,
-              name: decl.name.original,
+              name: decl.name.text,
               kind: "foreign",
               location,
             });
@@ -582,15 +582,15 @@ export const resolveProgram = (
         break;
 
       case "CDeclLet": {
-        const name = bindingNames.get(decl.name.original)!;
+        const name = bindingNames.get(decl.name.text)!;
         const resolvedValue = resolveExpr(ctx, decl.value);
 
         // Track constructor aliases for use declarations
         if (decl.value.kind === "CCon") {
           const newConstructors = new Set(ctx.constructors);
-          newConstructors.add(decl.name.original);
+          newConstructors.add(decl.name.text);
           const newAliases = new Map(ctx.constructorAliases);
-          newAliases.set(decl.name.original, decl.value.name);
+          newAliases.set(decl.name.text, decl.value.name);
           ctx = { ...ctx, constructors: newConstructors, constructorAliases: newAliases };
         }
 
@@ -600,7 +600,7 @@ export const resolveProgram = (
 
       case "CDeclLetRec": {
         const resolvedBindings = decl.bindings.map((b) => ({
-          name: bindingNames.get(b.name.original)!,
+          name: bindingNames.get(b.name.text)!,
           value: resolveExpr(ctx, b.value),
         }));
         resolvedDecls.push(C.cdeclletrec(resolvedBindings, decl.span));
@@ -608,7 +608,7 @@ export const resolveProgram = (
       }
 
       case "CDeclForeign": {
-        const name = bindingNames.get(decl.name.original)!;
+        const name = bindingNames.get(decl.name.text)!;
         resolvedDecls.push(
           C.cdeclforeign(name, decl.module, decl.jsName, decl.type, decl.isAsync, decl.span),
         );
@@ -640,7 +640,7 @@ export const resolveProgram = (
 export const createPreludeEnv = (names: readonly string[]): Map<string, Name> => {
   const env = new Map<string, Name>();
   for (const name of names) {
-    env.set(name, freshName(name));
+    env.set(name, freshName(name, syntheticSpan));
   }
   return env;
 };
