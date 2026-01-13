@@ -1,29 +1,38 @@
 {
   "name": "algow",
   "displayName": "Algow",
-  "description": "Language support for Algow - a statically-typed ML-like language",
   "version": "0.1.0",
-  "publisher": "algow",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/brielov/algow"
-  },
-  "engines": {
-    "vscode": "^1.85.0"
-  },
+  "description": "Language support for Algow - a statically-typed ML-like language",
   "categories": [
     "Programming Languages"
   ],
   "keywords": [
     "algow",
-    "ml",
     "functional",
+    "ml",
     "type-inference"
   ],
-  "activationEvents": [
-    "onLanguage:algow"
-  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brielov/algow"
+  },
+  "publisher": "algow",
   "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.3.0"
+  },
   "contributes": {
     "languages": [
       {
@@ -71,19 +80,10 @@
       }
     }
   },
-  "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "package": "vsce package"
-  },
-  "dependencies": {
-    "vscode-languageclient": "^9.0.1"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "@types/vscode": "^1.85.0",
-    "typescript": "^5.3.0",
-    "@vscode/vsce": "^2.22.0"
+  "activationEvents": [
+    "onLanguage:algow"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
   }
 }

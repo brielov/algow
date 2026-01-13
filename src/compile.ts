@@ -18,16 +18,7 @@ import { createFileRegistryBuilder, freezeFileRegistry, registerFile } from "./l
 import { optimize } from "./optimize";
 import { parse } from "./parser";
 import { resolveProgram } from "./resolve";
-import type {
-  SCase,
-  SDecl,
-  SDoStmt,
-  SExpr,
-  SPattern,
-  SProgram,
-  Span,
-  SType,
-} from "./surface";
+import type { SCase, SDecl, SDoStmt, SExpr, SPattern, SProgram, Span, SType } from "./surface";
 import { applySubst, type Scheme, type Type } from "./types";
 
 // Re-export Target type and helpers
@@ -679,9 +670,14 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
   const checkResult = checkProgram(resolveResult.program);
   allDiagnostics.push(...checkResult.diagnostics);
 
-  // Enrich symbol table with type information
+  // Enrich symbol table with type information (apply final substitution to resolve type vars)
   const symbolTable = resolveResult.symbolTable
-    ? enrichWithTypes(resolveResult.symbolTable, checkResult.typeMap, checkResult.typeEnv)
+    ? enrichWithTypes(
+        resolveResult.symbolTable,
+        checkResult.typeMap,
+        checkResult.typeEnv,
+        checkResult.subst,
+      )
     : null;
 
   return {

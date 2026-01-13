@@ -679,10 +679,18 @@ const parseTypeApp = (state: ParserState): S.SType | null => {
   return left;
 };
 
+// Built-in type names that are lowercase but should be type constructors
+const BUILTIN_TYPE_NAMES = new Set(["int", "float", "string", "char", "bool", "unit"]);
+
 const parseTypeAtom = (state: ParserState): S.SType | null => {
   if (at(state, TokenKind.Lower)) {
     const token = advance(state);
-    return S.stvar(text(state, token), tokenSpan(token));
+    const name = text(state, token);
+    // Built-in types are constructors, not variables
+    if (BUILTIN_TYPE_NAMES.has(name)) {
+      return S.stcon(name, tokenSpan(token));
+    }
+    return S.stvar(name, tokenSpan(token));
   }
 
   if (at(state, TokenKind.Upper)) {

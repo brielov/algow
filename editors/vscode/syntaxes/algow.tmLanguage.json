@@ -25,9 +25,7 @@
           "name": "comment.block.algow",
           "begin": "\\{-",
           "end": "-\\}",
-          "patterns": [
-            { "include": "#comments" }
-          ]
+          "patterns": [{ "include": "#comments" }]
         }
       ]
     },

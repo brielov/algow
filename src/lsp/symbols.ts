@@ -5,7 +5,7 @@
  * and scope information for LSP features.
  */
 
-import type { Scheme, Type } from "../types";
+import { applySubst, type Scheme, type Subst, type Type } from "../types";
 
 // =============================================================================
 // Location Types
@@ -166,26 +166,34 @@ export const freezeSymbolTable = (builder: SymbolTableBuilder): SymbolTable => (
 // Enrichment with Type Information
 // =============================================================================
 
-/** Enrich symbol definitions with type schemes */
+/** Enrich symbol definitions with type schemes, applying final substitution */
 export const enrichWithTypes = (
   table: SymbolTable,
   typeMap: ReadonlyMap<number, Type>,
   typeEnv: ReadonlyMap<string, Scheme>,
+  subst: Subst,
 ): SymbolTable => {
   const enrichedDefs = new Map<number, SymbolDefinition>();
 
   for (const [nameId, def] of table.definitions) {
     // Try to find scheme in typeEnv (keyed as "{id}:{name}")
     const schemeKey = `${nameId}:${def.name}`;
-    const scheme = typeEnv.get(schemeKey);
+    const envScheme = typeEnv.get(schemeKey);
 
-    if (scheme) {
+    if (envScheme) {
+      // Apply substitution to resolve type variables
+      const resolvedType = applySubst(subst, envScheme.type);
+      const scheme: Scheme = { ...envScheme, type: resolvedType };
       enrichedDefs.set(nameId, { ...def, scheme });
     } else {
       // Fallback: use typeMap if available
       const type = typeMap.get(nameId);
       if (type) {
-        enrichedDefs.set(nameId, { ...def, scheme: { vars: [], constraints: [], type } });
+        const resolvedType = applySubst(subst, type);
+        enrichedDefs.set(nameId, {
+          ...def,
+          scheme: { vars: [], constraints: [], type: resolvedType },
+        });
       } else {
         enrichedDefs.set(nameId, def);
       }

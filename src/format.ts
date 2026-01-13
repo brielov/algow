@@ -157,7 +157,7 @@ const formatProgram = (ctx: FormatContext, program: SProgram): string => {
         lines.push(c);
       }
     }
-    lines.push(formatDecl(decl, 0));
+    lines.push(formatDecl(ctx, decl, 0));
     lines.push("");
   }
 
@@ -168,7 +168,7 @@ const formatProgram = (ctx: FormatContext, program: SProgram): string => {
         lines.push(c);
       }
     }
-    lines.push(formatExpr(program.expr, 0, Prec.Lowest));
+    lines.push(formatExpr(ctx, program.expr, 0, Prec.Lowest));
   }
 
   // Remaining comments
@@ -199,7 +199,7 @@ const indentLines = (text: string, level: number): string => {
     .join("\n");
 };
 
-const formatDecl = (decl: SDecl, level: number): string => {
+const formatDecl = (ctx: FormatContext, decl: SDecl, level: number): string => {
   switch (decl.kind) {
     case "SDeclType": {
       const params = decl.params.length > 0 ? " " + decl.params.join(" ") : "";
@@ -213,7 +213,7 @@ const formatDecl = (decl: SDecl, level: number): string => {
     }
 
     case "SDeclLet": {
-      const value = formatExpr(decl.value, 0, Prec.Lowest);
+      const value = formatExpr(ctx, decl.value, 0, Prec.Lowest);
       const indentedValue = indentLines(value, level + 1);
       return `${ind(level)}let ${decl.name} =\n${ind(level + 1)}${indentedValue}`;
     }
@@ -222,10 +222,10 @@ const formatDecl = (decl: SDecl, level: number): string => {
       const [first, ...rest] = decl.bindings;
       if (!first) return "";
       const lines = [
-        `${ind(level)}let rec ${first.name} = ${formatExpr(first.value, level, Prec.Lowest)}`,
+        `${ind(level)}let rec ${first.name} = ${formatExpr(ctx, first.value, level, Prec.Lowest)}`,
       ];
       for (const b of rest) {
-        lines.push(`${ind(level)}and ${b.name} = ${formatExpr(b.value, level, Prec.Lowest)}`);
+        lines.push(`${ind(level)}and ${b.name} = ${formatExpr(ctx, b.value, level, Prec.Lowest)}`);
       }
       return lines.join("\n");
     }
@@ -239,7 +239,7 @@ const formatDecl = (decl: SDecl, level: number): string => {
         lines.push(`${ind(level + 1)}use ${use}`);
       }
       for (const d of decl.decls) {
-        lines.push(formatDecl(d, level + 1));
+        lines.push(formatDecl(ctx, d, level + 1));
       }
       lines.push(`${ind(level)}end`);
       return lines.join("\n");
@@ -262,8 +262,18 @@ const formatConDecl = (con: SConDecl): string => {
 // Expression Formatting
 // =============================================================================
 
-const formatExpr = (expr: SExpr, level: number, outerPrec: Prec): string => {
-  const result = formatExprInner(expr, level);
+/**
+ * Get comments before a position and format them with proper indentation.
+ */
+const emitCommentsBefore = (ctx: FormatContext, pos: number | undefined, level: number): string => {
+  if (pos === undefined) return "";
+  const comments = getCommentsBefore(ctx, pos);
+  if (comments.length === 0) return "";
+  return comments.map((c) => `${ind(level)}${c}\n`).join("");
+};
+
+const formatExpr = (ctx: FormatContext, expr: SExpr, level: number, outerPrec: Prec): string => {
+  const result = formatExprInner(ctx, expr, level);
   const innerPrec = exprPrec(expr);
   return innerPrec < outerPrec ? `(${result})` : result;
 };
@@ -304,7 +314,7 @@ const isMultilineExpr = (expr: SExpr): boolean => {
   }
 };
 
-const formatExprInner = (expr: SExpr, level: number): string => {
+const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string => {
   switch (expr.kind) {
     case "SVar":
       return expr.name;
@@ -316,84 +326,87 @@ const formatExprInner = (expr: SExpr, level: number): string => {
       return expr.name;
 
     case "SApp":
-      return formatApp(expr, level);
+      return formatApp(ctx, expr, level);
 
     case "SAbs": {
       const params = expr.params.join(" ");
       // Put complex bodies on new line
       if (isMultilineExpr(expr.body)) {
-        const body = formatExpr(expr.body, level + 1, Prec.Lowest);
+        const body = formatExpr(ctx, expr.body, level + 1, Prec.Lowest);
         return `${params} ->\n${ind(level + 1)}${body}`;
       }
-      const body = formatExpr(expr.body, level, Prec.Lowest);
+      const body = formatExpr(ctx, expr.body, level, Prec.Lowest);
       return `${params} -> ${body}`;
     }
 
     case "SLet": {
-      const value = formatExpr(expr.value, level, Prec.Lowest);
-      const body = formatExpr(expr.body, level, Prec.Lowest);
-      return `let ${expr.name} = ${value} in\n${ind(level)}${body}`;
+      // Emit comments before the let binding's body
+      const bodyComments = emitCommentsBefore(ctx, expr.body.span?.start, level);
+      const value = formatExpr(ctx, expr.value, level, Prec.Lowest);
+      const body = formatExpr(ctx, expr.body, level, Prec.Lowest);
+      return `let ${expr.name} = ${value} in\n${bodyComments}${ind(level)}${body}`;
     }
 
     case "SLetRec": {
       const [first, ...rest] = expr.bindings;
-      if (!first) return formatExpr(expr.body, level, Prec.Lowest);
-      let result = `let rec ${first.name} = ${formatExpr(first.value, level, Prec.Lowest)}`;
+      if (!first) return formatExpr(ctx, expr.body, level, Prec.Lowest);
+      let result = `let rec ${first.name} = ${formatExpr(ctx, first.value, level, Prec.Lowest)}`;
       for (const b of rest) {
-        result += `\n${ind(level)}and ${b.name} = ${formatExpr(b.value, level, Prec.Lowest)}`;
+        result += `\n${ind(level)}and ${b.name} = ${formatExpr(ctx, b.value, level, Prec.Lowest)}`;
       }
-      result += `\n${ind(level)}in\n${ind(level)}${formatExpr(expr.body, level, Prec.Lowest)}`;
+      const bodyComments = emitCommentsBefore(ctx, expr.body.span?.start, level);
+      result += `\n${ind(level)}in\n${bodyComments}${ind(level)}${formatExpr(ctx, expr.body, level, Prec.Lowest)}`;
       return result;
     }
 
     case "SIf": {
-      const cond = formatExpr(expr.cond, level, Prec.Lowest);
-      const thenBr = formatExpr(expr.thenBranch, level, Prec.Lowest);
-      const elseBr = formatExpr(expr.elseBranch, level, Prec.Lowest);
+      const cond = formatExpr(ctx, expr.cond, level, Prec.Lowest);
+      const thenBr = formatExpr(ctx, expr.thenBranch, level, Prec.Lowest);
+      const elseBr = formatExpr(ctx, expr.elseBranch, level, Prec.Lowest);
       return `if ${cond} then ${thenBr} else ${elseBr}`;
     }
 
     case "SMatch": {
-      const scrut = formatExpr(expr.scrutinee, level, Prec.Lowest);
-      const cases = expr.cases.map((c) => formatCase(c, level + 1)).join("\n");
+      const scrut = formatExpr(ctx, expr.scrutinee, level, Prec.Lowest);
+      const cases = expr.cases.map((c) => formatCase(ctx, c, level + 1)).join("\n");
       return `match ${scrut}\n${cases}\n${ind(level)}end`;
     }
 
     case "STuple":
-      return `(${expr.elements.map((e) => formatExpr(e, level, Prec.Lowest)).join(", ")})`;
+      return `(${expr.elements.map((e) => formatExpr(ctx, e, level, Prec.Lowest)).join(", ")})`;
 
     case "SRecord": {
       if (expr.fields.length === 0) return "{}";
       const fields = expr.fields
-        .map((f) => `${f.name} = ${formatExpr(f.value, level, Prec.Lowest)}`)
+        .map((f) => `${f.name} = ${formatExpr(ctx, f.value, level, Prec.Lowest)}`)
         .join(", ");
       return `{ ${fields} }`;
     }
 
     case "SRecordUpdate": {
-      const rec = formatExpr(expr.record, level, Prec.Lowest);
+      const rec = formatExpr(ctx, expr.record, level, Prec.Lowest);
       const fields = expr.fields
-        .map((f) => `${f.name} = ${formatExpr(f.value, level, Prec.Lowest)}`)
+        .map((f) => `${f.name} = ${formatExpr(ctx, f.value, level, Prec.Lowest)}`)
         .join(", ");
       return `{ ${rec} | ${fields} }`;
     }
 
     case "SField":
-      return `${formatExpr(expr.record, level, Prec.Atom)}.${expr.field}`;
+      return `${formatExpr(ctx, expr.record, level, Prec.Atom)}.${expr.field}`;
 
     case "SList":
       if (expr.elements.length === 0) return "[]";
-      return `[${expr.elements.map((e) => formatExpr(e, level, Prec.Lowest)).join(", ")}]`;
+      return `[${expr.elements.map((e) => formatExpr(ctx, e, level, Prec.Lowest)).join(", ")}]`;
 
     case "SPipe":
-      return `${formatExpr(expr.left, level, Prec.Pipe)} |> ${formatExpr(expr.right, level, Prec.Pipe + 1)}`;
+      return `${formatExpr(ctx, expr.left, level, Prec.Pipe)} |> ${formatExpr(ctx, expr.right, level, Prec.Pipe + 1)}`;
 
     case "SCons":
-      return `${formatExpr(expr.head, level, Prec.Cons + 1)} :: ${formatExpr(expr.tail, level, Prec.Cons)}`;
+      return `${formatExpr(ctx, expr.head, level, Prec.Cons + 1)} :: ${formatExpr(ctx, expr.tail, level, Prec.Cons)}`;
 
     case "SBinOp": {
       const prec = binopPrec(expr.op);
-      return `${formatExpr(expr.left, level, prec)} ${expr.op} ${formatExpr(expr.right, level, prec + 1)}`;
+      return `${formatExpr(ctx, expr.left, level, prec)} ${expr.op} ${formatExpr(ctx, expr.right, level, prec + 1)}`;
     }
 
     case "SDo": {
@@ -401,11 +414,11 @@ const formatExprInner = (expr: SExpr, level: number): string => {
         .map((s) => {
           switch (s.kind) {
             case "DoBindPattern":
-              return `${ind(level + 1)}${formatPattern(s.pattern)} <- ${formatExpr(s.expr, level + 1, Prec.Lowest)}`;
+              return `${ind(level + 1)}${formatPattern(s.pattern)} <- ${formatExpr(ctx, s.expr, level + 1, Prec.Lowest)}`;
             case "DoLet":
-              return `${ind(level + 1)}let ${formatPattern(s.pattern)} = ${formatExpr(s.expr, level + 1, Prec.Lowest)}`;
+              return `${ind(level + 1)}let ${formatPattern(s.pattern)} = ${formatExpr(ctx, s.expr, level + 1, Prec.Lowest)}`;
             case "DoExpr":
-              return `${ind(level + 1)}${formatExpr(s.expr, level + 1, Prec.Lowest)}`;
+              return `${ind(level + 1)}${formatExpr(ctx, s.expr, level + 1, Prec.Lowest)}`;
           }
         })
         .join("\n");
@@ -413,7 +426,7 @@ const formatExprInner = (expr: SExpr, level: number): string => {
     }
 
     case "SAnnot":
-      return `(${formatExpr(expr.expr, level, Prec.Lowest)} : ${formatType(expr.type)})`;
+      return `(${formatExpr(ctx, expr.expr, level, Prec.Lowest)} : ${formatType(expr.type)})`;
   }
 };
 
@@ -434,7 +447,7 @@ const formatLiteral = (lit: {
   }
 };
 
-const formatApp = (expr: Extract<SExpr, { kind: "SApp" }>, level: number): string => {
+const formatApp = (ctx: FormatContext, expr: Extract<SExpr, { kind: "SApp" }>, level: number): string => {
   const parts: SExpr[] = [];
   let current: SExpr = expr;
   while (current.kind === "SApp") {
@@ -442,13 +455,13 @@ const formatApp = (expr: Extract<SExpr, { kind: "SApp" }>, level: number): strin
     current = current.func;
   }
   parts.unshift(current);
-  return parts.map((e) => formatExpr(e, level, Prec.Application + 1)).join(" ");
+  return parts.map((e) => formatExpr(ctx, e, level, Prec.Application + 1)).join(" ");
 };
 
-const formatCase = (c: SCase, level: number): string => {
+const formatCase = (ctx: FormatContext, c: SCase, level: number): string => {
   const pat = formatPattern(c.pattern);
-  const guard = c.guard ? ` if ${formatExpr(c.guard, level, Prec.Lowest)}` : "";
-  const body = formatExpr(c.body, level, Prec.Lowest);
+  const guard = c.guard ? ` if ${formatExpr(ctx, c.guard, level, Prec.Lowest)}` : "";
+  const body = formatExpr(ctx, c.body, level, Prec.Lowest);
   return `${ind(level)}when ${pat}${guard} -> ${body}`;
 };
 

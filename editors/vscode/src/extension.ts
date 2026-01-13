@@ -1,11 +1,5 @@
 import * as path from "path";
-import {
-  workspace,
-  window,
-  commands,
-  StatusBarAlignment,
-  type ExtensionContext,
-} from "vscode";
+import { workspace, window, commands, StatusBarAlignment, type ExtensionContext } from "vscode";
 import {
   LanguageClient,
   TransportKind,
@@ -46,7 +40,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Try to use globally installed algow
     serverModule = "algow-lsp";
     window.showWarningMessage(
-      "Algow LSP server not found in workspace. Using global installation if available."
+      "Algow LSP server not found in workspace. Using global installation if available.",
     );
   }
 
@@ -74,12 +68,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
   };
 
   // Create the language client
-  client = new LanguageClient(
-    "algow",
-    "Algow Language Server",
-    serverOptions,
-    clientOptions
-  );
+  client = new LanguageClient("algow", "Algow Language Server", serverOptions, clientOptions);
 
   // Create status bar item
   const statusBarItem = window.createStatusBarItem(StatusBarAlignment.Right, 100);
@@ -96,7 +85,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await client.start();
         window.showInformationMessage("Algow Language Server restarted");
       }
-    })
+    }),
   );
 
   // Start the client
