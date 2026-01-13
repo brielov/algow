@@ -6,21 +6,39 @@
  */
 
 // Import runtime modules as text (works with bun build --compile)
-import base from "./base.js" with { type: "text" };
-import string from "./modules/string.js" with { type: "text" };
-import char from "./modules/char.js" with { type: "text" };
-import int from "./modules/int.js" with { type: "text" };
-import float from "./modules/float.js" with { type: "text" };
-import debug from "./modules/debug.js" with { type: "text" };
-import map from "./modules/map.js" with { type: "text" };
-import set from "./modules/set.js" with { type: "text" };
-import path from "./modules/path.js" with { type: "text" };
-import json from "./modules/json.js" with { type: "text" };
-import http from "./modules/http.js" with { type: "text" };
-import nodeTarget from "./targets/node.js" with { type: "text" };
-import denoTarget from "./targets/deno.js" with { type: "text" };
-import browserTarget from "./targets/browser.js" with { type: "text" };
-import cloudflareTarget from "./targets/cloudflare.js" with { type: "text" };
+// Bun's `with { type: "text" }` imports files as strings, but TypeScript
+// doesn't recognize this, so we cast to string to satisfy the type checker.
+import _base from "./base.js" with { type: "text" };
+import _string from "./modules/string.js" with { type: "text" };
+import _char from "./modules/char.js" with { type: "text" };
+import _int from "./modules/int.js" with { type: "text" };
+import _float from "./modules/float.js" with { type: "text" };
+import _debug from "./modules/debug.js" with { type: "text" };
+import _map from "./modules/map.js" with { type: "text" };
+import _set from "./modules/set.js" with { type: "text" };
+import _path from "./modules/path.js" with { type: "text" };
+import _json from "./modules/json.js" with { type: "text" };
+import _http from "./modules/http.js" with { type: "text" };
+import _nodeTarget from "./targets/node.js" with { type: "text" };
+import _denoTarget from "./targets/deno.js" with { type: "text" };
+import _browserTarget from "./targets/browser.js" with { type: "text" };
+import _cloudflareTarget from "./targets/cloudflare.js" with { type: "text" };
+
+const base = _base as string;
+const string = _string as string;
+const char = _char as string;
+const int = _int as string;
+const float = _float as string;
+const debug = _debug as string;
+const map = _map as string;
+const set = _set as string;
+const path = _path as string;
+const json = _json as string;
+const http = _http as string;
+const nodeTarget = _nodeTarget as string;
+const denoTarget = _denoTarget as string;
+const browserTarget = _browserTarget as string;
+const cloudflareTarget = _cloudflareTarget as string;
 
 export type Target = "node" | "deno" | "browser" | "cloudflare";
 
