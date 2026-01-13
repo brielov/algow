@@ -94,8 +94,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     statusBarItem.text = "$(check) Algow";
   } catch (error) {
     statusBarItem.text = "$(error) Algow";
-    statusBarItem.tooltip = `Algow Language Server failed to start: ${error}`;
-    window.showErrorMessage(`Failed to start Algow Language Server: ${error}`);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    statusBarItem.tooltip = `Algow Language Server failed to start: ${errorMsg}`;
+    window.showErrorMessage(`Failed to start Algow Language Server: ${errorMsg}`);
   }
 }
 

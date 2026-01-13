@@ -586,7 +586,8 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
         if (at(state, TokenKind.LParen)) {
           advance(state);
           const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-          if (paramToken) andParams.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
+          if (paramToken)
+            andParams.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
           if (at(state, TokenKind.Colon)) {
             advance(state);
             parseType(state);

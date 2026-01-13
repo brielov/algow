@@ -329,7 +329,7 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
       return formatApp(ctx, expr, level);
 
     case "SAbs": {
-      const params = expr.params.join(" ");
+      const params = expr.params.map((p) => p.name).join(" ");
       // Put complex bodies on new line
       if (isMultilineExpr(expr.body)) {
         const body = formatExpr(ctx, expr.body, level + 1, Prec.Lowest);

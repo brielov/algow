@@ -493,7 +493,12 @@ export const resolveProgram = (
         }
         const newTypes = new Set(ctx.types);
         newTypes.add(decl.name);
-        ctx = { ...ctx, constructors: newConstructors, constructorIds: newConstructorIds, types: newTypes };
+        ctx = {
+          ...ctx,
+          constructors: newConstructors,
+          constructorIds: newConstructorIds,
+          types: newTypes,
+        };
         break;
       }
 
