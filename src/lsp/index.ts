@@ -7,28 +7,36 @@
 import { createMessageReader, feedData } from "./protocol";
 import { createServer, handleMessage } from "./server";
 
-// Create server with stdout writer
-const server = createServer((data: Buffer) => {
-  process.stdout.write(data);
-});
+/** Start the LSP server with stdio transport. */
+export const startLspServer = (): void => {
+  // Create server with stdout writer
+  const server = createServer((data: Buffer) => {
+    process.stdout.write(data);
+  });
 
-// Create message reader
-const reader = createMessageReader();
+  // Create message reader
+  const reader = createMessageReader();
 
-// Handle stdin data
-process.stdin.on("data", (chunk: Buffer) => {
-  const messages = feedData(reader, chunk);
-  for (const message of messages) {
-    handleMessage(server, message);
-  }
-});
+  // Handle stdin data
+  process.stdin.on("data", (chunk: Buffer) => {
+    const messages = feedData(reader, chunk);
+    for (const message of messages) {
+      handleMessage(server, message);
+    }
+  });
 
-// Handle stdin close
-process.stdin.on("end", () => {
-  process.exit(0);
-});
+  // Handle stdin close
+  process.stdin.on("end", () => {
+    process.exit(0);
+  });
 
-// Prevent unhandled rejection crashes
-process.on("unhandledRejection", (error) => {
-  console.error("Unhandled rejection:", error);
-});
+  // Prevent unhandled rejection crashes
+  process.on("unhandledRejection", (error) => {
+    console.error("Unhandled rejection:", error);
+  });
+};
+
+// Auto-start when run directly (for backwards compatibility with bun run src/lsp/index.ts)
+if (import.meta.main) {
+  startLspServer();
+}

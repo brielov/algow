@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import * as path from "path";
 import { workspace, window, commands, StatusBarAlignment, type ExtensionContext } from "vscode";
 import {
@@ -9,51 +10,71 @@ import {
 
 let client: LanguageClient | undefined;
 
+/** Check if a command exists in PATH */
+const commandExists = (cmd: string): boolean => {
+  try {
+    execSync(`which ${cmd}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Check if a file exists */
+const fileExists = async (filePath: string): Promise<boolean> => {
+  try {
+    const fs = await import("fs");
+    return fs.existsSync(filePath);
+  } catch {
+    return false;
+  }
+};
+
 export async function activate(context: ExtensionContext): Promise<void> {
-  // Find the Algow LSP server
-  // First try the workspace, then fall back to global installation
+  const config = workspace.getConfiguration("algow");
+  const configuredPath = config.get<string>("serverPath");
   const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
 
-  // Look for the LSP server in common locations
-  const serverPaths = [
-    // In the Algow project itself
-    workspaceRoot ? path.join(workspaceRoot, "src", "lsp", "index.ts") : null,
-    // Parent directory (if editing files in a subdirectory of algow)
-    workspaceRoot ? path.join(workspaceRoot, "..", "src", "lsp", "index.ts") : null,
-  ].filter((p): p is string => p !== null);
+  let serverCommand: string;
+  let serverArgs: string[];
+  let useBun = false;
 
-  let serverModule: string | undefined;
+  if (configuredPath) {
+    // Use configured path
+    serverCommand = configuredPath;
+    serverArgs = ["lsp"];
+  } else if (commandExists("algow")) {
+    // Found algow in PATH
+    serverCommand = "algow";
+    serverArgs = ["lsp"];
+  } else {
+    // Development fallback: look for src/lsp/index.ts in workspace
+    const devServerPath = workspaceRoot
+      ? path.join(workspaceRoot, "src", "lsp", "index.ts")
+      : null;
 
-  for (const serverPath of serverPaths) {
-    try {
-      const fs = await import("fs");
-      if (fs.existsSync(serverPath)) {
-        serverModule = serverPath;
-        break;
-      }
-    } catch {
-      // Continue to next path
+    if (devServerPath && (await fileExists(devServerPath))) {
+      serverCommand = "bun";
+      serverArgs = ["run", devServerPath];
+      useBun = true;
+    } else {
+      window.showErrorMessage(
+        "Algow language server not found. Install algow or set algow.serverPath in settings.",
+      );
+      return;
     }
   }
 
-  if (!serverModule) {
-    // Try to use globally installed algow
-    serverModule = "algow-lsp";
-    window.showWarningMessage(
-      "Algow LSP server not found in workspace. Using global installation if available.",
-    );
-  }
-
-  // Server options - run with bun
+  // Server options
   const serverOptions: ServerOptions = {
     run: {
-      command: "bun",
-      args: ["run", serverModule],
+      command: serverCommand,
+      args: serverArgs,
       transport: TransportKind.stdio,
     },
     debug: {
-      command: "bun",
-      args: ["run", serverModule],
+      command: serverCommand,
+      args: serverArgs,
       transport: TransportKind.stdio,
     },
   };
@@ -72,8 +93,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
   // Create status bar item
   const statusBarItem = window.createStatusBarItem(StatusBarAlignment.Right, 100);
-  statusBarItem.text = "$(check) Algow";
-  statusBarItem.tooltip = "Algow Language Server";
+  statusBarItem.text = "$(loading~spin) Algow";
+  statusBarItem.tooltip = useBun ? "Algow (dev mode)" : "Algow Language Server";
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 

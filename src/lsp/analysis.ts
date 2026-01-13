@@ -5,35 +5,19 @@
  * and providing access to symbol information.
  */
 
-import { readFileSync } from "fs";
 import { compileForLSP, type SourceFile } from "../compile";
 import type { Diagnostic } from "../diagnostics";
 import { typeToString } from "../checker";
 import type { DocumentManager } from "./documents";
 import { getSourceFiles } from "./documents";
+import preludeContent from "../../lib/prelude.alg" with { type: "text" };
 
 // =============================================================================
 // Prelude Loading
 // =============================================================================
 
-/** Get the path to the prelude file bundled with the compiler */
-const getPreludePath = (): string => {
-  const url = new URL("../../lib/prelude.alg", import.meta.url);
-  return url.pathname;
-};
-
-/** Cached prelude content */
-let cachedPrelude: SourceFile | null = null;
-
-/** Load the prelude file */
-const loadPrelude = (): SourceFile => {
-  if (cachedPrelude) return cachedPrelude;
-
-  const path = getPreludePath();
-  const content = readFileSync(path, "utf-8");
-  cachedPrelude = { path, content };
-  return cachedPrelude;
-};
+/** The prelude source file (embedded at build time) */
+const prelude: SourceFile = { path: "<prelude>", content: preludeContent };
 import {
   buildLineIndex,
   offsetToPosition,
@@ -79,8 +63,7 @@ export const createAnalyzer = (): Analyzer => ({
 
 /** Run analysis on all open documents */
 export const analyze = (analyzer: Analyzer, documents: DocumentManager): AnalysisResult => {
-  // Load prelude and user sources
-  const prelude = loadPrelude();
+  // Get prelude and user sources
   const userSources = getSourceFiles(documents);
   const sources = [prelude, ...userSources];
 

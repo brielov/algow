@@ -19,10 +19,10 @@
   "publisher": "algow",
   "main": "./out/extension.js",
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "bun run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "package": "bunx @vscode/vsce package"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -67,6 +67,11 @@
     "configuration": {
       "title": "Algow",
       "properties": {
+        "algow.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Algow binary. If not set, the extension will look for 'algow' in PATH."
+        },
         "algow.trace.server": {
           "type": "string",
           "enum": [

@@ -4,6 +4,7 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
+    "build": "bun build src/index.ts --compile --outfile algow",
     "test": "bun run scripts/test-integration.ts",
     "lint": "oxlint --type-aware --type-check --ignore-pattern 'playground/*' --ignore-pattern 'editors/*'",
     "format": "oxfmt --write",

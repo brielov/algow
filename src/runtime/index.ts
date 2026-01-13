@@ -2,8 +2,25 @@
  * Runtime Builder
  *
  * Assembles the runtime from modular components based on the target platform.
- * All runtimes are pre-loaded at module initialization for synchronous access.
+ * All runtimes are imported as text for bundling compatibility.
  */
+
+// Import runtime modules as text (works with bun build --compile)
+import base from "./base.js" with { type: "text" };
+import string from "./modules/string.js" with { type: "text" };
+import char from "./modules/char.js" with { type: "text" };
+import int from "./modules/int.js" with { type: "text" };
+import float from "./modules/float.js" with { type: "text" };
+import debug from "./modules/debug.js" with { type: "text" };
+import map from "./modules/map.js" with { type: "text" };
+import set from "./modules/set.js" with { type: "text" };
+import path from "./modules/path.js" with { type: "text" };
+import json from "./modules/json.js" with { type: "text" };
+import http from "./modules/http.js" with { type: "text" };
+import nodeTarget from "./targets/node.js" with { type: "text" };
+import denoTarget from "./targets/deno.js" with { type: "text" };
+import browserTarget from "./targets/browser.js" with { type: "text" };
+import cloudflareTarget from "./targets/cloudflare.js" with { type: "text" };
 
 export type Target = "node" | "deno" | "browser" | "cloudflare";
 
@@ -15,13 +32,8 @@ export const isValidTarget = (target: string): target is Target => {
   return TARGETS.includes(target as Target);
 };
 
-// Load runtime modules at startup
-const loadModule = (path: string): Promise<string> => {
-  return Bun.file(new URL(path, import.meta.url)).text();
-};
-
-// Pre-load all modules at initialization (top-level await)
-const [
+// Cross-platform modules shared by all targets
+const crossPlatform: string = [
   base,
   string,
   char,
@@ -33,39 +45,14 @@ const [
   path,
   json,
   http,
-  nodeTarget,
-  denoTarget,
-  browserTarget,
-  cloudflareTarget,
-] = await Promise.all([
-  loadModule("./base.js"),
-  loadModule("./modules/string.js"),
-  loadModule("./modules/char.js"),
-  loadModule("./modules/int.js"),
-  loadModule("./modules/float.js"),
-  loadModule("./modules/debug.js"),
-  loadModule("./modules/map.js"),
-  loadModule("./modules/set.js"),
-  loadModule("./modules/path.js"),
-  loadModule("./modules/json.js"),
-  loadModule("./modules/http.js"),
-  loadModule("./targets/node.js"),
-  loadModule("./targets/deno.js"),
-  loadModule("./targets/browser.js"),
-  loadModule("./targets/cloudflare.js"),
-]);
-
-// Cross-platform modules shared by all targets
-const crossPlatform = [base, string, char, int, float, debug, map, set, path, json, http].join(
-  "\n",
-);
+].join("\n");
 
 // Pre-built runtimes for each target
 const RUNTIMES: Record<Target, string> = {
-  node: crossPlatform + "\n" + nodeTarget,
-  deno: crossPlatform + "\n" + denoTarget,
-  browser: crossPlatform + "\n" + browserTarget,
-  cloudflare: crossPlatform + "\n" + cloudflareTarget,
+  node: `${crossPlatform}\n${nodeTarget}`,
+  deno: `${crossPlatform}\n${denoTarget}`,
+  browser: `${crossPlatform}\n${browserTarget}`,
+  cloudflare: `${crossPlatform}\n${cloudflareTarget}`,
 };
 
 /**

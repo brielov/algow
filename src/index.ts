@@ -21,6 +21,7 @@ import {
 } from "./compile";
 import { format } from "./format";
 import type { Diagnostic } from "./diagnostics";
+import preludeContent from "../lib/prelude.alg" with { type: "text" };
 
 // =============================================================================
 // ANSI Colors
@@ -121,12 +122,6 @@ const resolveFiles = async (patterns: string[]): Promise<string[]> => {
   return [...new Set(files)]; // Deduplicate
 };
 
-/** Get the path to the prelude file bundled with the compiler. */
-const getPreludePath = (): string => {
-  const url = new URL("../lib/prelude.alg", import.meta.url);
-  return url.pathname;
-};
-
 /** Read source files from disk. */
 const readSources = async (filePaths: string[]): Promise<SourceFile[]> => {
   const sources: SourceFile[] = [];
@@ -152,8 +147,9 @@ const loadSources = async (patterns: string[]): Promise<SourceFile[]> => {
     process.exit(1);
   }
 
-  const preludePath = getPreludePath();
-  return readSources([preludePath, ...userFiles]);
+  const prelude: SourceFile = { path: "<prelude>", content: preludeContent };
+  const userSources = await readSources(userFiles);
+  return [prelude, ...userSources];
 };
 
 /** Run compilation and handle diagnostics/exit. */
@@ -356,6 +352,14 @@ program
       console.error(`\n${RED}error${RESET}: Some files need formatting`);
       process.exit(1);
     }
+  });
+
+program
+  .command("lsp")
+  .description("Start the Language Server Protocol server")
+  .action(async () => {
+    const { startLspServer } = await import("./lsp");
+    startLspServer();
   });
 
 // Default command for backwards compatibility
