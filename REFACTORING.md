@@ -934,16 +934,16 @@ export type Token = {
 - [x] **6.10** ~~Define `Pass` interface in `src/optimize/pass.ts`~~ Created `src/optimize/types.ts` with shared types instead
 - [x] **6.11** Extract constant folding to `src/optimize/fold.ts` (includes beta reduction, case-of-known, eta reduction)
 - [x] **6.12** ~~Extract beta reduction to `src/optimize/beta.ts`~~ Combined in fold.ts
-- [ ] **6.13** Extract dead code elimination to `src/optimize/dce.ts`
-- [ ] **6.14** Extract tail call optimization to `src/optimize/tco.ts`
+- [x] **6.13** Extract dead code elimination to `src/optimize/dce.ts`
+- [x] **6.14** Extract tail call optimization to `src/optimize/tco.ts`
 - [x] **6.15** ~~Extract case-of-known to `src/optimize/case-of-known.ts`~~ Combined in fold.ts
-- [ ] **6.16** Extract case-of-case to `src/optimize/case-of-case.ts`
-- [ ] **6.17** Extract let floating to `src/optimize/float.ts`
-- [ ] **6.18** Extract function inlining to `src/optimize/inline.ts`
+- [x] **6.16** Extract case-of-case to `src/optimize/case-of-case.ts`
+- [x] **6.17** Extract let floating to `src/optimize/float.ts`
+- [x] **6.18** Extract function inlining to `src/optimize/inline.ts`
 - [x] **6.19** ~~Create common traversal utilities in `src/optimize/traverse.ts`~~ Created `src/optimize/types.ts` and `src/optimize/alpha.ts`
-- [ ] **6.20** Create `src/optimize/index.ts` that orchestrates passes
-- [ ] **6.21** Update imports throughout codebase
-- [ ] **6.22** Run full test suite and fix any issues
+- [x] **6.20** Create `src/optimize/index.ts` that orchestrates passes
+- [x] **6.21** Update imports throughout codebase
+- [x] **6.22** Run full test suite and fix any issues
 
 ### Phase 7: Code Generation Improvements
 

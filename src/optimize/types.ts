@@ -153,7 +153,7 @@ const collectFreeVarsAtom = (atom: IR.Atom, bound: Set<string>, free: Set<string
   }
 };
 
-const collectFreeVarsBinding = (
+export const collectFreeVarsBinding = (
   binding: IR.IRBinding,
   bound: Set<string>,
   free: Set<string>,

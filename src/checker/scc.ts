@@ -164,7 +164,9 @@ export const collectPatternBindings = (pattern: C.CPattern, bound: Set<string>):
  * Build a dependency graph for a set of bindings.
  * Returns a map from binding name to the set of binding names it depends on.
  */
-export const buildDependencyGraph = (bindings: readonly BindingInfo[]): Map<string, Set<string>> => {
+export const buildDependencyGraph = (
+  bindings: readonly BindingInfo[],
+): Map<string, Set<string>> => {
   const bindingNames = new Set(bindings.map((b) => b.name.text));
   const graph = new Map<string, Set<string>>();
 
