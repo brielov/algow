@@ -49,9 +49,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     serverArgs = ["lsp"];
   } else {
     // Development fallback: look for src/lsp/index.ts in workspace
-    const devServerPath = workspaceRoot
-      ? path.join(workspaceRoot, "src", "lsp", "index.ts")
-      : null;
+    const devServerPath = workspaceRoot ? path.join(workspaceRoot, "src", "lsp", "index.ts") : null;
 
     if (devServerPath && (await fileExists(devServerPath))) {
       serverCommand = "bun";
