@@ -24,6 +24,6 @@ $foreign.Float = {
   toString: (a) => String(a),
   fromString: (s) => {
     const n = parseFloat(s);
-    return Number.isNaN(n) ? null : [0, n];
+    return Number.isNaN(n) ? [0] : [1, n];
   },
 };

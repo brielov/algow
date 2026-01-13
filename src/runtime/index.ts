@@ -19,6 +19,13 @@ import _set from "./modules/set.js" with { type: "text" };
 import _path from "./modules/path.js" with { type: "text" };
 import _json from "./modules/json.js" with { type: "text" };
 import _http from "./modules/http.js" with { type: "text" };
+import _bool from "./modules/bool.js" with { type: "text" };
+import _random from "./modules/random.js" with { type: "text" };
+import _duration from "./modules/duration.js" with { type: "text" };
+import _date from "./modules/date.js" with { type: "text" };
+import _time from "./modules/time.js" with { type: "text" };
+import _datetime from "./modules/datetime.js" with { type: "text" };
+import _assert from "./modules/assert.js" with { type: "text" };
 import _nodeTarget from "./targets/node.js" with { type: "text" };
 import _denoTarget from "./targets/deno.js" with { type: "text" };
 import _browserTarget from "./targets/browser.js" with { type: "text" };
@@ -35,6 +42,13 @@ const set = _set as string;
 const path = _path as string;
 const json = _json as string;
 const http = _http as string;
+const bool = _bool as string;
+const random = _random as string;
+const duration = _duration as string;
+const date = _date as string;
+const time = _time as string;
+const datetime = _datetime as string;
+const assert = _assert as string;
 const nodeTarget = _nodeTarget as string;
 const denoTarget = _denoTarget as string;
 const browserTarget = _browserTarget as string;
@@ -63,6 +77,13 @@ const crossPlatform: string = [
   path,
   json,
   http,
+  bool,
+  random,
+  duration,
+  date,
+  time,
+  datetime,
+  assert,
 ].join("\n");
 
 // Pre-built runtimes for each target

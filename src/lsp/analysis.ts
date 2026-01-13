@@ -5,20 +5,13 @@
  * and providing access to symbol information.
  */
 
-import { compileForLSP, type ModuleInfo, type SourceFile } from "../compile";
 import type { CheckOutput } from "../checker";
-import type { Diagnostic } from "../diagnostics";
 import { typeToString } from "../checker";
+import { compileForLSP, type ModuleInfo, type SourceFile } from "../compile";
+import type { Diagnostic } from "../diagnostics";
+import { prelude } from "../prelude";
 import type { DocumentManager } from "./documents";
 import { getSourceFiles } from "./documents";
-import preludeContent from "../../lib/prelude.alg" with { type: "text" };
-
-// =============================================================================
-// Prelude Loading
-// =============================================================================
-
-/** The prelude source file (embedded at build time) */
-const prelude: SourceFile = { path: "<prelude>", content: preludeContent };
 import {
   buildLineIndex,
   offsetToPosition,

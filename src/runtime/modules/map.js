@@ -3,7 +3,7 @@ $foreign.Map = {
   empty: new Map(),
   singleton: (k) => (v) => new Map([[k, v]]),
   insert: (k) => (v) => (m) => new Map(m).set(k, v),
-  lookup: (k) => (m) => (m.has(k) ? [0, m.get(k)] : null),
+  lookup: (k) => (m) => (m.has(k) ? [1, m.get(k)] : [0]),
   delete: (k) => (m) => {
     const m2 = new Map(m);
     m2.delete(k);

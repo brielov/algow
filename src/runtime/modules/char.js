@@ -1,7 +1,7 @@
 // Char module - cross-platform
 $foreign.Char = {
   toInt: (c) => c.charCodeAt(0),
-  fromInt: (n) => (n < 0 || n > 0x10ffff ? null : [0, String.fromCodePoint(n)]),
+  fromInt: (n) => (n < 0 || n > 0x10ffff ? [0] : [1, String.fromCodePoint(n)]),
   toString: (c) => c,
   eq: (a) => (b) => a === b,
   lt: (a) => (b) => a < b,

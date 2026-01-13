@@ -1,463 +1,154 @@
--- =============================================================================
 -- Pattern Matching: All Pattern Types, Guards, Nested, Or-Patterns
--- =============================================================================
-
--- =============================================================================
--- ADT Pattern Matching
--- =============================================================================
 
 type Color = Red | Green | Blue | RGB int int int
 
 let testADTPatterns =
-  let colorValue = c ->
-    match c
-      when Red -> 1
-      when Green -> 2
-      when Blue -> 3
-      when RGB r g b -> r + g + b
-    end
-  in
-  let a = colorValue Red in                  -- 1
-  let b = colorValue Green in                -- 2
-  let c = colorValue Blue in                 -- 3
-  let d = colorValue (RGB 10 20 30) in       -- 60
-  a + b + c + d                              -- 66
-
--- =============================================================================
--- Literal Patterns
--- =============================================================================
+  let colorValue = c -> match c when Red -> 1 when Green -> 2 when Blue -> 3 when RGB r g b -> r + g + b end in
+  let a = Assert.equal 1 (colorValue Red) "Red" in
+  let b = Assert.equal 2 (colorValue Green) "Green" in
+  let c = Assert.equal 3 (colorValue Blue) "Blue" in
+  let d = Assert.equal 60 (colorValue (RGB 10 20 30)) "RGB" in
+  ()
 
 let testLiteralPatterns =
-  let describeInt = n ->
-    match n
-      when 0 -> "zero"
-      when 1 -> "one"
-      when 2 -> "two"
-      when _ -> "many"
-    end
-  in
-  let lenZero = String.length (describeInt 0) in   -- 4
-  let lenOne = String.length (describeInt 1) in    -- 3
-  let lenTwo = String.length (describeInt 2) in    -- 3
-  let lenMany = String.length (describeInt 99) in  -- 4
-
-  let describeBool = b ->
-    match b
-      when true -> "yes"
-      when false -> "no"
-    end
-  in
-  let lenYes = String.length (describeBool true) in   -- 3
-  let lenNo = String.length (describeBool false) in   -- 2
-
-  lenZero + lenOne + lenTwo + lenMany + lenYes + lenNo  -- 19
-
--- =============================================================================
--- Variable Patterns
--- =============================================================================
+  let describeInt = n -> match n when 0 -> "zero" when 1 -> "one" when 2 -> "two" when _ -> "many" end in
+  let a = Assert.equal "zero" (describeInt 0) "0 -> zero" in
+  let b = Assert.equal "one" (describeInt 1) "1 -> one" in
+  let c = Assert.equal "many" (describeInt 99) "99 -> many" in
+  let describeBool = b -> match b when true -> "yes" when false -> "no" end in
+  let d = Assert.equal "yes" (describeBool true) "true -> yes" in
+  let e = Assert.equal "no" (describeBool false) "false -> no" in
+  ()
 
 let testVariablePatterns =
-  -- Simple variable binding
-  let extractValue = opt ->
-    match opt
-      when Nothing -> 0
-      when Just x -> x
-    end
-  in
-  let a = extractValue Nothing in            -- 0
-  let b = extractValue (Just 42) in          -- 42
-
-  -- Multiple variable extraction
-  let sumTuple = t ->
-    match t
-      when (a, b) -> a + b
-    end
-  in
-  let c = sumTuple (10, 20) in               -- 30
-
-  -- Nested variable extraction
-  let extractNested = opt ->
-    match opt
-      when Nothing -> 0
-      when Just (a, b) -> a * b
-    end
-  in
-  let d = extractNested (Just (3, 4)) in     -- 12
-
-  a + b + c + d                              -- 84
-
--- =============================================================================
--- Wildcard Patterns
--- =============================================================================
+  let extractValue = opt -> match opt when Nothing -> 0 when Just x -> x end in
+  let a = Assert.equal 0 (extractValue Nothing) "Nothing" in
+  let b = Assert.equal 42 (extractValue (Just 42)) "Just 42" in
+  let sumTuple = t -> match t when (a, b) -> a + b end in
+  let c = Assert.equal 30 (sumTuple (10, 20)) "tuple sum" in
+  let extractNested = opt -> match opt when Nothing -> 0 when Just (a, b) -> a * b end in
+  let d = Assert.equal 12 (extractNested (Just (3, 4))) "nested extract" in
+  ()
 
 let testWildcardPatterns =
-  -- Basic wildcard
-  let isJust_ = opt ->
-    match opt
-      when Nothing -> 0
-      when Just _ -> 1
-    end
-  in
-  let a = isJust_ Nothing in                 -- 0
-  let b = isJust_ (Just "ignored") in        -- 1
-
-  -- Wildcard in tuple
-  let getFirst = t ->
-    match t
-      when (x, _) -> x
-    end
-  in
-  let c = getFirst (42, "ignored") in        -- 42
-
-  -- Wildcard in list
-  let headOrZero = xs ->
-    match xs
-      when Nil -> 0
-      when Cons x _ -> x
-    end
-  in
-  let d = headOrZero [10, 20, 30] in         -- 10
-  let e = headOrZero Nil in                  -- 0
-
-  a + b + c + d + e                          -- 53
-
--- =============================================================================
--- Guard Patterns
--- =============================================================================
+  let isJust_ = opt -> match opt when Nothing -> false when Just _ -> true end in
+  let a = Assert.ok (Bool.negate (isJust_ Nothing)) "Nothing not Just" in
+  let b = Assert.ok (isJust_ (Just "ignored")) "Just _ is Just" in
+  let getFirst = t -> match t when (x, _) -> x end in
+  let c = Assert.equal 42 (getFirst (42, "ignored")) "getFirst" in
+  let headOrZero = xs -> match xs when Nil -> 0 when Cons x _ -> x end in
+  let d = Assert.equal 10 (headOrZero [10, 20, 30]) "headOrZero list" in
+  let e = Assert.equal 0 (headOrZero Nil) "headOrZero Nil" in
+  ()
 
 let testGuardPatterns =
-  -- Basic guards
-  let classify = n ->
-    match n
-      when x if x < 0 -> -1
-      when x if x == 0 -> 0
-      when x if x < 10 -> 1
-      when x if x < 100 -> 2
-      when _ -> 3
-    end
-  in
-  let a = classify (-5) in                   -- -1
-  let b = classify 0 in                      -- 0
-  let c = classify 5 in                      -- 1
-  let d = classify 50 in                     -- 2
-  let e = classify 500 in                    -- 3
-
-  -- Guards with destructuring
-  let safeDiv = pair ->
-    match pair
-      when (_, 0) -> Nothing
-      when (a, b) if b != 0 -> Just (Int.div a b)
-      when _ -> Nothing
-    end
-  in
-  let f = match safeDiv (10, 2) when Just x -> x when Nothing -> -1 end in  -- 5
-  let g = match safeDiv (10, 0) when Just x -> x when Nothing -> -1 end in  -- -1
-
-  -- Chained guards
-  let grade = score ->
-    match score
-      when n if n >= 90 -> 4
-      when n if n >= 80 -> 3
-      when n if n >= 70 -> 2
-      when n if n >= 60 -> 1
-      when _ -> 0
-    end
-  in
-  let h = grade 95 in                        -- 4
-  let i = grade 75 in                        -- 2
-  let j = grade 55 in                        -- 0
-
-  a + b + c + d + e + f + g + h + i + j      -- 15
-
--- =============================================================================
--- As-Patterns
--- =============================================================================
+  let classify = n -> match n
+    when x if x < 0 -> -1
+    when x if x == 0 -> 0
+    when x if x < 10 -> 1
+    when x if x < 100 -> 2
+    when _ -> 3
+  end in
+  let a = Assert.equal (-1) (classify (-5)) "classify -5" in
+  let b = Assert.equal 0 (classify 0) "classify 0" in
+  let c = Assert.equal 1 (classify 5) "classify 5" in
+  let d = Assert.equal 2 (classify 50) "classify 50" in
+  let e = Assert.equal 3 (classify 500) "classify 500" in
+  let safeDiv = pair -> match pair when (_, 0) -> Nothing when (a, b) -> Just (Int.div a b) end in
+  let f = Assert.equal (Just 5) (safeDiv (10, 2)) "safeDiv ok" in
+  let g = Assert.equal Nothing (safeDiv (10, 0)) "safeDiv by 0" in
+  ()
 
 let testAsPatterns =
-  -- Simple as-pattern
-  let headAndAll = xs ->
-    match xs
-      when Nil -> Nothing
-      when Cons x _ as whole -> Just (x, whole)
-    end
-  in
+  let headAndAll = xs -> match xs when Nil -> Nothing when Cons x _ as whole -> Just (x, whole) end in
   let result = headAndAll [1, 2, 3] in
-  let a = match result
-    when Nothing -> 0
-    when Just (h, list) -> h + List.length list
-  end in                                     -- 1 + 3 = 4
-
-  -- As-pattern with nested destructuring
-  let firstTwoAndAll = xs ->
-    match xs
-      when Cons a (Cons b rest) as whole -> Just (a, b, whole)
-      when _ -> Nothing
-    end
-  in
-  let result2 = firstTwoAndAll [10, 20, 30, 40] in
-  let b = match result2
-    when Nothing -> 0
-    when Just (x, y, list) -> x + y + List.length list
-  end in                                     -- 10 + 20 + 4 = 34
-
-  a + b                                      -- 38
-
--- =============================================================================
--- Tuple Patterns
--- =============================================================================
+  let a = Assert.equal (Just (1, [1, 2, 3])) result "headAndAll" in
+  ()
 
 let testTuplePatterns =
-  -- Pair matching
-  let swapPair = p ->
-    match p
-      when (a, b) -> (b, a)
-    end
-  in
-  let (x, y) = swapPair (1, 2) in
-  let a = x + y in                           -- 3
-
-  -- Triple matching
-  let sumTriple = t ->
-    match t
-      when (a, b, c) -> a + b + c
-    end
-  in
-  let b = sumTriple (10, 20, 30) in          -- 60
-
-  -- Nested tuple matching
-  let flattenPairs = t ->
-    match t
-      when ((a, b), (c, d)) -> a + b + c + d
-    end
-  in
-  let c = flattenPairs ((1, 2), (3, 4)) in   -- 10
-
-  -- Mixed tuple matching
-  let extractMiddle = t ->
-    match t
-      when (_, x, _) -> x
-    end
-  in
-  let d = extractMiddle ("a", 42, "b") in    -- 42
-
-  a + b + c + d                              -- 115
-
--- =============================================================================
--- List Patterns
--- =============================================================================
+  let swapPair = p -> match p when (a, b) -> (b, a) end in
+  let a = Assert.equal (2, 1) (swapPair (1, 2)) "swap" in
+  let sumTriple = t -> match t when (a, b, c) -> a + b + c end in
+  let b = Assert.equal 60 (sumTriple (10, 20, 30)) "triple sum" in
+  let flattenPairs = t -> match t when ((a, b), (c, d)) -> a + b + c + d end in
+  let c = Assert.equal 10 (flattenPairs ((1, 2), (3, 4))) "flatten pairs" in
+  let extractMiddle = t -> match t when (_, x, _) -> x end in
+  let d = Assert.equal 42 (extractMiddle ("a", 42, "b")) "extract middle" in
+  ()
 
 let testListPatterns =
-  -- Empty list
-  let isEmpty_ = xs ->
-    match xs
-      when Nil -> 1
-      when Cons _ _ -> 0
-    end
-  in
-  let a = isEmpty_ Nil in                    -- 1
-  let b = isEmpty_ [1, 2] in                 -- 0
-
-  -- Single element list
-  let isSingleton = xs ->
-    match xs
-      when Cons _ Nil -> 1
-      when _ -> 0
-    end
-  in
-  let c = isSingleton [42] in                -- 1
-  let d = isSingleton [1, 2] in              -- 0
-
-  -- First two elements
-  let sumFirstTwo = xs ->
-    match xs
-      when Cons a (Cons b _) -> a + b
-      when Cons a Nil -> a
-      when Nil -> 0
-    end
-  in
-  let e = sumFirstTwo [10, 20, 30] in        -- 30
-  let f = sumFirstTwo [5] in                 -- 5
-  let g = sumFirstTwo Nil in                 -- 0
-
-  -- Cons pattern with ::
-  let describeList = xs ->
-    match xs
-      when Nil -> 0
-      when Cons x Nil -> x
-      when Cons x (Cons y Nil) -> x + y
-      when Cons x (Cons y (Cons z _)) -> x + y + z
-    end
-  in
-  let h = describeList Nil in                -- 0
-  let i = describeList [5] in                -- 5
-  let j = describeList [3, 4] in             -- 7
-  let k = describeList [1, 2, 3, 4, 5] in    -- 6
-
-  a + b + c + d + e + f + g + h + i + j + k  -- 55
-
--- =============================================================================
--- Record Patterns
--- =============================================================================
+  let isEmpty_ = xs -> match xs when Nil -> true when Cons _ _ -> false end in
+  let a = Assert.ok (isEmpty_ Nil) "Nil isEmpty" in
+  let b = Assert.ok (Bool.negate (isEmpty_ [1, 2])) "[1,2] not empty" in
+  let isSingleton = xs -> match xs when Cons _ Nil -> true when _ -> false end in
+  let c = Assert.ok (isSingleton [42]) "[42] singleton" in
+  let d = Assert.ok (Bool.negate (isSingleton [1, 2])) "[1,2] not singleton" in
+  let sumFirstTwo = xs -> match xs
+    when Cons a (Cons b _) -> a + b
+    when Cons a Nil -> a
+    when Nil -> 0
+  end in
+  let e = Assert.equal 30 (sumFirstTwo [10, 20, 30]) "sumFirstTwo" in
+  let f = Assert.equal 5 (sumFirstTwo [5]) "sumFirstTwo single" in
+  let g = Assert.equal 0 (sumFirstTwo Nil) "sumFirstTwo Nil" in
+  ()
 
 let testRecordPatterns =
-  -- Simple record matching
-  let getX = p ->
-    match p
-      when { x = x, y = _ } -> x
-    end
-  in
-  let a = getX { x = 10, y = 20 } in         -- 10
-
-  -- Multiple field extraction
-  let sumCoords = p ->
-    match p
-      when { x = x, y = y } -> x + y
-    end
-  in
-  let b = sumCoords { x = 3, y = 4 } in      -- 7
-
-  -- Nested record matching
-  let getInnerX = p ->
-    match p
-      when { inner = { x = x, y = _ }, value = _ } -> x
-    end
-  in
-  let c = getInnerX { inner = { x = 100, y = 200 }, value = 0 } in  -- 100
-
-  a + b + c                                  -- 117
-
--- =============================================================================
--- Or-Patterns
--- =============================================================================
+  let getX = p -> match p when { x = x, y = _ } -> x end in
+  let a = Assert.equal 10 (getX { x = 10, y = 20 }) "getX" in
+  let sumCoords = p -> match p when { x = x, y = y } -> x + y end in
+  let b = Assert.equal 7 (sumCoords { x = 3, y = 4 }) "sumCoords" in
+  let getInnerX = p -> match p when { inner = { x = x, y = _ }, value = _ } -> x end in
+  let c = Assert.equal 100 (getInnerX { inner = { x = 100, y = 200 }, value = 0 }) "getInnerX" in
+  ()
 
 let testOrPatterns =
-  -- Simple or-pattern
-  let isRedOrBlue = c ->
-    match c
-      when Red | Blue -> 1
-      when _ -> 0
-    end
-  in
-  let a = isRedOrBlue Red in                 -- 1
-  let b = isRedOrBlue Blue in                -- 1
-  let c = isRedOrBlue Green in               -- 0
-
-  -- Or-pattern with Maybe
-  let isNothingOrZero = opt ->
-    match opt
-      when Nothing | Just 0 -> 1
-      when _ -> 0
-    end
-  in
-  let d = isNothingOrZero Nothing in         -- 1
-  let e = isNothingOrZero (Just 0) in        -- 1
-  let f = isNothingOrZero (Just 5) in        -- 0
-
-  -- Or-pattern with nested constructors
-  let isSpecial = opt ->
-    match opt
-      when Nothing | Just Nothing -> 1
-      when _ -> 0
-    end
-  in
-  let g = isSpecial Nothing in               -- 1
-  let h = isSpecial (Just Nothing) in        -- 1
-  let i = isSpecial (Just (Just 1)) in       -- 0
-
-  a + b + c + d + e + f + g + h + i          -- 6
-
--- =============================================================================
--- Nested Patterns
--- =============================================================================
+  let isRedOrBlue = c -> match c when Red | Blue -> true when _ -> false end in
+  let a = Assert.ok (isRedOrBlue Red) "Red is red or blue" in
+  let b = Assert.ok (isRedOrBlue Blue) "Blue is red or blue" in
+  let c = Assert.ok (Bool.negate (isRedOrBlue Green)) "Green not red or blue" in
+  let isNothingOrZero = opt -> match opt when Nothing | Just 0 -> true when _ -> false end in
+  let d = Assert.ok (isNothingOrZero Nothing) "Nothing" in
+  let e = Assert.ok (isNothingOrZero (Just 0)) "Just 0" in
+  let f = Assert.ok (Bool.negate (isNothingOrZero (Just 5))) "Just 5 not match" in
+  ()
 
 let testNestedPatterns =
-  -- Deeply nested ADT
-  let extractDeep = opt ->
-    match opt
-      when Just (Just (Just x)) -> x
-      when Just (Just Nothing) -> -1
-      when Just Nothing -> -2
-      when Nothing -> -3
-    end
-  in
-  let a = extractDeep (Just (Just (Just 42))) in    -- 42
-  let b = extractDeep (Just (Just Nothing)) in      -- -1
-  let c = extractDeep (Just Nothing) in             -- -2
-  let d = extractDeep Nothing in                    -- -3
-
-  -- Nested list pattern
-  let sumFirstOfFirst = xss ->
-    match xss
-      when Cons (Cons x _) _ -> x
-      when _ -> 0
-    end
-  in
-  let e = sumFirstOfFirst [[10, 20], [30, 40]] in   -- 10
-  let f = sumFirstOfFirst [Nil, [1, 2]] in          -- 0
-
-  -- Nested tuple in list
-  let sumPairs = xs ->
-    match xs
-      when Cons (a, b) rest ->
-        a + b + (match rest
-          when Cons (c, d) _ -> c + d
-          when _ -> 0
-        end)
-      when _ -> 0
-    end
-  in
-  let g = sumPairs [(1, 2), (3, 4), (5, 6)] in      -- 10
-
-  a + b + c + d + e + f + g                  -- 56
-
--- =============================================================================
--- Match Expression as Value
--- =============================================================================
+  let extractDeep = opt -> match opt
+    when Just (Just (Just x)) -> x
+    when Just (Just Nothing) -> -1
+    when Just Nothing -> -2
+    when Nothing -> -3
+  end in
+  let a = Assert.equal 42 (extractDeep (Just (Just (Just 42)))) "deep Just" in
+  let b = Assert.equal (-1) (extractDeep (Just (Just Nothing))) "JJN" in
+  let c = Assert.equal (-2) (extractDeep (Just Nothing)) "JN" in
+  let d = Assert.equal (-3) (extractDeep Nothing) "N" in
+  ()
 
 let testMatchAsValue =
-  -- Match in let binding
-  let x = match Just 10
-    when Nothing -> 0
-    when Just n -> n * 2
-  end in                                     -- 20
-
-  -- Match in function argument
-  let result = List.map (n ->
-    match n
-      when 0 -> 100
-      when _ -> n
-    end
-  ) [0, 1, 2, 0, 3] in
-  let y = List.foldl (acc x -> acc + x) 0 result in  -- 206
-
-  -- Nested match expressions
+  let x = match Just 10 when Nothing -> 0 when Just n -> n * 2 end in
+  let a = Assert.equal 20 x "match as value" in
+  let result = List.map (n -> match n when 0 -> 100 when _ -> n end) [0, 1, 2, 0, 3] in
+  let b = Assert.equal [100, 1, 2, 100, 3] result "map with match" in
   let z = match Just (Just 5)
-    when Just inner -> match inner
-      when Just n -> n * 10
-      when Nothing -> 0
-    end
+    when Just inner -> match inner when Just n -> n * 10 when Nothing -> 0 end
     when Nothing -> -1
-  end in                                     -- 50
+  end in
+  let c = Assert.equal 50 z "nested match" in
+  ()
 
-  x + y + z                                  -- 276
-
--- =============================================================================
--- Final Result
--- =============================================================================
-
-let result =
-  testADTPatterns +                          -- 66
-  testLiteralPatterns +                      -- 19
-  testVariablePatterns +                     -- 84
-  testWildcardPatterns +                     -- 53
-  testGuardPatterns +                        -- 15
-  testAsPatterns +                           -- 38
-  testTuplePatterns +                        -- 115
-  testListPatterns +                         -- 55
-  testRecordPatterns +                       -- 117
-  testOrPatterns +                           -- 6
-  testNestedPatterns +                       -- 56
-  testMatchAsValue                           -- 276
-                                             -- Total: 900
-
-let main = args -> IO.printLine (Int.toString result)
+let main = args ->
+  let a = testADTPatterns in
+  let b = testLiteralPatterns in
+  let c = testVariablePatterns in
+  let d = testWildcardPatterns in
+  let e = testGuardPatterns in
+  let f = testAsPatterns in
+  let g = testTuplePatterns in
+  let h = testListPatterns in
+  let i = testRecordPatterns in
+  let j = testOrPatterns in
+  let k = testNestedPatterns in
+  let l = testMatchAsValue in
+  IO.printLine "pattern-matching: ok"

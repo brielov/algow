@@ -1,314 +1,187 @@
--- =============================================================================
--- Basics: Literals, Operators, Strings, Booleans, Tuples, Basic Operations
--- =============================================================================
-
--- =============================================================================
--- Integer Literals and Arithmetic
--- =============================================================================
+-- Basics: Literals, Operators, Strings, Booleans, Tuples
 
 let testIntegers =
-  let a = 42 in
-  let b = -17 in
-  let c = 0 in
-  let sum = a + b + c in           -- 25
-  let diff = a - b in              -- 59
-  let prod = 6 * 7 in              -- 42
-  let quot = Int.div 100 3 in      -- 33 (integer division)
-  let neg = 0 - 5 in               -- -5
-  sum + diff + prod + quot + neg   -- 25 + 59 + 42 + 33 + (-5) = 154
-
--- =============================================================================
--- Comparison Operators
--- =============================================================================
+  let a = Assert.equal 25 (42 + (-17) + 0) "sum" in
+  let b = Assert.equal 59 (42 - (-17)) "diff" in
+  let c = Assert.equal 42 (6 * 7) "product" in
+  let d = Assert.equal 33 (Int.div 100 3) "division" in
+  let e = Assert.equal (-5) (0 - 5) "negation" in
+  ()
 
 let testComparisons =
-  let a = if 5 < 10 then 1 else 0 in         -- 1
-  let b = if 10 <= 10 then 1 else 0 in       -- 1
-  let c = if 15 > 10 then 1 else 0 in        -- 1
-  let d = if 10 >= 10 then 1 else 0 in       -- 1
-  let e = if 5 == 5 then 1 else 0 in         -- 1
-  let f = if 5 != 6 then 1 else 0 in         -- 1
-  let g = if 5 == 6 then 1 else 0 in         -- 0
-  let h = if 10 < 5 then 1 else 0 in         -- 0
-  a + b + c + d + e + f + g + h              -- 6
-
--- =============================================================================
--- Boolean Operations
--- =============================================================================
+  let a = Assert.ok (5 < 10) "5 < 10" in
+  let b = Assert.ok (10 <= 10) "10 <= 10" in
+  let c = Assert.ok (15 > 10) "15 > 10" in
+  let d = Assert.ok (10 >= 10) "10 >= 10" in
+  let e = Assert.ok (5 == 5) "5 == 5" in
+  let f = Assert.ok (5 != 6) "5 != 6" in
+  let g = Assert.ok (Bool.negate (5 == 6)) "not 5 == 6" in
+  let h = Assert.ok (Bool.negate (10 < 5)) "not 10 < 5" in
+  ()
 
 let testBooleans =
-  let t = true in
-  let f = false in
-  let a = if t && t then 1 else 0 in         -- 1
-  let b = if t && f then 1 else 0 in         -- 0
-  let c = if f && t then 1 else 0 in         -- 0
-  let d = if f && f then 1 else 0 in         -- 0
-  let e = if t || t then 1 else 0 in         -- 1
-  let f_ = if t || f then 1 else 0 in        -- 1
-  let g = if f || t then 1 else 0 in         -- 1
-  let h = if f || f then 1 else 0 in         -- 0
-  a + b + c + d + e + f_ + g + h             -- 4
-
--- =============================================================================
--- Short-circuit Evaluation
--- =============================================================================
+  let a = Assert.equal true (true && true) "&& tt" in
+  let b = Assert.equal false (true && false) "&& tf" in
+  let c = Assert.equal false (false && true) "&& ft" in
+  let d = Assert.equal false (false && false) "&& ff" in
+  let e = Assert.equal true (true || true) "|| tt" in
+  let f = Assert.equal true (true || false) "|| tf" in
+  let g = Assert.equal true (false || true) "|| ft" in
+  let h = Assert.equal false (false || false) "|| ff" in
+  ()
 
 let testShortCircuit =
-  -- && should not evaluate second arg if first is false
   let x = 0 in
-  let a = if false && (Int.div 1 x == 0) then 1 else 0 in  -- 0 (doesn't crash)
-  -- || should not evaluate second arg if first is true
-  let b = if true || (Int.div 1 x == 0) then 1 else 0 in   -- 1 (doesn't crash)
-  a + b                                               -- 1
-
--- =============================================================================
--- String Literals and Operations
--- =============================================================================
+  let a = Assert.equal false (false && (Int.div 1 x == 0)) "&& short-circuit" in
+  let b = Assert.equal true (true || (Int.div 1 x == 0)) "|| short-circuit" in
+  ()
 
 let testStrings =
-  let s1 = "hello" in
-  let s2 = "world" in
-  let a = String.length s1 in                -- 5
-  let b = String.length s2 in                -- 5
-  let s3 = String.concat s1 " " in
-  let s4 = String.concat s3 s2 in            -- "hello world"
-  let c = String.length s4 in                -- 11
-  let d = if String.isEmpty "" then 1 else 0 in      -- 1
-  let e = if String.isEmpty "x" then 1 else 0 in     -- 0
-  let f = if String.eq s1 "hello" then 1 else 0 in   -- 1
-  let g = if String.eq s1 "Hello" then 1 else 0 in   -- 0
-  a + b + c + d + e + f + g                  -- 23
-
--- =============================================================================
--- String Manipulation
--- =============================================================================
+  let a = Assert.equal 5 (String.length "hello") "length hello" in
+  let b = Assert.equal "hello world" (String.concat (String.concat "hello" " ") "world") "concat" in
+  let c = Assert.ok (String.isEmpty "") "isEmpty empty" in
+  let d = Assert.ok (Bool.negate (String.isEmpty "x")) "not isEmpty x" in
+  let e = Assert.ok (String.eq "hello" "hello") "eq same" in
+  let f = Assert.ok (Bool.negate (String.eq "hello" "Hello")) "eq different" in
+  ()
 
 let testStringManip =
   let s = "hello world" in
-  let a = String.length (String.take 5 s) in         -- 5
-  let b = String.length (String.drop 6 s) in         -- 5
-  let sub = String.substring 0 5 s in
-  let c = if String.eq sub "hello" then 1 else 0 in  -- 1
-  let upper = String.toUpper "abc" in
-  let d = if String.eq upper "ABC" then 1 else 0 in  -- 1
-  let lower = String.toLower "XYZ" in
-  let e = if String.eq lower "xyz" then 1 else 0 in  -- 1
-  let trimmed = String.trim "  hi  " in
-  let f = if String.eq trimmed "hi" then 1 else 0 in -- 1
-  let g = if String.contains "ell" "hello" then 1 else 0 in    -- 1
-  let h = if String.startsWith "he" "hello" then 1 else 0 in   -- 1
-  let i = if String.endsWith "lo" "hello" then 1 else 0 in     -- 1
-  a + b + c + d + e + f + g + h + i          -- 17
-
--- =============================================================================
--- Tuple Operations
--- =============================================================================
+  let a = Assert.equal "hello" (String.take 5 s) "take 5" in
+  let b = Assert.equal "world" (String.drop 6 s) "drop 6" in
+  let c = Assert.equal "hello" (String.substring 0 5 s) "substring" in
+  let d = Assert.equal "ABC" (String.toUpper "abc") "toUpper" in
+  let e = Assert.equal "xyz" (String.toLower "XYZ") "toLower" in
+  let f = Assert.equal "hi" (String.trim "  hi  ") "trim" in
+  let g = Assert.ok (String.contains "ell" "hello") "contains" in
+  let h = Assert.ok (String.startsWith "he" "hello") "startsWith" in
+  let i = Assert.ok (String.endsWith "lo" "hello") "endsWith" in
+  ()
 
 let testTuples =
-  let pair = (1, 2) in
-  let triple = (1, 2, 3) in
-  let quad = (1, 2, 3, 4) in
-  let nested = ((1, 2), (3, 4)) in
-  let a = match pair when (x, y) -> x + y end in          -- 3
-  let b = match triple when (x, y, z) -> x + y + z end in -- 6
-  let c = match quad when (a, b, c, d) -> a + b + c + d end in  -- 10
-  let d = match nested when ((a, b), (c, d)) -> a + b + c + d end in  -- 10
-  -- Mixed tuples
-  let mixed = (42, "hello", true) in
-  let e = match mixed when (n, s, b) ->
-    if b then n + String.length s else 0
-  end in  -- 47
-  a + b + c + d + e                          -- 76
-
--- =============================================================================
--- Let Bindings and Shadowing
--- =============================================================================
+  let a = Assert.equal 3 (match (1, 2) when (x, y) -> x + y end) "pair" in
+  let b = Assert.equal 6 (match (1, 2, 3) when (x, y, z) -> x + y + z end) "triple" in
+  let c = Assert.equal 10 (match (1, 2, 3, 4) when (a, b, c, d) -> a + b + c + d end) "quad" in
+  let d = Assert.equal 10 (match ((1, 2), (3, 4)) when ((a, b), (c, d)) -> a + b + c + d end) "nested" in
+  let e = Assert.equal 47 (match (42, "hello", true) when (n, s, b) -> if b then n + String.length s else 0 end) "mixed" in
+  ()
 
 let testBindings =
   let x = 1 in
   let y = 2 in
-  let z = x + y in                           -- 3
-  let x = 10 in                              -- shadow x
-  let w = x + y in                           -- 12
-  let result = z + w in                      -- 15
-  -- Nested let
+  let z = x + y in
+  let a = Assert.equal 3 z "z = x + y" in
+  let x = 10 in
+  let w = x + y in
+  let b = Assert.equal 12 w "w = shadowed x + y" in
   let nested =
     let a = 1 in
     let b = 2 in
-    let c =
-      let a = 10 in                          -- shadow a
-      a + b                                  -- 12
-    in
-    a + b + c                                -- 1 + 2 + 12 = 15
+    let c = let a = 10 in a + b in
+    a + b + c
   in
-  result + nested                            -- 30
-
--- =============================================================================
--- Conditionals
--- =============================================================================
+  let c = Assert.equal 15 nested "nested shadowing" in
+  ()
 
 let testConditionals =
-  let a = if true then 1 else 2 in           -- 1
-  let b = if false then 1 else 2 in          -- 2
-  let c = if 5 > 3 then 10 else 20 in        -- 10
-  let d = if 5 < 3 then 10 else 20 in        -- 20
-  -- Nested if
-  let e = if true then
-    if false then 1 else 2
-  else
-    if true then 3 else 4
-  in                                         -- 2
-  -- Chained conditions
-  let classify = n ->
-    if n < 0 then -1
-    else if n == 0 then 0
-    else 1
-  in
-  let f = classify (-5) in                   -- -1
-  let g = classify 0 in                      -- 0
-  let h = classify 10 in                     -- 1
-  a + b + c + d + e + f + g + h              -- 35
-
--- =============================================================================
--- Maybe Operations (from prelude)
--- =============================================================================
+  let a = Assert.equal 1 (if true then 1 else 2) "if true" in
+  let b = Assert.equal 2 (if false then 1 else 2) "if false" in
+  let c = Assert.equal 10 (if 5 > 3 then 10 else 20) "if 5 > 3" in
+  let d = Assert.equal 20 (if 5 < 3 then 10 else 20) "if 5 < 3" in
+  let e = Assert.equal 2 (if true then if false then 1 else 2 else 3) "nested if" in
+  let classify = n -> if n < 0 then -1 else if n == 0 then 0 else 1 in
+  let f = Assert.equal (-1) (classify (-5)) "classify -5" in
+  let g = Assert.equal 0 (classify 0) "classify 0" in
+  let h = Assert.equal 1 (classify 10) "classify 10" in
+  ()
 
 let testMaybe =
-  let a = match Just 42 when Just x -> x when Nothing -> 0 end in  -- 42
-  let b = match Nothing when Just x -> x when Nothing -> 0 end in  -- 0
-  let c = if Maybe.isJust (Just 1) then 1 else 0 in                -- 1
-  let d = if Maybe.isJust Nothing then 1 else 0 in                 -- 0
-  let e = if Maybe.isNothing Nothing then 1 else 0 in              -- 1
-  let f = if Maybe.isNothing (Just 1) then 1 else 0 in             -- 0
-  let g = Maybe.withDefault 99 Nothing in                          -- 99
-  let h = Maybe.withDefault 99 (Just 42) in                        -- 42
-  let mapped = Maybe.map (x -> x * 2) (Just 10) in
-  let i = Maybe.withDefault 0 mapped in                            -- 20
-  a + b + c + d + e + f + g + h + i          -- 206
-
--- =============================================================================
--- Either Operations (from prelude)
--- =============================================================================
+  let a = Assert.equal 42 (match Just 42 when Just x -> x when Nothing -> 0 end) "Just 42" in
+  let b = Assert.equal 0 (match Nothing when Just x -> x when Nothing -> 0 end) "Nothing" in
+  let c = Assert.ok (Maybe.isJust (Just 1)) "isJust Just" in
+  let d = Assert.ok (Bool.negate (Maybe.isJust Nothing)) "not isJust Nothing" in
+  let e = Assert.ok (Maybe.isNothing Nothing) "isNothing Nothing" in
+  let f = Assert.ok (Bool.negate (Maybe.isNothing (Just 1))) "not isNothing Just" in
+  let g = Assert.equal 99 (Maybe.withDefault 99 Nothing) "withDefault Nothing" in
+  let h = Assert.equal 42 (Maybe.withDefault 99 (Just 42)) "withDefault Just" in
+  let i = Assert.equal (Just 20) (Maybe.map (x -> x * 2) (Just 10)) "map Just" in
+  let j = Assert.equal Nothing (Maybe.map (x -> x * 2) Nothing) "map Nothing" in
+  ()
 
 let testEither =
-  let a = match Right 42 when Right x -> x when Left e -> 0 end in   -- 42
-  let b = match Left "error" when Right x -> x when Left e -> -1 end in  -- -1
-  let c = if Either.isRight (Right 1) then 1 else 0 in               -- 1
-  let d = if Either.isLeft (Left "x") then 1 else 0 in               -- 1
-  let e = Either.withDefault 99 (Right 42) in                        -- 42
-  let f = Either.withDefault 99 (Left "err") in                      -- 99
-  let mapped = Either.map (x -> x + 1) (Right 10) in
-  let g = Either.withDefault 0 mapped in                             -- 11
-  a + b + c + d + e + f + g                  -- 195
-
--- =============================================================================
--- List Basics (from prelude)
--- =============================================================================
+  let a = Assert.equal 42 (match Right 42 when Right x -> x when Left e -> 0 end) "Right 42" in
+  let b = Assert.equal (-1) (match Left "error" when Right x -> x when Left e -> -1 end) "Left error" in
+  let c = Assert.ok (Either.isRight (Right 1)) "isRight Right" in
+  let d = Assert.ok (Either.isLeft (Left "x")) "isLeft Left" in
+  let e = Assert.equal 42 (Either.withDefault 99 (Right 42)) "withDefault Right" in
+  let f = Assert.equal 99 (Either.withDefault 99 (Left "err")) "withDefault Left" in
+  let g = Assert.equal (Right 11) (Either.map (x -> x + 1) (Right 10)) "map Right" in
+  ()
 
 let testLists =
   let xs = [1, 2, 3, 4, 5] in
-  let a = List.length xs in                  -- 5
-  let b = List.length Nil in                 -- 0
-  let c = if List.isEmpty Nil then 1 else 0 in    -- 1
-  let d = if List.isEmpty xs then 1 else 0 in     -- 0
-  let e = match List.head xs when Just x -> x when Nothing -> 0 end in  -- 1
-  let f = match List.tail xs when Just t -> List.length t when Nothing -> 0 end in  -- 4
-  let sum = List.foldl (acc x -> acc + x) 0 xs in  -- 15
-  let prod = List.foldl (acc x -> acc * x) 1 xs in -- 120
-  a + b + c + d + e + f + sum + prod         -- 146
-
--- =============================================================================
--- List Operations
--- =============================================================================
+  let a = Assert.equal 5 (List.length xs) "length" in
+  let b = Assert.equal 0 (List.length Nil) "length Nil" in
+  let c = Assert.ok (List.isEmpty Nil) "isEmpty Nil" in
+  let d = Assert.ok (Bool.negate (List.isEmpty xs)) "not isEmpty xs" in
+  let e = Assert.equal (Just 1) (List.head xs) "head" in
+  let f = Assert.equal 4 (Maybe.withDefault 0 (Maybe.map List.length (List.tail xs))) "tail length" in
+  let g = Assert.equal 15 (List.foldl (acc x -> acc + x) 0 xs) "foldl sum" in
+  let h = Assert.equal 120 (List.foldl (acc x -> acc * x) 1 xs) "foldl product" in
+  ()
 
 let testListOps =
   let xs = [1, 2, 3, 4, 5] in
-  let doubled = List.map (x -> x * 2) xs in
-  let a = List.foldl (acc x -> acc + x) 0 doubled in   -- 30
-  let evens = List.filter (x -> Int.mod x 2 == 0) xs in
-  let b = List.length evens in                          -- 2
-  let ys = [6, 7, 8] in
-  let zs = List.append xs ys in
-  let c = List.length zs in                             -- 8
-  let rev = List.reverse xs in
-  let d = match List.head rev when Just x -> x when Nothing -> 0 end in  -- 5
-  let taken = List.take 3 xs in
-  let e = List.length taken in                          -- 3
-  let dropped = List.drop 2 xs in
-  let f = List.length dropped in                        -- 3
-  a + b + c + d + e + f                      -- 51
-
--- =============================================================================
--- Cons Operator and List Construction
--- =============================================================================
+  let a = Assert.equal [2, 4, 6, 8, 10] (List.map (x -> x * 2) xs) "map double" in
+  let b = Assert.equal [2, 4] (List.filter (x -> Int.mod x 2 == 0) xs) "filter even" in
+  let c = Assert.equal 8 (List.length (List.append xs [6, 7, 8])) "append length" in
+  let d = Assert.equal (Just 5) (List.head (List.reverse xs)) "reverse head" in
+  let e = Assert.equal 3 (List.length (List.take 3 xs)) "take 3" in
+  let f = Assert.equal 3 (List.length (List.drop 2 xs)) "drop 2" in
+  ()
 
 let testCons =
   let xs = 1 :: 2 :: 3 :: Nil in
-  let a = List.length xs in                  -- 3
-  let ys = 0 :: xs in
-  let b = List.length ys in                  -- 4
-  let c = match ys when Cons x rest -> x when Nil -> -1 end in  -- 0
-  let zs = [1, 2] in
-  let ws = 0 :: zs in
-  let d = List.foldl (acc x -> acc + x) 0 ws in  -- 3
-  a + b + c + d                              -- 10
-
--- =============================================================================
--- Character Operations
--- =============================================================================
+  let a = Assert.equal 3 (List.length xs) "cons length" in
+  let b = Assert.equal 4 (List.length (0 :: xs)) "prepend length" in
+  let c = Assert.equal (Just 0) (List.head (0 :: xs)) "prepend head" in
+  let d = Assert.equal 3 (List.foldl (acc x -> acc + x) 0 (0 :: [1, 2])) "cons with list" in
+  ()
 
 let testChars =
-  let c1 = 'a' in
-  let c2 = 'Z' in
-  let c3 = '5' in
-  let c4 = ' ' in
-  let a = if Char.isAlpha c1 then 1 else 0 in        -- 1
-  let b = if Char.isAlpha c3 then 1 else 0 in        -- 0
-  let c = if Char.isDigit c3 then 1 else 0 in        -- 1
-  let d = if Char.isDigit c1 then 1 else 0 in        -- 0
-  let e = if Char.isUpper c2 then 1 else 0 in        -- 1
-  let f = if Char.isLower c1 then 1 else 0 in        -- 1
-  let g = if Char.isSpace c4 then 1 else 0 in        -- 1
-  let h = Char.toInt c1 in                           -- 97
-  a + b + c + d + e + f + g + h              -- 102
-
--- =============================================================================
--- Integer Conversion
--- =============================================================================
+  let a = Assert.ok (Char.isAlpha 'a') "isAlpha a" in
+  let b = Assert.ok (Bool.negate (Char.isAlpha '5')) "not isAlpha 5" in
+  let c = Assert.ok (Char.isDigit '5') "isDigit 5" in
+  let d = Assert.ok (Bool.negate (Char.isDigit 'a')) "not isDigit a" in
+  let e = Assert.ok (Char.isUpper 'Z') "isUpper Z" in
+  let f = Assert.ok (Char.isLower 'a') "isLower a" in
+  let g = Assert.ok (Char.isSpace ' ') "isSpace" in
+  let h = Assert.equal 97 (Char.toInt 'a') "toInt a" in
+  ()
 
 let testIntConversion =
-  let s1 = Int.toString 42 in
-  let a = String.length s1 in                -- 2
-  let s2 = Int.toString (-17) in
-  let b = String.length s2 in                -- 3
-  let parsed = Int.fromString "123" in
-  let c = match parsed when Just n -> n when Nothing -> 0 end in  -- 123
-  let invalid = Int.fromString "abc" in
-  let d = match invalid when Just n -> n when Nothing -> -1 end in  -- -1
-  let e = Int.abs (-50) in                   -- 50
-  a + b + c + d + e                          -- 177
+  let a = Assert.equal "42" (Int.toString 42) "toString 42" in
+  let b = Assert.equal "-17" (Int.toString (-17)) "toString -17" in
+  let c = Assert.equal (Just 123) (Int.fromString "123") "fromString 123" in
+  let d = Assert.equal Nothing (Int.fromString "abc") "fromString abc" in
+  let e = Assert.equal 50 (Int.abs (-50)) "abs -50" in
+  ()
 
--- =============================================================================
--- Final Result
--- =============================================================================
-
-let result =
-  testIntegers +           -- 154
-  testComparisons +        -- 6
-  testBooleans +           -- 4
-  testShortCircuit +       -- 1
-  testStrings +            -- 23
-  testStringManip +        -- 17
-  testTuples +             -- 76
-  testBindings +           -- 30
-  testConditionals +       -- 35
-  testMaybe +              -- 206
-  testEither +             -- 195
-  testLists +              -- 146
-  testListOps +            -- 51
-  testCons +               -- 10
-  testChars +              -- 102
-  testIntConversion        -- 177
-                           -- Total: 1233
-
-let main = args -> IO.printLine (Int.toString result)
+let main = args ->
+  let a = testIntegers in
+  let b = testComparisons in
+  let c = testBooleans in
+  let d = testShortCircuit in
+  let e = testStrings in
+  let f = testStringManip in
+  let g = testTuples in
+  let h = testBindings in
+  let i = testConditionals in
+  let j = testMaybe in
+  let k = testEither in
+  let l = testLists in
+  let m = testListOps in
+  let n = testCons in
+  let o = testChars in
+  let p = testIntConversion in
+  IO.printLine "basics: ok"

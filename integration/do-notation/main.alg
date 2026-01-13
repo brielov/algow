@@ -1,10 +1,5 @@
--- =============================================================================
 -- Do-Notation Examples
--- =============================================================================
--- Demonstrates do-notation for monadic composition
--- Syntax: do[Module] ... end uses Module.flatMap for bind operations
 
--- Basic do-notation: sequence Maybe computations
 let testBasic =
   let result = do[Maybe]
     x <- Just 1
@@ -12,12 +7,8 @@ let testBasic =
     z <- Just 3
     Just (x + y + z)
   end in
-  match result
-    when Just n -> n
-    when Nothing -> 0
-  end
+  Assert.equal (Just 6) result "basic do"
 
--- Short-circuit on Nothing
 let testShortCircuit =
   let result = do[Maybe]
     x <- Just 10
@@ -25,24 +16,16 @@ let testShortCircuit =
     z <- Just 20
     Just (x + y + z)
   end in
-  match result
-    when Just _ -> 0
-    when Nothing -> 1
-  end
+  Assert.equal Nothing result "short-circuit"
 
--- Pattern matching in bind
 let testPatternBind =
   let result = do[Maybe]
     (a, b) <- Just (1, 2)
     (c, d) <- Just (3, 4)
     Just (a + b + c + d)
   end in
-  match result
-    when Just n -> n
-    when Nothing -> 0
-  end
+  Assert.equal (Just 10) result "pattern bind"
 
--- Let bindings inside do
 let testDoLet =
   let result = do[Maybe]
     x <- Just 5
@@ -50,12 +33,8 @@ let testDoLet =
     y <- Just doubled
     Just (x + y)
   end in
-  match result
-    when Just n -> n
-    when Nothing -> 0
-  end
+  Assert.equal (Just 15) result "do let"
 
--- Nested do blocks
 let testNested =
   let inner = x -> do[Maybe]
     y <- Just (x * 2)
@@ -66,12 +45,8 @@ let testNested =
     b <- inner a
     Just b
   end in
-  match result
-    when Just n -> n
-    when Nothing -> 0
-  end
+  Assert.equal (Just 11) result "nested"
 
--- Chaining multiple operations
 let safeDivide = x y -> if y == 0 then Nothing else Just (Int.div x y)
 
 let testChain =
@@ -81,12 +56,8 @@ let testChain =
     c <- safeDivide b 2
     Just c
   end in
-  match result
-    when Just n -> n
-    when Nothing -> 0
-  end
+  Assert.equal (Just 5) result "chain"
 
--- Division by zero short-circuits
 let testDivByZero =
   let result = do[Maybe]
     a <- safeDivide 100 2
@@ -94,17 +65,12 @@ let testDivByZero =
     c <- safeDivide b 2
     Just c
   end in
-  match result
-    when Just _ -> 0
-    when Nothing -> 1
-  end
+  Assert.equal Nothing result "div by zero"
 
--- List lookup helper
-let rec listNth = n xs ->
-  match xs
-    when Nil -> Nothing
-    when Cons x rest -> if n == 0 then Just x else listNth (n - 1) rest
-  end
+let rec listNth = n xs -> match xs
+  when Nil -> Nothing
+  when Cons x rest -> if n == 0 then Just x else listNth (n - 1) rest
+end
 
 let testListLookup =
   let items = [10, 20, 30, 40, 50] in
@@ -114,21 +80,15 @@ let testListLookup =
     last <- listNth 4 items
     Just (first + third + last)
   end in
-  match result
-    when Just n -> n
-    when Nothing -> 0
-  end
-
-let total = testBasic + testShortCircuit + testPatternBind + testDoLet + testNested + testChain + testDivByZero + testListLookup
+  Assert.equal (Just 90) result "list lookup"
 
 let main = args ->
-  let a = IO.printLine (String.concat "Basic: " (Int.toString testBasic)) in
-  let b = IO.printLine (String.concat "Short-circuit: " (Int.toString testShortCircuit)) in
-  let c = IO.printLine (String.concat "Pattern bind: " (Int.toString testPatternBind)) in
-  let d = IO.printLine (String.concat "Do let: " (Int.toString testDoLet)) in
-  let e = IO.printLine (String.concat "Nested: " (Int.toString testNested)) in
-  let f = IO.printLine (String.concat "Chain: " (Int.toString testChain)) in
-  let g = IO.printLine (String.concat "Div by zero: " (Int.toString testDivByZero)) in
-  let h = IO.printLine (String.concat "List lookup: " (Int.toString testListLookup)) in
-  let i = IO.printLine (String.concat "Total: " (Int.toString total)) in
-  IO.printLine "Do-notation tests passed!"
+  let a = testBasic in
+  let b = testShortCircuit in
+  let c = testPatternBind in
+  let d = testDoLet in
+  let e = testNested in
+  let f = testChain in
+  let g = testDivByZero in
+  let h = testListLookup in
+  IO.printLine "do-notation: ok"

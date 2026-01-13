@@ -24,8 +24,8 @@ $foreign.Path = {
   extension: (p) => {
     const base = $foreign.Path.basename(p);
     const lastDot = base.lastIndexOf(".");
-    if (lastDot <= 0) return null; // No extension or hidden file without extension
-    return [0, base.slice(lastDot)];
+    if (lastDot <= 0) return [0]; // Nothing - no extension or hidden file
+    return [1, base.slice(lastDot)]; // Just extension
   },
   isAbsolute: (p) => p.startsWith("/"),
 };

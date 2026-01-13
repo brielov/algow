@@ -9,19 +9,19 @@
  *   algow check <files...>    - Type check only
  */
 
-import { Command } from "commander";
 import { Glob } from "bun";
+import { Command } from "commander";
 import {
+  DEFAULT_TARGET,
+  TARGETS,
   compile,
+  isValidTarget,
   type SourceFile,
   type Target,
-  TARGETS,
-  isValidTarget,
-  DEFAULT_TARGET,
 } from "./compile";
-import { format } from "./format";
 import type { Diagnostic } from "./diagnostics";
-import preludeContent from "../lib/prelude.alg" with { type: "text" };
+import { format } from "./format";
+import { prelude } from "./prelude";
 
 // =============================================================================
 // ANSI Colors
@@ -145,7 +145,6 @@ const loadSources = async (patterns: string[]): Promise<SourceFile[]> => {
     process.exit(1);
   }
 
-  const prelude: SourceFile = { path: "<prelude>", content: preludeContent };
   const userSources = await readSources(userFiles);
   return [prelude, ...userSources];
 };
