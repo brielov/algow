@@ -96,37 +96,68 @@ const printDiagnostics = (
 };
 
 // =============================================================================
-// File Resolution
+// Input Resolution
 // =============================================================================
 
-/** Resolve file patterns to actual file paths. */
-const resolveFiles = async (patterns: string[]): Promise<string[]> => {
-  const files: string[] = [];
-
-  for (const pattern of patterns) {
-    if (pattern.includes("*")) {
-      // Glob pattern
-      const glob = new Glob(pattern);
-      for await (const file of glob.scan({ cwd: process.cwd(), absolute: true })) {
-        files.push(file);
-      }
-    } else {
-      // Single file - resolve to absolute path
-      const path = await import("path");
-      files.push(path.resolve(process.cwd(), pattern));
-    }
+/** Check if a path is a directory. */
+const isDirectory = async (path: string): Promise<boolean> => {
+  try {
+    const fs = await import("fs/promises");
+    const stat = await fs.stat(path);
+    return stat.isDirectory();
+  } catch {
+    return false;
   }
-
-  return [...new Set(files)]; // Deduplicate
 };
 
-/** Read source files from disk. */
-const readSources = async (filePaths: string[]): Promise<SourceFile[]> => {
+/** Resolve input patterns to source files (files, directories, globs, or - for stdin). */
+const resolveInputs = async (patterns: string[]): Promise<SourceFile[]> => {
+  const pathMod = await import("path");
   const sources: SourceFile[] = [];
+  const seenPaths = new Set<string>();
 
-  for (const path of filePaths) {
-    const content = await Bun.file(path).text();
-    sources.push({ path, content });
+  for (const pattern of patterns) {
+    // Stdin
+    if (pattern === "-") {
+      const content = await Bun.stdin.text();
+      sources.push({ path: "<stdin>", content });
+      continue;
+    }
+
+    const resolved = pathMod.resolve(process.cwd(), pattern);
+
+    // Directory - scan recursively for .alg files
+    if (await isDirectory(resolved)) {
+      const glob = new Glob("**/*.alg");
+      for await (const file of glob.scan({ cwd: resolved, absolute: true })) {
+        if (!seenPaths.has(file)) {
+          seenPaths.add(file);
+          const content = await Bun.file(file).text();
+          sources.push({ path: file, content });
+        }
+      }
+      continue;
+    }
+
+    // Glob pattern
+    if (pattern.includes("*")) {
+      const glob = new Glob(pattern);
+      for await (const file of glob.scan({ cwd: process.cwd(), absolute: true })) {
+        if (!seenPaths.has(file)) {
+          seenPaths.add(file);
+          const content = await Bun.file(file).text();
+          sources.push({ path: file, content });
+        }
+      }
+      continue;
+    }
+
+    // Single file
+    if (!seenPaths.has(resolved)) {
+      seenPaths.add(resolved);
+      const content = await Bun.file(resolved).text();
+      sources.push({ path: resolved, content });
+    }
   }
 
   return sources;
@@ -138,37 +169,22 @@ const readSources = async (filePaths: string[]): Promise<SourceFile[]> => {
 
 /** Load source files from patterns, including prelude. */
 const loadSources = async (patterns: string[]): Promise<SourceFile[]> => {
-  const userFiles = await resolveFiles(patterns);
+  const userSources = await resolveInputs(patterns);
 
-  if (userFiles.length === 0) {
+  if (userSources.length === 0) {
     console.error(`${RED}error${RESET}: No files matched the given patterns`);
     process.exit(1);
   }
 
-  const userSources = await readSources(userFiles);
   return [prelude, ...userSources];
 };
 
-/** Run compilation and handle diagnostics/exit. */
-const run = async (
-  patterns: string[],
-  options: { typeCheckOnly: boolean; target?: Target; minify?: boolean },
-): Promise<void> => {
-  const sources = await loadSources(patterns);
-  const result = await compile(sources, options);
-
-  if (result.diagnostics.length > 0) {
-    printDiagnostics(result.diagnostics, sources);
-  }
-
-  if (!result.success) {
-    process.exit(1);
-  }
-
-  if (options.typeCheckOnly) {
-    console.log(result.typeString ?? "(no expression)");
-  } else if (result.code) {
-    console.log(result.code);
+/** Write output to file or stdout. */
+const writeOutput = async (content: string, output?: string): Promise<void> => {
+  if (output) {
+    await Bun.write(output, content);
+  } else {
+    process.stdout.write(content);
   }
 };
 
@@ -187,43 +203,70 @@ program
 program
   .command("compile")
   .description("Compile source files to JavaScript")
-  .argument("<files...>", "Source files or glob patterns")
+  .argument("<input...>", "Source files, directories, globs, or - for stdin")
   .option(
     `-t, --target <target>`,
     `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
   )
+  .option("-o, --output <file>", "Write output to file instead of stdout")
   .option("-m, --minify", "Minify the output JavaScript with terser")
-  .action((files, options: { target?: string; minify?: boolean }) => {
-    const target = options.target;
-    if (target && !isValidTarget(target)) {
-      console.error(
-        `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
-      );
-      process.exit(1);
-    }
-    void run(files, {
-      typeCheckOnly: false,
-      target: target as Target | undefined,
-      minify: options.minify,
-    });
-  });
+  .action(
+    async (input: string[], options: { target?: string; output?: string; minify?: boolean }) => {
+      const target = options.target;
+      if (target && !isValidTarget(target)) {
+        console.error(
+          `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
+        );
+        process.exit(1);
+      }
+
+      const sources = await loadSources(input);
+      const result = await compile(sources, {
+        target: (target as Target) ?? DEFAULT_TARGET,
+        minify: options.minify,
+      });
+
+      if (result.diagnostics.length > 0) {
+        printDiagnostics(result.diagnostics, sources);
+      }
+
+      if (!result.success || !result.code) {
+        process.exit(1);
+      }
+
+      await writeOutput(result.code, options.output);
+    },
+  );
 
 program
   .command("check")
   .description("Type check source files")
-  .argument("<files...>", "Source files or glob patterns")
-  .action((files) => void run(files, { typeCheckOnly: true }));
+  .argument("<input...>", "Source files, directories, globs, or - for stdin")
+  .action(async (input: string[]) => {
+    const sources = await loadSources(input);
+    const result = await compile(sources, { typeCheckOnly: true });
+
+    if (result.diagnostics.length > 0) {
+      printDiagnostics(result.diagnostics, sources);
+    }
+
+    if (!result.success) {
+      process.exit(1);
+    }
+
+    console.log(result.typeString ?? "(no expression)");
+  });
 
 program
   .command("run")
   .description("Compile and execute source files (use -- to pass args to program)")
-  .argument("<files...>", "Source files or glob patterns")
+  .argument("<input...>", "Source files, directories, globs, or - for stdin")
   .option(
     `-t, --target <target>`,
     `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
   )
   .option("-m, --minify", "Minify the output JavaScript with terser")
-  .action(async (_files: string[], options: { target?: string; minify?: boolean }) => {
+  .action(async (_input: string[], options: { target?: string; minify?: boolean }) => {
     const target = options.target;
     if (target && !isValidTarget(target)) {
       console.error(
@@ -240,35 +283,33 @@ program
 
     // Find -- in the original args
     const dashDashIndex = argsAfterRun.indexOf("--");
-    let sourceFiles: string[];
+    let inputPatterns: string[];
     let programArgs: string[];
 
     if (dashDashIndex !== -1) {
-      // Filter out options like -t/--target from source files
+      // Filter out options like -t/--target from input patterns
       const beforeDash = argsAfterRun.slice(0, dashDashIndex);
-      sourceFiles = [];
+      inputPatterns = [];
       for (let i = 0; i < beforeDash.length; i++) {
         const arg = beforeDash[i]!;
-        if (arg === "-t" || arg === "--target") {
-          i++; // Skip the value too
+        if (arg === "-t" || arg === "--target" || arg === "-m" || arg === "--minify") {
+          if (arg === "-t" || arg === "--target") i++; // Skip the value too
         } else if (!arg.startsWith("-")) {
-          sourceFiles.push(arg);
+          inputPatterns.push(arg);
         }
       }
       programArgs = argsAfterRun.slice(dashDashIndex + 1);
     } else {
-      // No --, use Commander's parsed files (which excludes options)
-      sourceFiles = _files;
+      inputPatterns = _input;
       programArgs = [];
     }
 
-    if (sourceFiles.length === 0) {
-      console.error(`${RED}error${RESET}: No source files specified`);
+    if (inputPatterns.length === 0) {
+      console.error(`${RED}error${RESET}: No input specified`);
       process.exit(1);
     }
 
-    // Compile
-    const sources = await loadSources(sourceFiles);
+    const sources = await loadSources(inputPatterns);
     const result = await compile(sources, {
       target: (target as Target) ?? DEFAULT_TARGET,
       minify: options.minify,
@@ -296,60 +337,86 @@ program
 program
   .command("format")
   .description("Format source files")
-  .argument("<files...>", "Source files or glob patterns")
+  .argument("<input...>", "Source files, directories, globs, or - for stdin")
+  .option("-o, --output <file>", "Write output to file instead of stdout (single input only)")
   .option("-w, --write", "Write formatted output back to files")
   .option("--check", "Check if files are formatted (exit 1 if not)")
-  .action(async (files: string[], options: { write?: boolean; check?: boolean }) => {
-    const filePaths = await resolveFiles(files);
+  .action(
+    async (input: string[], options: { output?: string; write?: boolean; check?: boolean }) => {
+      // Handle stdin
+      if (input.length === 1 && input[0] === "-") {
+        const content = await Bun.stdin.text();
+        const result = format(content);
 
-    if (filePaths.length === 0) {
-      console.error(`${RED}error${RESET}: No files matched the given patterns`);
-      process.exit(1);
-    }
-
-    let hasChanges = false;
-    let hasErrors = false;
-
-    for (const filePath of filePaths) {
-      const content = await Bun.file(filePath).text();
-      const result = format(content);
-
-      if (result.diagnostics.length > 0) {
-        console.error(`${RED}error${RESET}: ${filePath}`);
-        for (const diag of result.diagnostics) {
-          printDiagnostic(diag, content, filePath);
+        if (result.diagnostics.length > 0) {
+          for (const diag of result.diagnostics) {
+            printDiagnostic(diag, content, "<stdin>");
+          }
+          process.exit(1);
         }
-        hasErrors = true;
-        continue;
+
+        await writeOutput(result.formatted, options.output);
+        return;
       }
 
-      const isChanged = result.formatted !== content;
+      // Resolve file patterns
+      const sources = await resolveInputs(input);
 
-      if (options.check) {
-        if (isChanged) {
-          console.log(`${filePath}`);
-          hasChanges = true;
-        }
-      } else if (options.write) {
-        if (isChanged) {
-          await Bun.write(filePath, result.formatted);
-          console.log(`${GRAY}formatted${RESET} ${filePath}`);
-        }
-      } else {
-        // Print to stdout
-        process.stdout.write(result.formatted);
+      if (sources.length === 0) {
+        console.error(`${RED}error${RESET}: No files matched the given patterns`);
+        process.exit(1);
       }
-    }
 
-    if (hasErrors) {
-      process.exit(1);
-    }
+      // -o/--output only works with single file
+      if (options.output && sources.length > 1) {
+        console.error(`${RED}error${RESET}: --output can only be used with a single input file`);
+        process.exit(1);
+      }
 
-    if (options.check && hasChanges) {
-      console.error(`\n${RED}error${RESET}: Some files need formatting`);
-      process.exit(1);
-    }
-  });
+      let hasChanges = false;
+      let hasErrors = false;
+
+      for (const source of sources) {
+        const result = format(source.content);
+
+        if (result.diagnostics.length > 0) {
+          console.error(`${RED}error${RESET}: ${source.path}`);
+          for (const diag of result.diagnostics) {
+            printDiagnostic(diag, source.content, source.path);
+          }
+          hasErrors = true;
+          continue;
+        }
+
+        const isChanged = result.formatted !== source.content;
+
+        if (options.check) {
+          if (isChanged) {
+            console.log(`${source.path}`);
+            hasChanges = true;
+          }
+        } else if (options.write) {
+          if (isChanged) {
+            await Bun.write(source.path, result.formatted);
+            console.log(`${GRAY}formatted${RESET} ${source.path}`);
+          }
+        } else if (options.output) {
+          await writeOutput(result.formatted, options.output);
+        } else {
+          process.stdout.write(result.formatted);
+        }
+      }
+
+      if (hasErrors) {
+        process.exit(1);
+      }
+
+      if (options.check && hasChanges) {
+        console.error(`\n${RED}error${RESET}: Some files need formatting`);
+        process.exit(1);
+      }
+    },
+  );
 
 program
   .command("lsp")
@@ -358,39 +425,5 @@ program
     const { startLspServer } = await import("./lsp");
     startLspServer();
   });
-
-// Default command for backwards compatibility
-program
-  .argument("[file]", "Source file to compile")
-  .option("-c, --compile", "Compile to JavaScript (default)")
-  .option("-T, --typecheck", "Type check only")
-  .option(
-    `--target <target>`,
-    `Target platform: ${TARGETS.join(", ")} (default: ${DEFAULT_TARGET})`,
-  )
-  .option("-m, --minify", "Minify the output JavaScript with terser")
-  .action(
-    async (
-      file,
-      options: { compile?: boolean; typecheck?: boolean; target?: string; minify?: boolean },
-    ) => {
-      if (!file) {
-        program.help();
-        return;
-      }
-      const target = options.target;
-      if (target && !isValidTarget(target)) {
-        console.error(
-          `${RED}error${RESET}: Invalid target "${target}". Valid targets: ${TARGETS.join(", ")}`,
-        );
-        process.exit(1);
-      }
-      await run([file], {
-        typeCheckOnly: !!options.typecheck,
-        target: target as Target | undefined,
-        minify: options.minify,
-      });
-    },
-  );
 
 program.parse();

@@ -56,59 +56,41 @@ module Counter
   let add = n c -> match c when Counter m -> Counter (m + n) end
 end
 
-let testMath =
-  let a = Assert.equal 42 (Math.abs (0 - 42)) "abs" in
-  let b = Assert.equal 6 (Math.gcd 48 18) "gcd" in
-  let c = Assert.equal 12 (Math.lcm 4 6) "lcm" in
-  let d = Assert.equal 256 (Math.pow 2 8) "pow" in
-  let e = Assert.equal 100 (Math.clamp 0 100 150) "clamp" in
-  ()
-
-let testVec2 =
+let tests =
   let v1 = Vec2.make 3 4 in
   let v2 = Vec2.make 1 2 in
   let v3 = Vec2.add v1 v2 in
   let v4 = Vec2.scale 2 v1 in
-  let a = Assert.equal 11 (Vec2.dot v1 v2) "dot" in
-  let b = Assert.equal 25 (Vec2.lengthSquared v1) "lengthSquared" in
-  let c = Assert.equal 4 (Vec2.getX v3) "add X" in
-  let d = Assert.equal 8 (Vec2.getY v4) "scale Y" in
-  ()
-
-let testStack =
   let s0 = Stack.empty in
   let s1 = Stack.push 1 s0 in
   let s2 = Stack.push 2 s1 in
   let s3 = Stack.push 3 s2 in
-  let a = Assert.equal 3 (Stack.size s3) "size" in
-  let b = Assert.equal (Just 3) (Stack.peek s3) "peek" in
-  let c = Assert.ok (Stack.isEmpty s0) "isEmpty" in
-  let d = Assert.ok (Bool.negate (Stack.isEmpty s3)) "not isEmpty" in
-  ()
-
-let testQueue =
   let q0 = Queue.empty in
   let q1 = Queue.enqueue 1 q0 in
   let q2 = Queue.enqueue 2 q1 in
   let q3 = Queue.enqueue 3 q2 in
-  let a = Assert.equal 3 (Queue.size q3) "size" in
-  let b = Assert.equal (Just 1) (Maybe.map (p -> match p when (x, _) -> x end) (Queue.dequeue q3)) "dequeue first" in
-  let c = Assert.ok (Queue.isEmpty q0) "isEmpty" in
-  ()
-
-let testCounter =
   let c0 = Counter.zero in
   let c1 = Counter.increment c0 in
   let c2 = Counter.increment c1 in
   let c3 = Counter.add 10 c2 in
-  let a = Assert.equal 12 (Counter.value c3) "value after add" in
-  let b = Assert.equal 0 (Counter.value c0) "zero value" in
-  ()
+  [ Test.equal "abs" 42 (Math.abs (0 - 42))
+  , Test.equal "gcd" 6 (Math.gcd 48 18)
+  , Test.equal "lcm" 12 (Math.lcm 4 6)
+  , Test.equal "pow" 256 (Math.pow 2 8)
+  , Test.equal "clamp" 100 (Math.clamp 0 100 150)
+  , Test.equal "dot" 11 (Vec2.dot v1 v2)
+  , Test.equal "lengthSquared" 25 (Vec2.lengthSquared v1)
+  , Test.equal "add X" 4 (Vec2.getX v3)
+  , Test.equal "scale Y" 8 (Vec2.getY v4)
+  , Test.equal "stack size" 3 (Stack.size s3)
+  , Test.equal "stack peek" (Just 3) (Stack.peek s3)
+  , Test.ok "stack isEmpty" (Stack.isEmpty s0)
+  , Test.ok "stack not isEmpty" (Bool.negate (Stack.isEmpty s3))
+  , Test.equal "queue size" 3 (Queue.size q3)
+  , Test.equal "queue dequeue first" (Just 1) (Maybe.map (p -> match p when (x, _) -> x end) (Queue.dequeue q3))
+  , Test.ok "queue isEmpty" (Queue.isEmpty q0)
+  , Test.equal "counter value after add" 12 (Counter.value c3)
+  , Test.equal "counter zero value" 0 (Counter.value c0)
+  ]
 
-let main = args ->
-  let a = testMath in
-  let b = testVec2 in
-  let c = testStack in
-  let d = testQueue in
-  let e = testCounter in
-  IO.printLine "modules: ok"
+let main = args -> Test.run tests

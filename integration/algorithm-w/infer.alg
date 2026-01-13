@@ -1,399 +1,298 @@
--- =============================================================================
--- Algorithm W - Type Inference
--- =============================================================================
--- Implementation of Hindley-Milner type inference (Algorithm W).
+-- Algorithm W - Type Inference Implementation
+-- Uses types from types.alg
 
--- =============================================================================
--- Type Definitions (inline for self-containment)
--- =============================================================================
-
-type Type
-  = TVar string
-  | TCon string
-  | TFun Type Type
-
-type Scheme = Forall (List string) Type
-
-type Expr
-  = EVar string
-  | ELit Lit
-  | EAbs string Expr
-  | EApp Expr Expr
-  | ELet string Expr Expr
-
-type Lit = LInt int | LBool bool
-
-type TypeEnv = TypeEnv (List (string, Scheme))
-type Subst = Subst (List (string, Type))
-
--- Result type for inference
-type InferResult a = InferErr string | InferOk a
-
--- =============================================================================
--- Helper Functions
--- =============================================================================
-
--- String equality
+-- Utility Functions
 let strEq = String.eq
 
--- List membership
-let rec member = x xs ->
+let rec listMember = x xs ->
   match xs
     when Nil -> false
-    when Cons y rest -> if strEq x y then true else member x rest
+    when Cons y rest -> if strEq x y then true else listMember x rest
   end
 
--- Remove duplicates
-let rec nub = xs ->
+let listUnion = xs ys ->
+  List.foldl (acc x -> if listMember x acc then acc else Cons x acc) ys xs
+
+let listDiff = xs ys ->
+  List.filter (x -> listMember x ys == false) xs
+
+let rec listNub = xs ->
   match xs
     when Nil -> Nil
     when Cons x rest ->
-      if member x rest
-        then nub rest
-        else Cons x (nub rest)
+      if listMember x rest then listNub rest else Cons x (listNub rest)
   end
 
--- Set difference (xs - ys)
-let diff = xs ys -> List.filter (x -> member x ys == false) xs
+-- Environment Operations
+module Env
+  let empty = Env Nil
 
--- =============================================================================
--- Type Environment Operations
--- =============================================================================
+  let extend = name scheme env ->
+    match env when Env bindings -> Env (Cons (name, scheme) bindings) end
 
-let envEmpty = TypeEnv Nil
+  let rec lookup = name env ->
+    match env
+      when Env Nil -> Nothing
+      when Env (Cons (n, s) rest) ->
+        if strEq name n then Just s else lookup name (Env rest)
+    end
 
-let envExtend = name scheme env ->
-  match env
-    when TypeEnv bindings -> TypeEnv (Cons (name, scheme) bindings)
-  end
+  let remove = name env ->
+    match env
+      when Env bindings ->
+        Env (List.filter (p -> match p when (n, s) -> strEq n name == false end) bindings)
+    end
+end
 
-let rec envLookup = name env ->
-  match env
-    when TypeEnv Nil -> Nothing
-    when TypeEnv (Cons (n, s) rest) ->
-      if strEq name n
-        then Just s
-        else envLookup name (TypeEnv rest)
-  end
-
--- =============================================================================
 -- Substitution Operations
--- =============================================================================
+module Subst
+  let empty = Subst Nil
 
-let substEmpty = Subst Nil
-let substSingleton = var ty -> Subst (Cons (var, ty) Nil)
+  let single = var ty -> Subst (Cons (var, ty) Nil)
 
-let rec substLookup = var subst ->
-  match subst
-    when Subst Nil -> Nothing
-    when Subst (Cons (v, t) rest) ->
-      if strEq var v
-        then Just t
-        else substLookup var (Subst rest)
-  end
+  let rec lookup = var s ->
+    match s
+      when Subst Nil -> Nothing
+      when Subst (Cons (v, t) rest) ->
+        if strEq var v then Just t else lookup var (Subst rest)
+    end
 
--- Apply substitution to a type
-let rec applySubstType = subst ty ->
-  match ty
-    when TVar v ->
-      match substLookup v subst
-        when Nothing -> TVar v
-        when Just t -> t
-      end
-    when TCon c -> TCon c
-    when TFun t1 t2 -> TFun (applySubstType subst t1) (applySubstType subst t2)
-  end
+  let rec applyType = s ty ->
+    match ty
+      when TVar v ->
+        match lookup v s
+          when Nothing -> TVar v
+          when Just t -> t
+        end
+      when TCon c -> TCon c
+      when TFun t1 t2 -> TFun (applyType s t1) (applyType s t2)
+    end
 
--- Apply substitution to a scheme
-let applySubstScheme = subst scheme ->
-  match scheme
-    when Forall vars ty ->
-      let filtered = List.foldl (acc var ->
-        match acc
+  let applyScheme = s scheme ->
+    match scheme
+      when Forall vars ty ->
+        let filtered = match s
           when Subst bindings ->
             Subst (List.filter (p ->
-              match p when (v, t) -> strEq v var == false end
+              match p when (v, t) -> listMember v vars == false end
             ) bindings)
+        end in
+        Forall vars (applyType filtered ty)
+    end
+
+  let applyEnv = s env ->
+    match env
+      when Env bindings ->
+        Env (List.map (p ->
+          match p when (name, scheme) -> (name, applyScheme s scheme) end
+        ) bindings)
+    end
+
+  let compose = s2 s1 ->
+    match s1
+      when Subst bindings1 ->
+        match s2
+          when Subst bindings2 ->
+            let applied = List.map (p ->
+              match p when (v, t) -> (v, applyType s2 t) end
+            ) bindings1 in
+            Subst (List.append bindings2 applied)
         end
-      ) subst vars in
-      Forall vars (applySubstType filtered ty)
-  end
+    end
+end
 
--- Apply substitution to environment
-let applySubstEnv = subst env ->
-  match env
-    when TypeEnv bindings ->
-      TypeEnv (List.map (p ->
-        match p when (name, scheme) -> (name, applySubstScheme subst scheme) end
-      ) bindings)
-  end
-
--- Compose substitutions: apply s1 first, then s2
-let composeSubst = s2 s1 ->
-  match (s1, s2)
-    when (Subst bindings1, Subst bindings2) ->
-      let applied = List.map (p ->
-        match p when (v, t) -> (v, applySubstType s2 t) end
-      ) bindings1 in
-      Subst (List.append bindings2 applied)
-  end
-
--- =============================================================================
 -- Free Type Variables
--- =============================================================================
+module FTV
+  let rec inType = ty ->
+    match ty
+      when TVar v -> Cons v Nil
+      when TCon c -> Nil
+      when TFun t1 t2 -> listUnion (inType t1) (inType t2)
+    end
 
-let rec freeVarsType = ty ->
-  match ty
-    when TVar v -> Cons v Nil
-    when TCon c -> Nil
-    when TFun t1 t2 -> List.append (freeVarsType t1) (freeVarsType t2)
-  end
+  let inScheme = scheme ->
+    match scheme
+      when Forall vars ty -> listDiff (inType ty) vars
+    end
 
-let freeVarsScheme = scheme ->
-  match scheme
-    when Forall vars ty -> diff (freeVarsType ty) vars
-  end
+  let inEnv = env ->
+    match env
+      when Env bindings ->
+        listNub (List.concat (List.map (p ->
+          match p when (name, scheme) -> inScheme scheme end
+        ) bindings))
+    end
+end
 
-let freeVarsEnv = env ->
-  match env
-    when TypeEnv bindings ->
-      nub (List.concat (List.map (p ->
-        match p when (name, scheme) -> freeVarsScheme scheme end
-      ) bindings))
-  end
-
--- =============================================================================
 -- Occurs Check
--- =============================================================================
-
-let rec occursIn = var ty ->
+let rec occurs = var ty ->
   match ty
     when TVar v -> strEq var v
     when TCon c -> false
-    when TFun t1 t2 -> occursIn var t1 || occursIn var t2
+    when TFun t1 t2 -> occurs var t1 || occurs var t2
   end
 
--- =============================================================================
 -- Unification
--- =============================================================================
-
 let rec unify = t1 t2 ->
   match (t1, t2)
     when (TVar v1, TVar v2) ->
-      if strEq v1 v2
-        then InferOk substEmpty
-        else InferOk (substSingleton v1 t2)
+      if strEq v1 v2 then Ok Subst.empty else Ok (Subst.single v1 t2)
 
     when (TVar v, t) ->
-      if occursIn v t
-        then InferErr "occurs check failed"
-        else InferOk (substSingleton v t)
+      if occurs v t
+        then Err "infinite type (occurs check)"
+        else Ok (Subst.single v t)
 
     when (t, TVar v) ->
-      if occursIn v t
-        then InferErr "occurs check failed"
-        else InferOk (substSingleton v t)
+      if occurs v t
+        then Err "infinite type (occurs check)"
+        else Ok (Subst.single v t)
 
     when (TCon c1, TCon c2) ->
-      if strEq c1 c2
-        then InferOk substEmpty
-        else InferErr "type mismatch"
+      if strEq c1 c2 then Ok Subst.empty else Err "type constructor mismatch"
 
     when (TFun l1 r1, TFun l2 r2) ->
       match unify l1 l2
-        when InferErr e -> InferErr e
-        when InferOk s1 ->
-          match unify (applySubstType s1 r1) (applySubstType s1 r2)
-            when InferErr e -> InferErr e
-            when InferOk s2 -> InferOk (composeSubst s2 s1)
+        when Err e -> Err e
+        when Ok s1 ->
+          match unify (Subst.applyType s1 r1) (Subst.applyType s1 r2)
+            when Err e -> Err e
+            when Ok s2 -> Ok (Subst.compose s2 s1)
           end
       end
 
-    when _ -> InferErr "type mismatch"
+    when _ -> Err "cannot unify types"
   end
 
--- =============================================================================
--- Fresh Type Variables
--- =============================================================================
-
--- Counter state passed through inference
-type InferState = InferState int
-
+-- Fresh Variables & Instantiation
 let freshVar = state ->
   match state
-    when InferState n ->
-      let name = String.concat "t" (Int.toString n) in
-      (TVar name, InferState (n + 1))
+    when State n ->
+      (TVar (String.concat "t" (Int.toString n)), State (n + 1))
   end
 
--- =============================================================================
--- Instantiation and Generalization
--- =============================================================================
-
--- Instantiate a scheme with fresh type variables
 let instantiate = scheme state ->
   match scheme
     when Forall vars ty ->
-      let rec go = vars subst state ->
-        match vars
-          when Nil -> (applySubstType subst ty, state)
+      let rec go = vs s st ->
+        match vs
+          when Nil -> (Subst.applyType s ty, st)
           when Cons v rest ->
-            let pair = freshVar state in
-            match pair
-              when (freshTy, newState) ->
-                go rest (composeSubst (substSingleton v freshTy) subst) newState
+            match freshVar st
+              when (tv, st2) -> go rest (Subst.compose (Subst.single v tv) s) st2
             end
         end
-      in go vars substEmpty state
+      in go vars Subst.empty state
   end
 
--- Generalize a type over free variables not in the environment
 let generalize = env ty ->
-  let envFree = freeVarsEnv env in
-  let tyFree = freeVarsType ty in
-  let vars = diff tyFree envFree in
-  Forall (nub vars) ty
+  let envFree = FTV.inEnv env in
+  let tyFree = FTV.inType ty in
+  let vars = listNub (listDiff tyFree envFree) in
+  Forall vars ty
 
--- =============================================================================
--- Type Inference (Algorithm W)
--- =============================================================================
-
+-- Algorithm W
 let rec infer = env expr state ->
   match expr
     when EVar x ->
-      match envLookup x env
-        when Nothing -> (InferErr (String.concat "unbound variable: " x), state)
+      match Env.lookup x env
+        when Nothing -> (Err (String.concat "unbound: " x), state)
         when Just scheme ->
-          let pair = instantiate scheme state in
-          match pair
-            when (ty, newState) -> (InferOk (substEmpty, ty), newState)
+          match instantiate scheme state
+            when (ty, st) -> (Ok (Subst.empty, ty), st)
           end
       end
 
-    when ELit lit ->
-      match lit
-        when LInt n -> (InferOk (substEmpty, TCon "Int"), state)
-        when LBool b -> (InferOk (substEmpty, TCon "Bool"), state)
-      end
+    when EInt n -> (Ok (Subst.empty, TCon "Int"), state)
+
+    when EBool b -> (Ok (Subst.empty, TCon "Bool"), state)
 
     when EAbs x body ->
-      let pair = freshVar state in
-      match pair
-        when (paramTy, state1) ->
-          let newEnv = envExtend x (Forall Nil paramTy) env in
-          match infer newEnv body state1
-            when (InferErr e, state2) -> (InferErr e, state2)
-            when (InferOk (s, bodyTy), state2) ->
-              let resultTy = TFun (applySubstType s paramTy) bodyTy in
-              (InferOk (s, resultTy), state2)
+      match freshVar state
+        when (tv, st1) ->
+          let env2 = Env.extend x (Forall Nil tv) env in
+          match infer env2 body st1
+            when (Err e, st2) -> (Err e, st2)
+            when (Ok (s, t), st2) ->
+              (Ok (s, TFun (Subst.applyType s tv) t), st2)
           end
       end
 
-    when EApp fun arg ->
-      let pair = freshVar state in
-      match pair
-        when (resultTy, state1) ->
-          match infer env fun state1
-            when (InferErr e, state2) -> (InferErr e, state2)
-            when (InferOk (s1, funTy), state2) ->
-              match infer (applySubstEnv s1 env) arg state2
-                when (InferErr e, state3) -> (InferErr e, state3)
-                when (InferOk (s2, argTy), state3) ->
-                  let expectedFunTy = TFun argTy (applySubstType s2 resultTy) in
-                  match unify (applySubstType s2 funTy) expectedFunTy
-                    when InferErr e -> (InferErr e, state3)
-                    when InferOk s3 ->
-                      let finalSubst = composeSubst s3 (composeSubst s2 s1) in
-                      let finalTy = applySubstType s3 (applySubstType s2 resultTy) in
-                      (InferOk (finalSubst, finalTy), state3)
+    when EApp e1 e2 ->
+      match freshVar state
+        when (tv, st1) ->
+          match infer env e1 st1
+            when (Err e, st2) -> (Err e, st2)
+            when (Ok (s1, t1), st2) ->
+              match infer (Subst.applyEnv s1 env) e2 st2
+                when (Err e, st3) -> (Err e, st3)
+                when (Ok (s2, t2), st3) ->
+                  match unify (Subst.applyType s2 t1) (TFun t2 (Subst.applyType s2 tv))
+                    when Err e -> (Err e, st3)
+                    when Ok s3 ->
+                      let s = Subst.compose s3 (Subst.compose s2 s1) in
+                      (Ok (s, Subst.applyType s3 (Subst.applyType s2 tv)), st3)
                   end
               end
           end
       end
 
-    when ELet x defn body ->
-      match infer env defn state
-        when (InferErr e, state1) -> (InferErr e, state1)
-        when (InferOk (s1, defnTy), state1) ->
-          let newEnv = applySubstEnv s1 env in
-          let scheme = generalize newEnv defnTy in
-          let extendedEnv = envExtend x scheme newEnv in
-          match infer extendedEnv body state1
-            when (InferErr e, state2) -> (InferErr e, state2)
-            when (InferOk (s2, bodyTy), state2) ->
-              (InferOk (composeSubst s2 s1, bodyTy), state2)
+    when ELet x e1 e2 ->
+      match infer env e1 state
+        when (Err e, st1) -> (Err e, st1)
+        when (Ok (s1, t1), st1) ->
+          let env2 = Subst.applyEnv s1 env in
+          let scheme = generalize env2 t1 in
+          match infer (Env.extend x scheme env2) e2 st1
+            when (Err e, st2) -> (Err e, st2)
+            when (Ok (s2, t2), st2) ->
+              (Ok (Subst.compose s2 s1, t2), st2)
+          end
+      end
+
+    when EIf cond then_ else_ ->
+      match infer env cond state
+        when (Err e, st1) -> (Err e, st1)
+        when (Ok (s1, t1), st1) ->
+          match unify t1 (TCon "Bool")
+            when Err e -> (Err e, st1)
+            when Ok s2 ->
+              let env2 = Subst.applyEnv (Subst.compose s2 s1) env in
+              match infer env2 then_ st1
+                when (Err e, st2) -> (Err e, st2)
+                when (Ok (s3, t2), st2) ->
+                  let env3 = Subst.applyEnv s3 env2 in
+                  match infer env3 else_ st2
+                    when (Err e, st3) -> (Err e, st3)
+                    when (Ok (s4, t3), st3) ->
+                      match unify (Subst.applyType s4 t2) t3
+                        when Err e -> (Err e, st3)
+                        when Ok s5 ->
+                          let s = Subst.compose s5 (Subst.compose s4 (Subst.compose s3 (Subst.compose s2 s1))) in
+                          (Ok (s, Subst.applyType s5 t3), st3)
+                      end
+                  end
+              end
           end
       end
   end
 
--- =============================================================================
--- Top-level Inference
--- =============================================================================
-
-let inferExpr = expr ->
-  let initialEnv = envEmpty in
-  let initialState = InferState 0 in
-  match infer initialEnv expr initialState
-    when (InferErr e, _) -> Left e
-    when (InferOk (subst, ty), _) -> Right ty
+-- Top-Level Interface
+let typeOf = expr ->
+  match infer Env.empty expr (State 0)
+    when (Err e, _) -> Left e
+    when (Ok (s, ty), _) -> Right ty
   end
 
--- =============================================================================
--- Type Pretty Printing
--- =============================================================================
-
-let rec typeToString = ty ->
+-- Pretty print type
+let rec showType = ty ->
   match ty
     when TVar v -> v
     when TCon c -> c
     when TFun t1 t2 ->
-      let left = match t1
-        when TFun _ _ -> String.concat "(" (String.concat (typeToString t1) ")")
-        when _ -> typeToString t1
+      let l = match t1
+        when TFun _ _ -> String.concat "(" (String.concat (showType t1) ")")
+        when _ -> showType t1
       end in
-      String.concat left (String.concat " -> " (typeToString t2))
+      String.concat l (String.concat " -> " (showType t2))
   end
-
--- =============================================================================
--- Example Expressions
--- =============================================================================
-
--- Identity function: \x -> x
-let idExpr = EAbs "x" (EVar "x")
-
--- Constant function: \x -> \y -> x
-let constExpr = EAbs "x" (EAbs "y" (EVar "x"))
-
--- Apply: \f -> \x -> f x
-let applyExpr = EAbs "f" (EAbs "x" (EApp (EVar "f") (EVar "x")))
-
--- Compose: \f -> \g -> \x -> f (g x)
-let composeExpr = EAbs "f" (EAbs "g" (EAbs "x" (EApp (EVar "f") (EApp (EVar "g") (EVar "x")))))
-
--- Let polymorphism: let id = \x -> x in (id 1, id true)
--- (Simplified since we don't have tuples - just apply id twice)
-let letPolyExpr = ELet "id" (EAbs "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 42)))
-
--- Self application attempt (should fail or give complex type)
-let selfAppExpr = EAbs "x" (EApp (EVar "x") (EVar "x"))
-
--- =============================================================================
--- Testing
--- =============================================================================
-
-let testInfer = expr name ->
-  match inferExpr expr
-    when Left err ->
-      IO.printLine (String.concat name (String.concat ": Error - " err))
-    when Right ty ->
-      IO.printLine (String.concat name (String.concat ": " (typeToString ty)))
-  end
-
-let runInferTests =
-  let r1 = testInfer idExpr "id" in
-  let r2 = testInfer constExpr "const" in
-  let r3 = testInfer applyExpr "apply" in
-  let r4 = testInfer composeExpr "compose" in
-  let r5 = testInfer letPolyExpr "letPoly" in
-  let r6 = testInfer selfAppExpr "selfApp" in
-  0

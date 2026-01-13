@@ -14,24 +14,26 @@ let isZeroOrOne = n -> match n when 0 | 1 -> true when _ -> false end
 
 let startsWithZeroOrOne = xs -> match xs when Cons 0 _ | Cons 1 _ -> true when _ -> false end
 
-let main = args ->
-  let a = Assert.ok (isPrimary Red) "Red is primary" in
-  let b = Assert.ok (isPrimary Green) "Green is primary" in
-  let c = Assert.ok (isPrimary Blue) "Blue is primary" in
-  let d = Assert.ok (Bool.negate (isPrimary (RGB 1 2 3))) "RGB not primary" in
-  let e = Assert.ok (isEmptyOrNothing Nothing) "Nothing" in
-  let f = Assert.ok (isEmptyOrNothing (Just Nil)) "Just Nil" in
-  let g = Assert.ok (Bool.negate (isEmptyOrNothing (Just [1]))) "Just [1]" in
-  let h = Assert.ok (isSpecialValue Nothing) "special Nothing" in
-  let i = Assert.ok (isSpecialValue (Just Nothing)) "special Just Nothing" in
-  let j = Assert.ok (Bool.negate (isSpecialValue (Just (Just 1)))) "not special Just Just" in
-  let k = Assert.equal 42 (extractValue (Just (Just 42))) "extract Just Just" in
-  let l = Assert.equal 0 (extractValue (Just Nothing)) "extract Just Nothing" in
-  let m = Assert.equal 0 (extractValue Nothing) "extract Nothing" in
-  let n = Assert.ok (isZeroOrOne 0) "0 is 0 or 1" in
-  let o = Assert.ok (isZeroOrOne 1) "1 is 0 or 1" in
-  let p = Assert.ok (Bool.negate (isZeroOrOne 5)) "5 not 0 or 1" in
-  let q = Assert.ok (startsWithZeroOrOne [0, 2, 3]) "starts with 0" in
-  let r = Assert.ok (startsWithZeroOrOne [1, 2, 3]) "starts with 1" in
-  let s = Assert.ok (Bool.negate (startsWithZeroOrOne [5, 2, 3])) "not starts with 0 or 1" in
-  IO.printLine "or-patterns: ok"
+let tests =
+  [ Test.ok "Red is primary" (isPrimary Red)
+  , Test.ok "Green is primary" (isPrimary Green)
+  , Test.ok "Blue is primary" (isPrimary Blue)
+  , Test.ok "RGB not primary" (Bool.negate (isPrimary (RGB 1 2 3)))
+  , Test.ok "Nothing" (isEmptyOrNothing Nothing)
+  , Test.ok "Just Nil" (isEmptyOrNothing (Just Nil))
+  , Test.ok "Just [1]" (Bool.negate (isEmptyOrNothing (Just [1])))
+  , Test.ok "special Nothing" (isSpecialValue Nothing)
+  , Test.ok "special Just Nothing" (isSpecialValue (Just Nothing))
+  , Test.ok "not special Just Just" (Bool.negate (isSpecialValue (Just (Just 1))))
+  , Test.equal "extract Just Just" 42 (extractValue (Just (Just 42)))
+  , Test.equal "extract Just Nothing" 0 (extractValue (Just Nothing))
+  , Test.equal "extract Nothing" 0 (extractValue Nothing)
+  , Test.ok "0 is 0 or 1" (isZeroOrOne 0)
+  , Test.ok "1 is 0 or 1" (isZeroOrOne 1)
+  , Test.ok "5 not 0 or 1" (Bool.negate (isZeroOrOne 5))
+  , Test.ok "starts with 0" (startsWithZeroOrOne [0, 2, 3])
+  , Test.ok "starts with 1" (startsWithZeroOrOne [1, 2, 3])
+  , Test.ok "not starts with 0 or 1" (Bool.negate (startsWithZeroOrOne [5, 2, 3]))
+  ]
+
+let main = args -> Test.run tests

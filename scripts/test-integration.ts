@@ -4,25 +4,24 @@ import { join } from "node:path";
 const TIMEOUT_MS = 3000;
 const INTEGRATION_DIR = "integration";
 
-async function findAlgFiles(dir: string): Promise<string[]> {
-  const files: string[] = [];
+/** Find all test directories (immediate subdirectories of integration/) */
+async function findTestDirs(dir: string): Promise<string[]> {
+  const dirs: string[] = [];
   const entries = await readdir(dir);
   for (const entry of entries) {
     const path = join(dir, entry);
     const s = await stat(path);
     if (s.isDirectory()) {
-      files.push(...(await findAlgFiles(path)));
-    } else if (entry === "main.alg") {
-      // Only test main.alg files - other .alg files are helper modules or error examples
-      files.push(path);
+      dirs.push(path);
     }
   }
-  return files.sort();
+  return dirs.sort();
 }
 
-async function runWithTimeout(file: string): Promise<{ ok: boolean; output: string }> {
+/** Run check on a directory (multi-file project) */
+async function runWithTimeout(dir: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const proc = Bun.spawn(["bun", "run", "src/index.ts", "check", file], {
+    const proc = Bun.spawn(["bun", "run", "src/index.ts", "check", dir], {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -41,19 +40,19 @@ async function runWithTimeout(file: string): Promise<{ ok: boolean; output: stri
 }
 
 async function main() {
-  const files = await findAlgFiles(INTEGRATION_DIR);
+  const dirs = await findTestDirs(INTEGRATION_DIR);
   let passed = 0;
   let failed = 0;
 
-  console.log(`Running ${files.length} integration tests...\n`);
+  console.log(`Running ${dirs.length} integration tests...\n`);
 
-  for (const file of files) {
-    const { ok, output } = await runWithTimeout(file);
+  for (const dir of dirs) {
+    const { ok, output } = await runWithTimeout(dir);
     if (ok) {
-      console.log(`✓ ${file}`);
+      console.log(`✓ ${dir}`);
       passed++;
     } else {
-      console.log(`✗ ${file}`);
+      console.log(`✗ ${dir}`);
       if (output.trim()) {
         console.log(`  ${output.trim().split("\n").join("\n  ")}`);
       }

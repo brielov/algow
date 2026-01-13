@@ -25,7 +25,7 @@ import _duration from "./modules/duration.js" with { type: "text" };
 import _date from "./modules/date.js" with { type: "text" };
 import _time from "./modules/time.js" with { type: "text" };
 import _datetime from "./modules/datetime.js" with { type: "text" };
-import _assert from "./modules/assert.js" with { type: "text" };
+import _test from "./modules/test.js" with { type: "text" };
 import _nodeTarget from "./targets/node.js" with { type: "text" };
 import _denoTarget from "./targets/deno.js" with { type: "text" };
 import _browserTarget from "./targets/browser.js" with { type: "text" };
@@ -48,7 +48,7 @@ const duration = _duration as string;
 const date = _date as string;
 const time = _time as string;
 const datetime = _datetime as string;
-const assert = _assert as string;
+const test = _test as string;
 const nodeTarget = _nodeTarget as string;
 const denoTarget = _denoTarget as string;
 const browserTarget = _browserTarget as string;
@@ -83,7 +83,7 @@ const crossPlatform: string = [
   date,
   time,
   datetime,
-  assert,
+  test,
 ].join("\n");
 
 // Pre-built runtimes for each target
