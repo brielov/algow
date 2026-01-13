@@ -513,6 +513,160 @@ end
 module Json
   foreign decode : string -> Either string JsonValue
   foreign encode : a -> string
+
+  -- ===========================================================================
+  -- Decoder Combinators
+  -- ===========================================================================
+
+  -- Primitive decoders
+  let int = json ->
+    match json
+      when JsonNumber n -> Just (Float.round n)
+      when _ -> Nothing
+    end
+
+  let float = json ->
+    match json
+      when JsonNumber n -> Just n
+      when _ -> Nothing
+    end
+
+  let string = json ->
+    match json
+      when JsonString s -> Just s
+      when _ -> Nothing
+    end
+
+  let bool = json ->
+    match json
+      when JsonBool b -> Just b
+      when _ -> Nothing
+    end
+
+  let null = json ->
+    match json
+      when JsonNull -> Just ()
+      when _ -> Nothing
+    end
+
+  -- Field access: get a field from a JsonObject
+  let rec field = name json ->
+    match json
+      when JsonObject pairs ->
+        match pairs
+          when Nil -> Nothing
+          when Cons (k, v) rest ->
+            if String.eq k name then Just v else field name (JsonObject rest)
+        end
+      when _ -> Nothing
+    end
+
+  -- Get field and decode in one step
+  let at = name decoder json ->
+    Maybe.flatMap decoder (field name json)
+
+  -- Decode a JSON array with a decoder for each element
+  -- Returns Nothing if any element fails to decode
+  let list = decoder json ->
+    match json
+      when JsonArray items ->
+        let rec go = xs acc ->
+          match xs
+            when Nil -> Just (List.reverse acc)
+            when Cons x rest ->
+              match decoder x
+                when Nothing -> Nothing
+                when Just v -> go rest (Cons v acc)
+              end
+          end
+        in go items Nil
+      when _ -> Nothing
+    end
+
+  -- Nullable: decode a value that might be null
+  let nullable = decoder json ->
+    match json
+      when JsonNull -> Just Nothing
+      when _ -> Maybe.map (x -> Just x) (decoder json)
+    end
+
+  -- Provide a default value for Nothing
+  let withDefault = default maybe ->
+    match maybe
+      when Nothing -> default
+      when Just x -> x
+    end
+
+  -- Applicative combinators for combining decoders
+  let map = f ma ->
+    match ma
+      when Nothing -> Nothing
+      when Just a -> Just (f a)
+    end
+
+  let map2 = f ma mb ->
+    match ma
+      when Nothing -> Nothing
+      when Just a ->
+        match mb
+          when Nothing -> Nothing
+          when Just b -> Just (f a b)
+        end
+    end
+
+  let map3 = f ma mb mc ->
+    match ma
+      when Nothing -> Nothing
+      when Just a ->
+        match mb
+          when Nothing -> Nothing
+          when Just b ->
+            match mc
+              when Nothing -> Nothing
+              when Just c -> Just (f a b c)
+            end
+        end
+    end
+
+  let map4 = f ma mb mc md ->
+    match ma
+      when Nothing -> Nothing
+      when Just a ->
+        match mb
+          when Nothing -> Nothing
+          when Just b ->
+            match mc
+              when Nothing -> Nothing
+              when Just c ->
+                match md
+                  when Nothing -> Nothing
+                  when Just d -> Just (f a b c d)
+                end
+            end
+        end
+    end
+
+  let map5 = f ma mb mc md me ->
+    match ma
+      when Nothing -> Nothing
+      when Just a ->
+        match mb
+          when Nothing -> Nothing
+          when Just b ->
+            match mc
+              when Nothing -> Nothing
+              when Just c ->
+                match md
+                  when Nothing -> Nothing
+                  when Just d ->
+                    match me
+                      when Nothing -> Nothing
+                      when Just e -> Just (f a b c d e)
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- =============================================================================

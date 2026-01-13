@@ -1,7 +1,11 @@
 -- =============================================================================
--- JSON Decoding into Typed Data Structures
+-- JSON Decoding with Combinators and Do-Notation
 -- =============================================================================
--- Demonstrates parsing JsonValue into custom ADTs
+-- Demonstrates both combinator-style and do-notation for JSON parsing
+
+-- Bring Maybe's flatMap into scope for do-notation
+let flatMap = Maybe.flatMap
+let pure = x -> Just x
 
 -- Define a Todo type matching jsonplaceholder.typicode.com/todos schema
 type Todo = Todo {
@@ -11,97 +15,121 @@ type Todo = Todo {
   completed: bool
 }
 
--- Helper to find a field in a JSON object's key-value pairs
-let rec findField = name pairs ->
-  match pairs
-    when Nil -> Nothing
-    when Cons (k, v) rest ->
-      if String.eq k name then Just v else findField name rest
-  end
+-- =============================================================================
+-- Combinator Style (using Json.mapN)
+-- =============================================================================
 
--- Decode a single Todo from JsonValue
-let decodeTodo = json ->
-  match json
-    when JsonObject pairs ->
-      let userId = match findField "userId" pairs
-        when Just (JsonNumber n) -> Just (Float.round n)
-        when _ -> Nothing
-      end in
-      let id = match findField "id" pairs
-        when Just (JsonNumber n) -> Just (Float.round n)
-        when _ -> Nothing
-      end in
-      let title = match findField "title" pairs
-        when Just (JsonString s) -> Just s
-        when _ -> Nothing
-      end in
-      let completed = match findField "completed" pairs
-        when Just (JsonBool b) -> Just b
-        when _ -> Nothing
-      end in
-      match (userId, id, title, completed)
-        when (Just u, Just i, Just t, Just c) ->
-          Just (Todo { userId = u, id = i, title = t, completed = c })
-        when _ -> Nothing
-      end
-    when _ -> Nothing
-  end
+let decodeTodoCombinator = json ->
+  let userId = Json.at "userId" Json.int json in
+  let id = Json.at "id" Json.int json in
+  let title = Json.at "title" Json.string json in
+  let completed = Json.at "completed" Json.bool json in
+  Json.map4 (u i t c -> Todo { userId = u, id = i, title = t, completed = c }) userId id title completed
 
--- Decode a list of Todos from a JsonArray
-let decodeTodos = json ->
-  match json
-    when JsonArray items -> List.filterMap decodeTodo items
-    when _ -> Nil
-  end
+-- =============================================================================
+-- Do-Notation Style (cleaner!)
+-- =============================================================================
 
--- Test with inline JSON (no network required for type checking)
+let decodeTodoDo = json -> do
+  userId <- Json.at "userId" Json.int json
+  id <- Json.at "id" Json.int json
+  title <- Json.at "title" Json.string json
+  completed <- Json.at "completed" Json.bool json
+  pure (Todo { userId = userId, id = id, title = title, completed = completed })
+end
+
+-- Decode a list of Todos
+let decodeTodosCombinator = Json.list decodeTodoCombinator
+let decodeTodosDo = Json.list decodeTodoDo
+
+-- Test JSON data
 let testJson = "[{\"userId\":1,\"id\":1,\"title\":\"task one\",\"completed\":false},{\"userId\":1,\"id\":2,\"title\":\"task two\",\"completed\":true}]"
 
-let testDecode =
+-- Test combinator style
+let testCombinator =
   match Json.decode testJson
     when Left err -> 0
     when Right jsonValue ->
-      let todos = decodeTodos jsonValue in
-      List.length todos
+      match decodeTodosCombinator jsonValue
+        when Nothing -> 0
+        when Just todos -> List.length todos
+      end
   end
 
--- Test individual field access
+-- Test do-notation style
+let testDoNotation =
+  match Json.decode testJson
+    when Left err -> 0
+    when Right jsonValue ->
+      match decodeTodosDo jsonValue
+        when Nothing -> 0
+        when Just todos -> List.length todos
+      end
+  end
+
+-- Test that both produce the same result
+let testEquivalent = if testCombinator == testDoNotation then 1 else 0
+
+-- Test field access on decoded data
 let testFieldAccess =
-  let todos = match Json.decode testJson
-    when Left _ -> Nil
-    when Right json -> decodeTodos json
-  end in
-  match todos
-    when Cons (Todo t) _ -> if t.completed then 0 else 1
-    when Nil -> 0
+  match Json.decode testJson
+    when Left _ -> 0
+    when Right json ->
+      match decodeTodosDo json
+        when Nothing -> 0
+        when Just todos ->
+          match todos
+            when Cons (Todo t) _ -> if t.completed then 0 else 1
+            when Nil -> 0
+          end
+      end
   end
 
--- Test completed filter
+-- Test filtering decoded data
 let testFilter =
-  let todos = match Json.decode testJson
-    when Left _ -> Nil
-    when Right json -> decodeTodos json
-  end in
-  let completedTodos = List.filter (todo ->
-    match todo when Todo t -> t.completed end
-  ) todos in
-  List.length completedTodos
+  match Json.decode testJson
+    when Left _ -> 0
+    when Right json ->
+      match decodeTodosDo json
+        when Nothing -> 0
+        when Just todos ->
+          let completed = List.filter (todo -> match todo when Todo t -> t.completed end) todos in
+          List.length completed
+      end
+  end
+
+-- Test primitive decoders
+let testPrimitives =
+  let intOk = match Json.int (JsonNumber 42.0) when Just n -> if n == 42 then 1 else 0 when Nothing -> 0 end in
+  let strOk = match Json.string (JsonString "hello") when Just s -> if String.eq s "hello" then 1 else 0 when Nothing -> 0 end in
+  let boolOk = match Json.bool (JsonBool true) when Just b -> if b then 1 else 0 when Nothing -> 0 end in
+  let nullOk = match Json.null JsonNull when Just _ -> 1 when Nothing -> 0 end in
+  intOk + strOk + boolOk + nullOk
+
+-- Test nullable decoder
+let testNullable =
+  let nullCase = match Json.nullable Json.int JsonNull when Just Nothing -> 1 when _ -> 0 end in
+  let valueCase = match Json.nullable Json.int (JsonNumber 5.0) when Just (Just n) -> if n == 5 then 1 else 0 when _ -> 0 end in
+  nullCase + valueCase
 
 -- Full integration: HTTP GET -> JSON decode -> typed data
--- (This would make a real network request when run)
 let fetchTodos = unit ->
   let result = Http.get "https://jsonplaceholder.typicode.com/todos?_limit=5" in
   match result
-    when Left err -> Nil
+    when Left err -> Nothing
     when Right response ->
       match Json.decode response.body
-        when Left _ -> Nil
-        when Right json -> decodeTodos json
+        when Left _ -> Nothing
+        when Right json -> decodeTodosDo json
       end
   end
 
 let main = args ->
-  let a = IO.printLine (String.concat "Decoded todos: " (Int.toString testDecode)) in
-  let b = IO.printLine (String.concat "Field access test: " (Int.toString testFieldAccess)) in
-  let c = IO.printLine (String.concat "Completed count: " (Int.toString testFilter)) in
-  IO.printLine "JSON decode tests passed!"
+  let a = IO.printLine (String.concat "Combinator style: " (Int.toString testCombinator)) in
+  let b = IO.printLine (String.concat "Do-notation style: " (Int.toString testDoNotation)) in
+  let c = IO.printLine (String.concat "Both equivalent: " (Int.toString testEquivalent)) in
+  let d = IO.printLine (String.concat "Field access: " (Int.toString testFieldAccess)) in
+  let e = IO.printLine (String.concat "Filter test: " (Int.toString testFilter)) in
+  let f = IO.printLine (String.concat "Primitives: " (Int.toString testPrimitives)) in
+  let g = IO.printLine (String.concat "Nullable: " (Int.toString testNullable)) in
+  IO.printLine "JSON decoder tests passed!"
