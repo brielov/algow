@@ -169,7 +169,7 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
       const lookupSpan = expr.memberSpan ?? expr.span;
       const resolved = lookup(ctx, expr.name.text, lookupSpan);
       if (resolved) {
-        return C.cvar(resolved, expr.span, expr.moduleSpan, expr.memberSpan);
+        return C.cvar(expr.nodeId, resolved, expr.span, expr.moduleSpan, expr.memberSpan);
       }
       // Keep the unresolved name for error recovery
       return expr;
@@ -179,11 +179,16 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
       return expr;
 
     case "CApp":
-      return C.capp(resolveExpr(ctx, expr.func), resolveExpr(ctx, expr.arg), expr.span);
+      return C.capp(
+        expr.nodeId,
+        resolveExpr(ctx, expr.func),
+        resolveExpr(ctx, expr.arg),
+        expr.span,
+      );
 
     case "CAbs": {
       const [newCtx, param] = extendEnv(ctx, expr.param.text, "parameter", expr.paramSpan);
-      return C.cabs(param, resolveExpr(newCtx, expr.body), expr.span, expr.paramSpan);
+      return C.cabs(expr.nodeId, param, resolveExpr(newCtx, expr.body), expr.span, expr.paramSpan);
     }
 
     case "CLet": {
@@ -191,7 +196,7 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
       const resolvedValue = resolveExpr(ctx, expr.value);
       // Extend context with binding (span embedded in name for LSP tracking)
       const [newCtx, name] = extendEnv(ctx, expr.name.text, "variable", expr.name.span);
-      return C.clet(name, resolvedValue, resolveExpr(newCtx, expr.body), expr.span);
+      return C.clet(expr.nodeId, name, resolvedValue, resolveExpr(newCtx, expr.body), expr.span);
     }
 
     case "CLetRec": {
@@ -206,11 +211,12 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
         value: resolveExpr(newCtx, b.value),
       }));
 
-      return C.cletrec(resolvedBindings, resolveExpr(newCtx, expr.body), expr.span);
+      return C.cletrec(expr.nodeId, resolvedBindings, resolveExpr(newCtx, expr.body), expr.span);
     }
 
     case "CMatch":
       return C.cmatch(
+        expr.nodeId,
         resolveExpr(ctx, expr.scrutinee),
         expr.cases.map((c) => resolveCase(ctx, c)),
         expr.span,
@@ -220,7 +226,7 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
       // Check if this constructor is an alias (from use declarations)
       const aliasedName = ctx.constructorAliases.get(expr.name);
       if (aliasedName) {
-        return C.ccon(aliasedName, expr.span);
+        return C.ccon(expr.nodeId, aliasedName, expr.span);
       }
       // Constructors are global, no resolution needed
       return expr;
@@ -228,25 +234,28 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
 
     case "CTuple":
       return C.ctuple(
+        expr.nodeId,
         expr.elements.map((e) => resolveExpr(ctx, e)),
         expr.span,
       );
 
     case "CRecord":
       return C.crecord(
+        expr.nodeId,
         expr.fields.map((f) => ({ name: f.name, value: resolveExpr(ctx, f.value) })),
         expr.span,
       );
 
     case "CRecordUpdate":
       return C.crecordUpdate(
+        expr.nodeId,
         resolveExpr(ctx, expr.record),
         expr.fields.map((f) => ({ name: f.name, value: resolveExpr(ctx, f.value) })),
         expr.span,
       );
 
     case "CField":
-      return C.cfield(resolveExpr(ctx, expr.record), expr.field, expr.span);
+      return C.cfield(expr.nodeId, resolveExpr(ctx, expr.record), expr.field, expr.span);
 
     case "CForeign":
       // Foreign calls don't need resolution
@@ -254,6 +263,7 @@ const resolveExpr = (ctx: ResolveContext, expr: C.CExpr): C.CExpr => {
 
     case "CBinOp":
       return C.cbinop(
+        expr.nodeId,
         expr.op,
         resolveExpr(ctx, expr.left),
         resolveExpr(ctx, expr.right),
@@ -284,7 +294,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
     case "CPVar": {
       const name = freshName(pattern.name.text, pattern.name.span);
       return {
-        pattern: C.cpvar(name, pattern.span),
+        pattern: C.cpvar(pattern.nodeId, name, pattern.span),
         bindings: [{ name, span: pattern.span }],
       };
     }
@@ -309,6 +319,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
 
       return {
         pattern: C.cpcon(
+          pattern.nodeId,
           resolvedName,
           results.map((r) => r.pattern),
           pattern.span,
@@ -321,6 +332,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
       const results = pattern.elements.map((p) => resolvePattern(ctx, p));
       return {
         pattern: C.cptuple(
+          pattern.nodeId,
           results.map((r) => r.pattern),
           pattern.span,
         ),
@@ -339,7 +351,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
       }
 
       return {
-        pattern: C.cprecord(resolvedFields, pattern.span),
+        pattern: C.cprecord(pattern.nodeId, resolvedFields, pattern.span),
         bindings,
       };
     }
@@ -348,7 +360,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
       const name = freshName(pattern.name.text, pattern.name.span);
       const inner = resolvePattern(ctx, pattern.pattern);
       return {
-        pattern: C.cpas(name, inner.pattern, pattern.span),
+        pattern: C.cpas(pattern.nodeId, name, inner.pattern, pattern.span),
         bindings: [{ name, span: pattern.span }, ...inner.bindings],
       };
     }
@@ -359,7 +371,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
       const right = resolvePattern(ctx, pattern.right);
       // Use left's bindings (should be same as right's)
       return {
-        pattern: C.cpor(left.pattern, right.pattern, pattern.span),
+        pattern: C.cpor(pattern.nodeId, left.pattern, right.pattern, pattern.span),
         bindings: left.bindings,
       };
     }
@@ -566,7 +578,7 @@ export const resolveProgram = (
           ctx = { ...ctx, constructors: newConstructors, constructorAliases: newAliases };
         }
 
-        resolvedDecls.push(C.cdecllet(name, resolvedValue, decl.span));
+        resolvedDecls.push(C.cdecllet(decl.nodeId, name, resolvedValue, decl.span));
         break;
       }
 
@@ -575,14 +587,22 @@ export const resolveProgram = (
           name: bindingNames.get(b.name.text)!,
           value: resolveExpr(ctx, b.value),
         }));
-        resolvedDecls.push(C.cdeclletrec(resolvedBindings, decl.span));
+        resolvedDecls.push(C.cdeclletrec(decl.nodeId, resolvedBindings, decl.span));
         break;
       }
 
       case "CDeclForeign": {
         const name = bindingNames.get(decl.name.text)!;
         resolvedDecls.push(
-          C.cdeclforeign(name, decl.module, decl.jsName, decl.type, decl.isAsync, decl.span),
+          C.cdeclforeign(
+            decl.nodeId,
+            name,
+            decl.module,
+            decl.jsName,
+            decl.type,
+            decl.isAsync,
+            decl.span,
+          ),
         );
         break;
       }

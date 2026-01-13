@@ -891,22 +891,22 @@ export type Token = {
 - [x] **3.15** Update LSP position conversion to use file-aware spans
 - [x] **3.16** Run full test suite and fix any issues
 
-### Phase 4: Node IDs and Unified Type Map
+### Phase 4: Node IDs and Unified Type Map ✅
 
-- [ ] **4.1** Create `NodeId` type alias: `type NodeId = number`
-- [ ] **4.2** Create `NodeIdGenerator` with `next(): NodeId` method
-- [ ] **4.3** Add `nodeId: NodeId` to all Surface AST types
-- [ ] **4.4** Add `nodeId: NodeId` to all Core AST types
-- [ ] **4.5** Update parser to assign node IDs during parsing
-- [ ] **4.6** Update desugarer to assign new node IDs to synthetic nodes
-- [ ] **4.7** Create unified `TypeMap = Map<NodeId, Type>`
-- [ ] **4.8** Update checker to store types by node ID
-- [ ] **4.9** Remove `typeMap: Map<number, Scheme>` from CheckOutput
-- [ ] **4.10** Remove `exprTypeMap: Map<number, Type>` from CheckOutput
-- [ ] **4.11** Remove `tupleProjections: Map<number, Type>` from CheckOutput
-- [ ] **4.12** Update LSP `getHoverAtPosition` to use single TypeMap lookup
-- [ ] **4.13** Update lower.ts type lookup to use node IDs
-- [ ] **4.14** Run full test suite and fix any issues
+- [x] **4.1** Create `NodeId` type alias: `type NodeId = number`
+- [x] **4.2** Create `NodeIdGenerator` with `next(): NodeId` method
+- [x] **4.3** Add `nodeId: NodeId` to all Surface AST types
+- [x] **4.4** Add `nodeId: NodeId` to all Core AST types
+- [x] **4.5** Update parser to assign node IDs during parsing
+- [x] **4.6** Update desugarer to assign new node IDs to synthetic nodes
+- [x] **4.7** Create unified `nodeTypeMap = Map<NodeId, Type>` in checker
+- [x] **4.8** Update checker to store types by node ID
+- [x] **4.9** ~~Remove `typeMap`~~ (kept for backward compatibility with lower.ts)
+- [x] **4.10** Remove `exprTypeMap: Map<number, Type>` from CheckOutput
+- [x] **4.11** ~~Remove `tupleProjections`~~ (still used for deferred tuple projections)
+- [x] **4.12** ~~Update LSP `getHoverAtPosition`~~ (uses symbolTable, not typeMap)
+- [x] **4.13** Update lower.ts type lookup to use node IDs
+- [x] **4.14** Run full test suite and fix any issues
 
 ### Phase 5: Integrated Symbol Table
 

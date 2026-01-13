@@ -383,31 +383,25 @@ export const getCompletionsAtPosition = (
   if (isInPatternContext(file.content, offset)) {
     const completions: { label: string; kind: string; detail?: string }[] = [];
 
-    // Try to find the scrutinee type to filter constructors
-    let allowedConstructors: ReadonlySet<string> | null = null;
-
+    // Try to determine the scrutinee type for filtering
+    let scrutineeTypeName: string | null = null;
     if (result.checkOutput) {
       const scrutineeStart = findMatchScrutineeStart(file.content, offset);
       if (scrutineeStart !== null) {
-        // Look up scrutinee type by local offset (exprTypeMap now uses file-local offsets)
-        const scrutineeType = result.checkOutput.exprTypeMap.get(scrutineeStart);
-
-        if (scrutineeType) {
-          const typeName = getTypeConstructorName(scrutineeType);
-          if (typeName) {
-            const ctors = result.checkOutput.constructorRegistry.get(typeName);
-            if (ctors) {
-              allowedConstructors = new Set(ctors);
-            }
+        const nodeId = result.checkOutput.spanToNodeId.get(scrutineeStart);
+        if (nodeId !== undefined) {
+          const scrutineeType = result.checkOutput.nodeTypeMap.get(nodeId);
+          if (scrutineeType) {
+            scrutineeTypeName = getTypeConstructorName(scrutineeType);
           }
         }
       }
     }
 
-    // Add constructors (filtered if we know the type)
+    // Add constructors, filtered by scrutinee type if known
     if (result.symbolTable) {
       for (const [name, ctor] of result.symbolTable.constructors) {
-        if (allowedConstructors === null || allowedConstructors.has(name)) {
+        if (scrutineeTypeName === null || ctor.typeName === scrutineeTypeName) {
           completions.push({
             label: name,
             kind: "Constructor",

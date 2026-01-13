@@ -1,7 +1,7 @@
 // Core AST - minimal, canonical representation after desugaring
 // All surface sugar is removed. Names have unique IDs.
 
-import type { Literal, Span } from "./surface";
+import type { Literal, NodeId, Span } from "./surface";
 
 // =============================================================================
 // Names (Section 5.1)
@@ -45,6 +45,7 @@ export type CExpr =
 
 export type CVar = {
   readonly kind: "CVar";
+  readonly nodeId: NodeId;
   readonly name: Name;
   readonly span: Span;
   // For qualified names (Module.member), track the spans separately
@@ -54,12 +55,14 @@ export type CVar = {
 
 export type CLit = {
   readonly kind: "CLit";
+  readonly nodeId: NodeId;
   readonly value: Literal;
   readonly span: Span;
 };
 
 export type CApp = {
   readonly kind: "CApp";
+  readonly nodeId: NodeId;
   readonly func: CExpr;
   readonly arg: CExpr;
   readonly span: Span;
@@ -68,6 +71,7 @@ export type CApp = {
 // Single-param lambda (multi-param desugared to nested)
 export type CAbs = {
   readonly kind: "CAbs";
+  readonly nodeId: NodeId;
   readonly param: Name;
   readonly body: CExpr;
   readonly span: Span;
@@ -76,6 +80,7 @@ export type CAbs = {
 
 export type CLet = {
   readonly kind: "CLet";
+  readonly nodeId: NodeId;
   readonly name: Name;
   readonly value: CExpr;
   readonly body: CExpr;
@@ -84,6 +89,7 @@ export type CLet = {
 
 export type CLetRec = {
   readonly kind: "CLetRec";
+  readonly nodeId: NodeId;
   readonly bindings: readonly {
     readonly name: Name;
     readonly value: CExpr;
@@ -94,6 +100,7 @@ export type CLetRec = {
 
 export type CMatch = {
   readonly kind: "CMatch";
+  readonly nodeId: NodeId;
   readonly scrutinee: CExpr;
   readonly cases: readonly CCase[];
   readonly span: Span;
@@ -107,24 +114,28 @@ export type CCase = {
 
 export type CCon = {
   readonly kind: "CCon";
+  readonly nodeId: NodeId;
   readonly name: string;
   readonly span: Span;
 };
 
 export type CTuple = {
   readonly kind: "CTuple";
+  readonly nodeId: NodeId;
   readonly elements: readonly CExpr[];
   readonly span: Span;
 };
 
 export type CRecord = {
   readonly kind: "CRecord";
+  readonly nodeId: NodeId;
   readonly fields: readonly { readonly name: string; readonly value: CExpr }[];
   readonly span: Span;
 };
 
 export type CRecordUpdate = {
   readonly kind: "CRecordUpdate";
+  readonly nodeId: NodeId;
   readonly record: CExpr;
   readonly fields: readonly { readonly name: string; readonly value: CExpr }[];
   readonly span: Span;
@@ -132,6 +143,7 @@ export type CRecordUpdate = {
 
 export type CField = {
   readonly kind: "CField";
+  readonly nodeId: NodeId;
   readonly record: CExpr;
   readonly field: string;
   readonly span: Span;
@@ -140,6 +152,7 @@ export type CField = {
 // Foreign call (module, name)
 export type CForeign = {
   readonly kind: "CForeign";
+  readonly nodeId: NodeId;
   readonly module: string;
   readonly name: string;
   readonly span: Span;
@@ -148,6 +161,7 @@ export type CForeign = {
 // Binary operation (kept as primitive, not desugared to function call)
 export type CBinOp = {
   readonly kind: "CBinOp";
+  readonly nodeId: NodeId;
   readonly op: string;
   readonly left: CExpr;
   readonly right: CExpr;
@@ -162,23 +176,27 @@ export type CPattern = CPWild | CPVar | CPLit | CPCon | CPTuple | CPRecord | CPA
 
 export type CPWild = {
   readonly kind: "CPWild";
+  readonly nodeId: NodeId;
   readonly span: Span;
 };
 
 export type CPVar = {
   readonly kind: "CPVar";
+  readonly nodeId: NodeId;
   readonly name: Name;
   readonly span: Span;
 };
 
 export type CPLit = {
   readonly kind: "CPLit";
+  readonly nodeId: NodeId;
   readonly value: Literal;
   readonly span: Span;
 };
 
 export type CPCon = {
   readonly kind: "CPCon";
+  readonly nodeId: NodeId;
   readonly name: string;
   readonly args: readonly CPattern[];
   readonly span: Span;
@@ -186,18 +204,21 @@ export type CPCon = {
 
 export type CPTuple = {
   readonly kind: "CPTuple";
+  readonly nodeId: NodeId;
   readonly elements: readonly CPattern[];
   readonly span: Span;
 };
 
 export type CPRecord = {
   readonly kind: "CPRecord";
+  readonly nodeId: NodeId;
   readonly fields: readonly { readonly name: string; readonly pattern: CPattern }[];
   readonly span: Span;
 };
 
 export type CPAs = {
   readonly kind: "CPAs";
+  readonly nodeId: NodeId;
   readonly name: Name;
   readonly pattern: CPattern;
   readonly span: Span;
@@ -205,6 +226,7 @@ export type CPAs = {
 
 export type CPOr = {
   readonly kind: "CPOr";
+  readonly nodeId: NodeId;
   readonly left: CPattern;
   readonly right: CPattern;
   readonly span: Span;
@@ -256,6 +278,7 @@ export type CDecl = CDeclType | CDeclLet | CDeclLetRec | CDeclForeign;
 
 export type CDeclType = {
   readonly kind: "CDeclType";
+  readonly nodeId: NodeId;
   readonly name: string;
   readonly params: readonly string[];
   readonly constructors: readonly CConDecl[];
@@ -263,6 +286,7 @@ export type CDeclType = {
 };
 
 export type CConDecl = {
+  readonly nodeId: NodeId;
   readonly name: string;
   readonly fields: readonly CType[];
   readonly span: Span;
@@ -270,6 +294,7 @@ export type CConDecl = {
 
 export type CDeclLet = {
   readonly kind: "CDeclLet";
+  readonly nodeId: NodeId;
   readonly name: Name;
   readonly value: CExpr;
   readonly span: Span;
@@ -277,6 +302,7 @@ export type CDeclLet = {
 
 export type CDeclLetRec = {
   readonly kind: "CDeclLetRec";
+  readonly nodeId: NodeId;
   readonly bindings: readonly {
     readonly name: Name;
     readonly value: CExpr;
@@ -286,6 +312,7 @@ export type CDeclLetRec = {
 
 export type CDeclForeign = {
   readonly kind: "CDeclForeign";
+  readonly nodeId: NodeId;
   readonly name: Name;
   readonly module: string;
   readonly jsName: string;
@@ -307,74 +334,119 @@ export type CProgram = {
 // Smart Constructors
 // =============================================================================
 
-export const cvar = (name: Name, span: Span, moduleSpan?: Span, memberSpan?: Span): CVar => ({
+export const cvar = (
+  nodeId: NodeId,
+  name: Name,
+  span: Span,
+  moduleSpan?: Span,
+  memberSpan?: Span,
+): CVar => ({
   kind: "CVar",
+  nodeId,
   name,
   span,
   moduleSpan,
   memberSpan,
 });
-export const clit = (value: Literal, span: Span): CLit => ({ kind: "CLit", value, span });
-export const capp = (func: CExpr, arg: CExpr, span: Span): CApp => ({
+export const clit = (nodeId: NodeId, value: Literal, span: Span): CLit => ({
+  kind: "CLit",
+  nodeId,
+  value,
+  span,
+});
+export const capp = (nodeId: NodeId, func: CExpr, arg: CExpr, span: Span): CApp => ({
   kind: "CApp",
+  nodeId,
   func,
   arg,
   span,
 });
-export const cabs = (param: Name, body: CExpr, span: Span, paramSpan?: Span): CAbs => ({
+export const cabs = (
+  nodeId: NodeId,
+  param: Name,
+  body: CExpr,
+  span: Span,
+  paramSpan?: Span,
+): CAbs => ({
   kind: "CAbs",
+  nodeId,
   param,
   body,
   span,
   paramSpan,
 });
-export const clet = (name: Name, value: CExpr, body: CExpr, span: Span): CLet => ({
+export const clet = (nodeId: NodeId, name: Name, value: CExpr, body: CExpr, span: Span): CLet => ({
   kind: "CLet",
+  nodeId,
   name,
   value,
   body,
   span,
 });
 export const cletrec = (
+  nodeId: NodeId,
   bindings: readonly { name: Name; value: CExpr }[],
   body: CExpr,
   span: Span,
-): CLetRec => ({ kind: "CLetRec", bindings, body, span });
-export const cmatch = (scrutinee: CExpr, cases: readonly CCase[], span: Span): CMatch => ({
+): CLetRec => ({ kind: "CLetRec", nodeId, bindings, body, span });
+export const cmatch = (
+  nodeId: NodeId,
+  scrutinee: CExpr,
+  cases: readonly CCase[],
+  span: Span,
+): CMatch => ({
   kind: "CMatch",
+  nodeId,
   scrutinee,
   cases,
   span,
 });
-export const ccon = (name: string, span: Span): CCon => ({ kind: "CCon", name, span });
-export const ctuple = (elements: readonly CExpr[], span: Span): CTuple => ({
+export const ccon = (nodeId: NodeId, name: string, span: Span): CCon => ({
+  kind: "CCon",
+  nodeId,
+  name,
+  span,
+});
+export const ctuple = (nodeId: NodeId, elements: readonly CExpr[], span: Span): CTuple => ({
   kind: "CTuple",
+  nodeId,
   elements,
   span,
 });
 export const crecord = (
+  nodeId: NodeId,
   fields: readonly { name: string; value: CExpr }[],
   span: Span,
-): CRecord => ({ kind: "CRecord", fields, span });
+): CRecord => ({ kind: "CRecord", nodeId, fields, span });
 export const crecordUpdate = (
+  nodeId: NodeId,
   record: CExpr,
   fields: readonly { name: string; value: CExpr }[],
   span: Span,
-): CRecordUpdate => ({ kind: "CRecordUpdate", record, fields, span });
-export const cfield = (record: CExpr, field: string, span: Span): CField => ({
+): CRecordUpdate => ({ kind: "CRecordUpdate", nodeId, record, fields, span });
+export const cfield = (nodeId: NodeId, record: CExpr, field: string, span: Span): CField => ({
   kind: "CField",
+  nodeId,
   record,
   field,
   span,
 });
-export const cforeign = (module: string, name: string, span: Span): CForeign => ({
+export const cforeign = (nodeId: NodeId, module: string, name: string, span: Span): CForeign => ({
   kind: "CForeign",
+  nodeId,
   module,
   name,
   span,
 });
-export const cbinop = (op: string, left: CExpr, right: CExpr, span: Span): CBinOp => ({
+export const cbinop = (
+  nodeId: NodeId,
+  op: string,
+  left: CExpr,
+  right: CExpr,
+  span: Span,
+): CBinOp => ({
   kind: "CBinOp",
+  nodeId,
   op,
   left,
   right,
@@ -382,32 +454,52 @@ export const cbinop = (op: string, left: CExpr, right: CExpr, span: Span): CBinO
 });
 
 // Pattern constructors
-export const cpwild = (span: Span): CPWild => ({ kind: "CPWild", span });
-export const cpvar = (name: Name, span: Span): CPVar => ({ kind: "CPVar", name, span });
-export const cplit = (value: Literal, span: Span): CPLit => ({ kind: "CPLit", value, span });
-export const cpcon = (name: string, args: readonly CPattern[], span: Span): CPCon => ({
+export const cpwild = (nodeId: NodeId, span: Span): CPWild => ({ kind: "CPWild", nodeId, span });
+export const cpvar = (nodeId: NodeId, name: Name, span: Span): CPVar => ({
+  kind: "CPVar",
+  nodeId,
+  name,
+  span,
+});
+export const cplit = (nodeId: NodeId, value: Literal, span: Span): CPLit => ({
+  kind: "CPLit",
+  nodeId,
+  value,
+  span,
+});
+export const cpcon = (
+  nodeId: NodeId,
+  name: string,
+  args: readonly CPattern[],
+  span: Span,
+): CPCon => ({
   kind: "CPCon",
+  nodeId,
   name,
   args,
   span,
 });
-export const cptuple = (elements: readonly CPattern[], span: Span): CPTuple => ({
+export const cptuple = (nodeId: NodeId, elements: readonly CPattern[], span: Span): CPTuple => ({
   kind: "CPTuple",
+  nodeId,
   elements,
   span,
 });
 export const cprecord = (
+  nodeId: NodeId,
   fields: readonly { name: string; pattern: CPattern }[],
   span: Span,
-): CPRecord => ({ kind: "CPRecord", fields, span });
-export const cpas = (name: Name, pattern: CPattern, span: Span): CPAs => ({
+): CPRecord => ({ kind: "CPRecord", nodeId, fields, span });
+export const cpas = (nodeId: NodeId, name: Name, pattern: CPattern, span: Span): CPAs => ({
   kind: "CPAs",
+  nodeId,
   name,
   pattern,
   span,
 });
-export const cpor = (left: CPattern, right: CPattern, span: Span): CPOr => ({
+export const cpor = (nodeId: NodeId, left: CPattern, right: CPattern, span: Span): CPOr => ({
   kind: "CPOr",
+  nodeId,
   left,
   right,
   span,
@@ -425,27 +517,37 @@ export const ctrecord = (fields: readonly { name: string; type: CType }[]): CTRe
 });
 
 // Declaration constructors
+export const ccondecl = (
+  nodeId: NodeId,
+  name: string,
+  fields: readonly CType[],
+  span: Span,
+): CConDecl => ({ nodeId, name, fields, span });
 export const cdecltype = (
+  nodeId: NodeId,
   name: string,
   params: readonly string[],
   constructors: readonly CConDecl[],
   span: Span,
-): CDeclType => ({ kind: "CDeclType", name, params, constructors, span });
-export const cdecllet = (name: Name, value: CExpr, span: Span): CDeclLet => ({
+): CDeclType => ({ kind: "CDeclType", nodeId, name, params, constructors, span });
+export const cdecllet = (nodeId: NodeId, name: Name, value: CExpr, span: Span): CDeclLet => ({
   kind: "CDeclLet",
+  nodeId,
   name,
   value,
   span,
 });
 export const cdeclletrec = (
+  nodeId: NodeId,
   bindings: readonly { name: Name; value: CExpr }[],
   span: Span,
-): CDeclLetRec => ({ kind: "CDeclLetRec", bindings, span });
+): CDeclLetRec => ({ kind: "CDeclLetRec", nodeId, bindings, span });
 export const cdeclforeign = (
+  nodeId: NodeId,
   name: Name,
   module: string,
   jsName: string,
   type: CType,
   isAsync: boolean,
   span: Span,
-): CDeclForeign => ({ kind: "CDeclForeign", name, module, jsName, type, isAsync, span });
+): CDeclForeign => ({ kind: "CDeclForeign", nodeId, name, module, jsName, type, isAsync, span });

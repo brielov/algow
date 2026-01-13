@@ -11,7 +11,7 @@
 
 import * as C from "./core";
 import type { Name } from "./core";
-import type { Literal, Span } from "./surface";
+import type { Literal, NodeId, Span } from "./surface";
 import * as IR from "./ir";
 import {
   type Type,
@@ -42,8 +42,8 @@ type LowerContext = {
   subst: Subst;
   /** Map from Name.id to type */
   typeMap: ReadonlyMap<number, Type>;
-  /** Map from span.start to instantiated type for expressions */
-  exprTypeMap: ReadonlyMap<number, Type>;
+  /** Map from NodeId to instantiated type for expressions */
+  nodeTypeMap: ReadonlyMap<NodeId, Type>;
   /** Type environment - used to lookup constructor types */
   typeEnv: TypeEnv;
   /** Set of async foreign function keys (Module.name) */
@@ -57,7 +57,7 @@ const createContext = (
   varCounter: 0,
   subst: checkOutput.subst,
   typeMap: checkOutput.typeMap,
-  exprTypeMap: checkOutput.exprTypeMap,
+  nodeTypeMap: checkOutput.nodeTypeMap,
   typeEnv: checkOutput.typeEnv,
   asyncForeignFunctions,
 });
@@ -88,10 +88,9 @@ const lookupType = (ctx: LowerContext, name: Name): Type => {
   return { kind: "TVar", name: `?${name.text}` };
 };
 
-/** Look up the instantiated type of an expression by its span */
-const lookupExprType = (ctx: LowerContext, span: C.CExpr["span"]): Type | undefined => {
-  if (!span) return undefined;
-  const type = ctx.exprTypeMap.get(span.start);
+/** Look up the instantiated type of an expression by its nodeId */
+const lookupExprType = (ctx: LowerContext, nodeId: NodeId): Type | undefined => {
+  const type = ctx.nodeTypeMap.get(nodeId);
   if (type) {
     return applySubst(ctx.subst, type);
   }
@@ -403,8 +402,8 @@ const lowerApp = (ctx: LowerContext, expr: C.CApp): IR.IRExpr => {
   const funcResult = normalize(ctx, expr.func);
   const argResult = normalize(ctx, expr.arg);
 
-  // Get return type - prefer span-based lookup for polymorphic instantiation
-  let returnType = lookupExprType(ctx, expr.span);
+  // Get return type - use nodeId-based lookup for polymorphic instantiation
+  let returnType = lookupExprType(ctx, expr.nodeId);
   if (!returnType) {
     // Fall back to deriving from function type
     const funcType = funcResult.atom.type;
@@ -580,13 +579,14 @@ const rewritePatternVars = (pattern: C.CPattern, nameMap: Map<string, Name>): C.
     case "CPVar": {
       const newName = nameMap.get(pattern.name.text);
       if (newName) {
-        return C.cpvar(newName, pattern.span);
+        return C.cpvar(pattern.nodeId, newName, pattern.span);
       }
       return pattern;
     }
 
     case "CPCon":
       return C.cpcon(
+        pattern.nodeId,
         pattern.name,
         pattern.args.map((a) => rewritePatternVars(a, nameMap)),
         pattern.span,
@@ -594,12 +594,14 @@ const rewritePatternVars = (pattern: C.CPattern, nameMap: Map<string, Name>): C.
 
     case "CPTuple":
       return C.cptuple(
+        pattern.nodeId,
         pattern.elements.map((e) => rewritePatternVars(e, nameMap)),
         pattern.span,
       );
 
     case "CPRecord":
       return C.cprecord(
+        pattern.nodeId,
         pattern.fields.map((f) => ({
           name: f.name,
           pattern: rewritePatternVars(f.pattern, nameMap),
@@ -610,6 +612,7 @@ const rewritePatternVars = (pattern: C.CPattern, nameMap: Map<string, Name>): C.
     case "CPAs": {
       const newName = nameMap.get(pattern.name.text);
       return C.cpas(
+        pattern.nodeId,
         newName ?? pattern.name,
         rewritePatternVars(pattern.pattern, nameMap),
         pattern.span,
@@ -618,6 +621,7 @@ const rewritePatternVars = (pattern: C.CPattern, nameMap: Map<string, Name>): C.
 
     case "CPOr":
       return C.cpor(
+        pattern.nodeId,
         rewritePatternVars(pattern.left, nameMap),
         rewritePatternVars(pattern.right, nameMap),
         pattern.span,

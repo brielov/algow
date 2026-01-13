@@ -6,7 +6,7 @@
 
 import type { Diagnostic } from "./diagnostics";
 import { error as diagError, typeMismatch } from "./diagnostics";
-import type { Span } from "./surface";
+import type { NodeId, Span } from "./surface";
 import * as C from "./core";
 import type { Name } from "./core";
 import {
@@ -52,10 +52,12 @@ type CheckContext = {
   readonly diagnostics: Diagnostic[];
   readonly registry: ConstructorRegistry;
   readonly aliasRegistry: AliasRegistry;
-  // Map from Name.id to inferred type (for LSP/lowering)
+  // Unified type map: NodeId → Type (for LSP/lowering)
+  readonly nodeTypeMap: Map<NodeId, Type>;
+  // Span position to NodeId mapping (for LSP position lookup)
+  readonly spanToNodeId: Map<number, NodeId>;
+  // Legacy map from Name.id to inferred type (for bindings - will be removed)
   readonly typeMap: Map<number, Type>;
-  // Map from span.start to instantiated type (for polymorphic expressions)
-  readonly exprTypeMap: Map<number, Type>;
   // Deferred tuple projections: TVar name -> (index -> element type)
   // Used to collect all tuple index accesses before creating the tuple type
   readonly tupleProjections: Map<string, Map<number, Type>>;
@@ -68,8 +70,9 @@ const createContext = (
   diagnostics: [],
   registry,
   aliasRegistry,
+  nodeTypeMap: new Map(),
+  spanToNodeId: new Map(),
   typeMap: new Map(),
-  exprTypeMap: new Map(),
   tupleProjections: new Map(),
 });
 
@@ -79,13 +82,15 @@ const addError = (ctx: CheckContext, message: string, span?: C.CExpr["span"]): v
   ctx.diagnostics.push(diagError(start, end, message));
 };
 
+/** Record type for a named binding (legacy - used by lower.ts) */
 const recordType = (ctx: CheckContext, name: Name, type: Type): void => {
   ctx.typeMap.set(name.id, type);
 };
 
-/** Record the instantiated type of an expression by its span position */
-const recordExprType = (ctx: CheckContext, span: Span, type: Type): void => {
-  ctx.exprTypeMap.set(span.start, type);
+/** Record the type of an expression by its nodeId and span position */
+const recordNodeType = (ctx: CheckContext, nodeId: NodeId, span: Span, type: Type): void => {
+  ctx.nodeTypeMap.set(nodeId, type);
+  ctx.spanToNodeId.set(span.start, nodeId);
 };
 
 /**
@@ -317,7 +322,7 @@ const inferVar = (ctx: CheckContext, env: TypeEnv, expr: C.CVar): InferResult =>
 
   const type = instantiate(s);
   // Record the instantiated type for polymorphic resolution during lowering
-  recordExprType(ctx, expr.span, type);
+  recordNodeType(ctx, expr.nodeId, expr.span, type);
   return [new Map(), type, [...s.constraints]];
 };
 
@@ -346,7 +351,7 @@ const inferApp = (ctx: CheckContext, env: TypeEnv, expr: C.CApp): InferResult =>
 
   const finalResultType = applySubst(s3, resultType);
   // Record the result type of the application for polymorphic resolution during lowering
-  recordExprType(ctx, expr.span, finalResultType);
+  recordNodeType(ctx, expr.nodeId, expr.span, finalResultType);
   return [composeSubst(composeSubst(s1, s2), s3), finalResultType, [...c1, ...c2]];
 };
 
@@ -1025,9 +1030,12 @@ export type CheckOutput = {
   readonly diagnostics: readonly Diagnostic[];
   readonly typeEnv: TypeEnv;
   readonly constructorRegistry: ConstructorRegistry;
+  // Legacy: Map from Name.id to type (for bindings)
   readonly typeMap: ReadonlyMap<number, Type>;
-  // Map from span.start to instantiated type (for polymorphic expressions)
-  readonly exprTypeMap: ReadonlyMap<number, Type>;
+  // Unified: Map from NodeId to instantiated type (for all expressions)
+  readonly nodeTypeMap: ReadonlyMap<NodeId, Type>;
+  // Maps span.start to NodeId for LSP position lookups
+  readonly spanToNodeId: ReadonlyMap<number, NodeId>;
 };
 
 export const checkProgram = (
@@ -1184,7 +1192,8 @@ export const checkProgram = (
     typeEnv: env,
     constructorRegistry: ctx.registry,
     typeMap: ctx.typeMap,
-    exprTypeMap: ctx.exprTypeMap,
+    nodeTypeMap: ctx.nodeTypeMap,
+    spanToNodeId: ctx.spanToNodeId,
   };
 };
 
