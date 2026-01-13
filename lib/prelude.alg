@@ -22,6 +22,14 @@ type IOError
   | NotEmpty string
   | UnknownError string
 
+type JsonValue
+  = JsonNull
+  | JsonBool bool
+  | JsonNumber float
+  | JsonString string
+  | JsonArray (List JsonValue)
+  | JsonObject (List (string, JsonValue))
+
 -- =============================================================================
 -- Maybe Functions
 -- =============================================================================
@@ -490,4 +498,13 @@ module Path
   foreign basename   : string -> string
   foreign extension  : string -> Maybe string
   foreign isAbsolute : string -> bool
+end
+
+-- =============================================================================
+-- Json Functions (foreign)
+-- =============================================================================
+
+module Json
+  foreign decode : string -> Either string JsonValue
+  foreign encode : a -> string
 end

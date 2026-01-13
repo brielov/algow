@@ -1072,9 +1072,13 @@ export const checkProgram = (
     if (decl.kind === "CDeclForeign") {
       const type = convertCoreType(decl.type);
       const key = `${decl.name.id}:${decl.name.original}`;
-      env.set(key, mono(type));
+      // Generalize foreign function types to allow polymorphic usage
+      // e.g., `encode : a -> string` should instantiate fresh `a` each time
+      const freeVars = [...ftv(type)];
+      const foreignScheme = scheme(freeVars, type);
+      env.set(key, foreignScheme);
       // Also register with module.name key for lookup
-      env.set(`${decl.module}.${decl.jsName}`, mono(type));
+      env.set(`${decl.module}.${decl.jsName}`, foreignScheme);
       recordType(ctx, decl.name, type);
     }
   }
