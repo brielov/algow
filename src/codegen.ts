@@ -293,28 +293,39 @@ const genLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
     return genTailRecursiveLambda(ctx, binding);
   }
 
-  // Generate body
+  // Check if body requires await
+  const needsAwait = exprRequiresAwait(binding.body);
+  const asyncPrefix = needsAwait ? "async " : "";
+
+  // Generate body using statement generation (includes return)
   ctx.indent++;
   const bodyLines: string[] = [];
   const savedLines = ctx.lines;
   const savedDeclared = new Set(ctx.declaredNames);
   ctx.lines = bodyLines;
 
-  const bodyResult = genExpr(ctx, binding.body);
+  genExprAsStatements(ctx, binding.body);
 
   ctx.lines = savedLines;
   ctx.declaredNames = savedDeclared;
   ctx.indent--;
 
-  if (bodyLines.length === 0) {
-    // Wrap object literals in parentheses to avoid ambiguity with function body
-    const result = bodyResult.startsWith("{") ? `(${bodyResult})` : bodyResult;
-    return `async (${param}) => ${result}`;
+  // For simple expressions (single return), use arrow shorthand
+  if (bodyLines.length === 1) {
+    const line = bodyLines[0]!.trim();
+    // Check if it's just "return <expr>;"
+    const returnMatch = line.match(/^return (.+);$/);
+    if (returnMatch) {
+      const result = returnMatch[1]!;
+      // Wrap object literals in parentheses to avoid ambiguity with function body
+      const safeResult = result.startsWith("{") ? `(${result})` : result;
+      return `${asyncPrefix}(${param}) => ${safeResult}`;
+    }
   }
 
   const indentation = "  ".repeat(ctx.indent + 1);
   const body = bodyLines.map((l) => indentation + l.trimStart()).join("\n");
-  return `async (${param}) => {\n${body}\n${"  ".repeat(ctx.indent)}  return ${bodyResult};\n${"  ".repeat(ctx.indent)}}`;
+  return `${asyncPrefix}(${param}) => {\n${body}\n${"  ".repeat(ctx.indent)}}`;
 };
 
 const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
@@ -327,31 +338,35 @@ const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): str
     innerBody = innerBody.binding.body;
   }
 
-  // Generate loop body
-  ctx.indent++;
+  // Check if body requires await
+  const needsAwait = exprRequiresAwait(innerBody);
+  const asyncPrefix = needsAwait ? "async " : "";
+
+  // Generate loop body using statement generation
+  ctx.indent += 2; // Account for function + while nesting
   const bodyLines: string[] = [];
   const savedLines = ctx.lines;
   const savedDeclared = new Set(ctx.declaredNames);
   ctx.lines = bodyLines;
 
-  const bodyResult = genExpr(ctx, innerBody);
+  genExprAsStatements(ctx, innerBody);
 
   ctx.lines = savedLines;
   ctx.declaredNames = savedDeclared;
-  ctx.indent--;
+  ctx.indent -= 2;
 
-  // Build curried async function with while loop
+  // Build curried function with while loop
   if (params.length === 1) {
     const indentation = "  ".repeat(ctx.indent + 1);
     const loopIndent = "  ".repeat(ctx.indent + 2);
     const body = bodyLines.map((l) => loopIndent + l.trimStart()).join("\n");
-    return `async (${params[0]}) => {\n${indentation}while (true) {\n${body}\n${loopIndent}return ${bodyResult};\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
+    return `${asyncPrefix}(${params[0]}) => {\n${indentation}while (true) {\n${body}\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
   }
 
-  // Multi-param: curried async function
+  // Multi-param: curried function
   let result = "";
   for (let i = 0; i < params.length - 1; i++) {
-    result += `async (${params[i]}) => `;
+    result += `${asyncPrefix}(${params[i]}) => `;
   }
 
   const lastParam = params[params.length - 1]!;
@@ -359,7 +374,7 @@ const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): str
   const loopIndent = "  ".repeat(ctx.indent + 2);
   const body = bodyLines.map((l) => loopIndent + l.trimStart()).join("\n");
 
-  result += `async (${lastParam}) => {\n${indentation}while (true) {\n${body}\n${loopIndent}return ${bodyResult};\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
+  result += `${asyncPrefix}(${lastParam}) => {\n${indentation}while (true) {\n${body}\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
 
   return result;
 };
@@ -414,6 +429,165 @@ const genExpr = (ctx: CodeGenContext, expr: IR.IRExpr): string => {
 
     case "IRMatch":
       return genMatch(ctx, expr);
+  }
+};
+
+// =============================================================================
+// Statement Generation (for return position)
+// =============================================================================
+
+/**
+ * Generate expression as statements ending with return.
+ * Used in function bodies where we can emit if-else directly.
+ */
+const genExprAsStatements = (ctx: CodeGenContext, expr: IR.IRExpr): void => {
+  switch (expr.kind) {
+    case "IRAtom":
+      emit(ctx, `return ${genAtom(ctx, expr.atom)};`);
+      break;
+
+    case "IRLet": {
+      // Optimization: if body is just returning this variable, skip the intermediate binding
+      if (
+        expr.body.kind === "IRAtom" &&
+        expr.body.atom.kind === "AVar" &&
+        expr.body.atom.name.id === expr.name.id
+      ) {
+        emit(ctx, `return ${genBinding(ctx, expr.binding)};`);
+        return;
+      }
+
+      const binding = genBinding(ctx, expr.binding);
+      const jsName = nameToJs(expr.name);
+
+      if (!ctx.declaredNames.has(jsName)) {
+        emit(ctx, `const ${jsName} = ${binding};`);
+        ctx.declaredNames.add(jsName);
+      } else {
+        emit(ctx, `${jsName} = ${binding};`);
+      }
+      genExprAsStatements(ctx, expr.body);
+      break;
+    }
+
+    case "IRLetRec": {
+      // Declare all variables first
+      for (const { name } of expr.bindings) {
+        const jsName = nameToJs(name);
+        if (!ctx.declaredNames.has(jsName)) {
+          emit(ctx, `let ${jsName};`);
+          ctx.declaredNames.add(jsName);
+        }
+      }
+      // Then assign all values
+      for (const { name, binding } of expr.bindings) {
+        const bindingCode = genBinding(ctx, binding);
+        emit(ctx, `${nameToJs(name)} = ${bindingCode};`);
+      }
+      genExprAsStatements(ctx, expr.body);
+      break;
+    }
+
+    case "IRMatch":
+      genMatchAsStatements(ctx, expr);
+      break;
+  }
+};
+
+/**
+ * Generate match as direct if-else statements with returns.
+ * No IIFE wrapper needed.
+ */
+const genMatchAsStatements = (ctx: CodeGenContext, match: IR.IRMatch): void => {
+  const scrutineeVar =
+    match.scrutinee.kind === "AVar"
+      ? nameToJs(match.scrutinee.name)
+      : (() => {
+          // Need to bind scrutinee to a variable first
+          const v = freshScrutinee(ctx);
+          emit(ctx, `const ${v} = ${genAtom(ctx, match.scrutinee)};`);
+          return v;
+        })();
+
+  // Check if any case has a guard
+  const hasGuards = match.cases.some((c) => c.guard !== null);
+
+  for (let i = 0; i < match.cases.length; i++) {
+    const case_ = match.cases[i]!;
+    const { condition, bindings } = genPatternMatch(ctx, scrutineeVar, case_.pattern);
+    const isFirst = i === 0;
+    const isLast = i === match.cases.length - 1;
+
+    // Generate guard code first
+    let guardCode: string | null = null;
+    const guardLines: string[] = [];
+    if (case_.guard) {
+      const savedLines = ctx.lines;
+      ctx.lines = guardLines;
+      guardCode = genExpr(ctx, case_.guard);
+      ctx.lines = savedLines;
+    }
+
+    // Determine if statement prefix
+    let prefix: string;
+    let combineGuard = false;
+    if (hasGuards) {
+      // With guards: use separate if blocks
+      if (guardCode && guardLines.length === 0 && bindings.length === 0) {
+        if (condition === "true") {
+          prefix = `if (${guardCode})`;
+        } else {
+          prefix = `if ((${condition}) && (${guardCode}))`;
+        }
+        combineGuard = true;
+      } else {
+        prefix = `if (${condition})`;
+      }
+    } else {
+      // No guards: use if/else-if chain
+      if (isFirst) {
+        prefix = `if (${condition})`;
+      } else if (isLast && condition === "true") {
+        prefix = "} else";
+      } else {
+        prefix = `} else if (${condition})`;
+      }
+    }
+    emit(ctx, `${prefix} {`);
+
+    // Emit bindings
+    ctx.indent++;
+    for (const [name, expr] of bindings) {
+      emit(ctx, `const ${name} = ${expr};`);
+    }
+
+    // Emit guard computation lines if any
+    for (const line of guardLines) {
+      emit(ctx, line.trimStart());
+    }
+
+    // Generate body as statements
+    if (guardCode && !combineGuard) {
+      // Guard wasn't combined - need nested if
+      emit(ctx, `if (${guardCode}) {`);
+      ctx.indent++;
+      genExprAsStatements(ctx, case_.body);
+      ctx.indent--;
+      emit(ctx, "}");
+    } else {
+      genExprAsStatements(ctx, case_.body);
+    }
+
+    ctx.indent--;
+
+    // Close the if block
+    if (hasGuards) {
+      emit(ctx, "}");
+    }
+  }
+
+  if (!hasGuards) {
+    emit(ctx, "}");
   }
 };
 
@@ -687,26 +861,30 @@ const genMatchFull = (ctx: CodeGenContext, match: IR.IRMatch, needsAwait: boolea
       lines.push("    " + line.trimStart());
     }
 
-    // Generate body
+    // Generate body using statement generation (includes return)
     ctx.indent += 2;
     const bodyLines: string[] = [];
     const savedLines = ctx.lines;
     const savedDeclared = new Set(ctx.declaredNames);
     ctx.lines = bodyLines;
-    const bodyResult = genExpr(ctx, case_.body);
+
+    if (guardCode && !combineGuard) {
+      // Guard wasn't combined - need nested if for guard check
+      emit(ctx, `if (${guardCode}) {`);
+      ctx.indent++;
+      genExprAsStatements(ctx, case_.body);
+      ctx.indent--;
+      emit(ctx, "}");
+    } else {
+      genExprAsStatements(ctx, case_.body);
+    }
+
     ctx.lines = savedLines;
     ctx.declaredNames = savedDeclared;
     ctx.indent -= 2;
 
     for (const line of bodyLines) {
       lines.push("    " + line.trimStart());
-    }
-
-    if (guardCode && !combineGuard) {
-      // Guard wasn't combined - need nested if for guard check
-      lines.push(`    if (${guardCode}) return ${bodyResult};`);
-    } else {
-      lines.push(`    return ${bodyResult};`);
     }
 
     // Close the if block
