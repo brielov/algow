@@ -25,6 +25,9 @@ export { TARGETS, DEFAULT_TARGET, isValidTarget } from "./runtime";
 
 type TagMap = Map<string, number>;
 
+/** Context determines how code should be generated */
+type GenContext = "expr" | "stmt";
+
 type CodeGenContext = {
   /** Current indentation level */
   indent: number;
@@ -36,6 +39,8 @@ type CodeGenContext = {
   declaredNames: Set<string>;
   /** Counter for fresh scrutinee variables */
   scrutineeCounter: number;
+  /** Whether we're generating in expression or statement context */
+  genContext: GenContext;
 };
 
 const createContext = (): CodeGenContext => ({
@@ -44,6 +49,7 @@ const createContext = (): CodeGenContext => ({
   tagMap: new Map(),
   declaredNames: new Set(),
   scrutineeCounter: 0,
+  genContext: "stmt",
 });
 
 const emit = (ctx: CodeGenContext, code: string): void => {
@@ -412,10 +418,198 @@ const genExpr = (ctx: CodeGenContext, expr: IR.IRExpr): string => {
 };
 
 // =============================================================================
+// Async Detection
+// =============================================================================
+
+/** Check if an expression requires await (contains function calls or async foreign) */
+const exprRequiresAwait = (expr: IR.IRExpr): boolean => {
+  switch (expr.kind) {
+    case "IRAtom":
+      return false;
+    case "IRLet":
+      return bindingRequiresAwait(expr.binding) || exprRequiresAwait(expr.body);
+    case "IRLetRec":
+      return (
+        expr.bindings.some((b) => bindingRequiresAwait(b.binding)) || exprRequiresAwait(expr.body)
+      );
+    case "IRMatch":
+      return expr.cases.some(
+        (c) => (c.guard && exprRequiresAwait(c.guard)) || exprRequiresAwait(c.body),
+      );
+  }
+};
+
+const bindingRequiresAwait = (binding: IR.IRBinding): boolean => {
+  switch (binding.kind) {
+    case "IRBAtom":
+    case "IRBBinOp":
+    case "IRBTuple":
+    case "IRBRecord":
+    case "IRBRecordUpdate":
+    case "IRBField":
+      return false;
+    case "IRBApp":
+      // Function applications require await (all user functions are async)
+      // Exception: constructor applications don't require await
+      return binding.func.kind !== "ACon";
+    case "IRBForeign":
+      return binding.isAsync;
+    case "IRBLambda":
+      // Lambda body may require await, but the lambda itself doesn't
+      return false;
+    case "IRBMatch":
+      return binding.cases.some(
+        (c) => (c.guard && exprRequiresAwait(c.guard)) || exprRequiresAwait(c.body),
+      );
+  }
+};
+
+// =============================================================================
+// Match Optimization Detection
+// =============================================================================
+
+type TernaryMatch = {
+  kind: "ternary";
+  condition: string;
+  thenExpr: IR.IRExpr;
+  elseExpr: IR.IRExpr;
+};
+
+type SimpleMatch = {
+  kind: "simple";
+};
+
+type MatchOptimization = TernaryMatch | SimpleMatch | null;
+
+/** Check if a match can be optimized to a ternary expression */
+const canOptimizeToTernary = (ctx: CodeGenContext, match: IR.IRMatch): MatchOptimization => {
+  // Must have exactly 2 cases with no guards
+  if (match.cases.length !== 2) return null;
+  if (match.cases.some((c) => c.guard !== null)) return null;
+
+  const [case1, case2] = match.cases;
+  if (!case1 || !case2) return null;
+
+  // Check for boolean patterns: True/False
+  if (
+    case1.pattern.kind === "IRPCon" &&
+    case2.pattern.kind === "IRPCon" &&
+    case1.pattern.args.length === 0 &&
+    case2.pattern.args.length === 0
+  ) {
+    const name1 = case1.pattern.name;
+    const name2 = case2.pattern.name;
+
+    if ((name1 === "True" && name2 === "False") || (name1 === "False" && name2 === "True")) {
+      const scrutinee = genAtom(ctx, match.scrutinee);
+      const isTrueFirst = name1 === "True";
+      return {
+        kind: "ternary",
+        condition: scrutinee,
+        thenExpr: isTrueFirst ? case1.body : case2.body,
+        elseExpr: isTrueFirst ? case2.body : case1.body,
+      };
+    }
+  }
+
+  // Check for literal patterns
+  if (case1.pattern.kind === "IRPLit" && case2.pattern.kind === "IRPWild") {
+    const lit = case1.pattern.value;
+    const scrutinee = genAtom(ctx, match.scrutinee);
+    let litValue: string;
+    switch (lit.kind) {
+      case "int":
+      case "float":
+        litValue = String(lit.value);
+        break;
+      case "string":
+      case "char":
+        litValue = JSON.stringify(lit.value);
+        break;
+      case "bool":
+        litValue = lit.value ? "true" : "false";
+        break;
+    }
+    return {
+      kind: "ternary",
+      condition: `${scrutinee} === ${litValue}`,
+      thenExpr: case1.body,
+      elseExpr: case2.body,
+    };
+  }
+
+  return null;
+};
+
+// =============================================================================
 // Match Generation
 // =============================================================================
 
 const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
+  // Try ternary optimization first
+  const ternaryOpt = canOptimizeToTernary(ctx, match);
+  if (ternaryOpt && ternaryOpt.kind === "ternary") {
+    return genTernaryMatch(ctx, ternaryOpt);
+  }
+
+  // Check if any case body requires await
+  const needsAwait = match.cases.some(
+    (c) => (c.guard && exprRequiresAwait(c.guard)) || exprRequiresAwait(c.body),
+  );
+
+  // Generate optimized match
+  return genMatchFull(ctx, match, needsAwait);
+};
+
+/** Generate a ternary expression for simple two-branch matches */
+const genTernaryMatch = (ctx: CodeGenContext, opt: TernaryMatch): string => {
+  // Generate then and else expressions
+  const savedContext = ctx.genContext;
+  ctx.genContext = "expr";
+
+  const thenLines: string[] = [];
+  const savedLines = ctx.lines;
+  ctx.lines = thenLines;
+  const thenResult = genExpr(ctx, opt.thenExpr);
+  ctx.lines = savedLines;
+
+  const elseLines: string[] = [];
+  ctx.lines = elseLines;
+  const elseResult = genExpr(ctx, opt.elseExpr);
+  ctx.lines = savedLines;
+
+  ctx.genContext = savedContext;
+
+  // If either branch has intermediate lines, fall back to IIFE
+  if (thenLines.length > 0 || elseLines.length > 0) {
+    // Check if await needed
+    const needsAwait = exprRequiresAwait(opt.thenExpr) || exprRequiresAwait(opt.elseExpr);
+    const asyncPrefix = needsAwait ? "async " : "";
+    const awaitPrefix = needsAwait ? "await " : "";
+
+    const lines: string[] = [];
+    lines.push(`(${asyncPrefix}() => {`);
+    lines.push(`  if (${opt.condition}) {`);
+    for (const line of thenLines) {
+      lines.push("    " + line.trimStart());
+    }
+    lines.push(`    return ${thenResult};`);
+    lines.push("  } else {");
+    for (const line of elseLines) {
+      lines.push("    " + line.trimStart());
+    }
+    lines.push(`    return ${elseResult};`);
+    lines.push("  }");
+    lines.push("})()");
+    return awaitPrefix + lines.join("\n" + "  ".repeat(ctx.indent));
+  }
+
+  // Simple ternary
+  return `(${opt.condition} ? ${thenResult} : ${elseResult})`;
+};
+
+/** Generate full match expression */
+const genMatchFull = (ctx: CodeGenContext, match: IR.IRMatch, needsAwait: boolean): string => {
   // If scrutinee is a simple variable, use it directly without IIFE wrapping
   const isSimpleVar = match.scrutinee.kind === "AVar";
   const scrutineeVar = isSimpleVar ? nameToJs(match.scrutinee.name) : freshScrutinee(ctx);
@@ -426,11 +620,12 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   const hasGuards = match.cases.some((c) => c.guard !== null);
 
   const lines: string[] = [];
-  // Make IIFEs async to support await inside bodies
+  // Only make IIFEs async when needed
+  const asyncPrefix = needsAwait ? "async " : "";
   if (isSimpleVar) {
-    lines.push("(async () => {");
+    lines.push(`(${asyncPrefix}() => {`);
   } else {
-    lines.push(`(async (${scrutineeVar}) => {`);
+    lines.push(`(${asyncPrefix}(${scrutineeVar}) => {`);
   }
 
   for (let i = 0; i < match.cases.length; i++) {
@@ -523,14 +718,16 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   if (!hasGuards) {
     lines.push("  }");
   }
-  // Await the async IIFE
+  // Close IIFE
   if (isSimpleVar) {
     lines.push("})()");
   } else {
     lines.push(`})(${scrutineeExpr})`);
   }
 
-  return "await " + lines.join("\n" + "  ".repeat(ctx.indent));
+  // Only await if the IIFE is async
+  const awaitPrefix = needsAwait ? "await " : "";
+  return awaitPrefix + lines.join("\n" + "  ".repeat(ctx.indent));
 };
 
 // =============================================================================

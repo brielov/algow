@@ -947,14 +947,14 @@ export type Token = {
 
 ### Phase 7: Code Generation Improvements
 
-- [ ] **7.1** Add `context: "expr" | "stmt"` to `CodeGenContext`
-- [ ] **7.2** Update `genExpr` to track context
-- [ ] **7.3** Implement direct statement generation for matches in statement context
-- [ ] **7.4** Implement ternary generation for simple two-branch matches
-- [ ] **7.5** Only generate async IIFE when necessary
-- [ ] **7.6** Consider making pure functions non-async
-- [ ] **7.7** Add output quality tests comparing generated code
-- [ ] **7.8** Run full test suite and fix any issues
+- [x] **7.1** Add `context: "expr" | "stmt"` to `CodeGenContext`
+- [ ] ~~**7.2** Update `genExpr` to track context~~ (not needed with IIFE approach)
+- [ ] ~~**7.3** Implement direct statement generation for matches in statement context~~ (would require major changes)
+- [x] **7.4** Implement ternary generation for simple two-branch matches (True/False and literal patterns)
+- [x] **7.5** Only generate async IIFE when necessary (detect if body requires await)
+- [ ] ~~**7.6** Consider making pure functions non-async~~ (requires tracking async-ness through call graph)
+- [ ] **7.7** Add output quality tests comparing generated code (optional)
+- [x] **7.8** Run full test suite and fix any issues
 
 ### Cleanup Tasks
 
