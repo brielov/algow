@@ -908,17 +908,17 @@ export type Token = {
 - [x] **4.13** Update lower.ts type lookup to use node IDs
 - [x] **4.14** Run full test suite and fix any issues
 
-### Phase 5: Integrated Symbol Table
+### Phase 5: Integrated Symbol Table ✅
 
-- [ ] **5.1** Make `fileRegistry` required in `resolveProgram` signature
-- [ ] **5.2** Always create symbol table in resolver (remove conditional)
-- [ ] **5.3** Update `ResolveResult` to always include `symbolTable` (not nullable)
-- [ ] **5.4** Move type storage into symbol table during checking
-- [ ] **5.5** Remove `enrichWithTypes` function
-- [ ] **5.6** Update `compileForLSP` to use integrated symbol table
-- [ ] **5.7** Update regular `compile` to pass file registry
-- [ ] **5.8** Ensure symbol table is populated even in CLI mode
-- [ ] **5.9** Run full test suite and fix any issues
+- [x] **5.1** Make `fileRegistry` required in `resolveProgram` signature
+- [x] **5.2** Always create symbol table in resolver (remove conditional)
+- [x] **5.3** Update `ResolveResult` to always include `symbolTableBuilder` (mutable)
+- [x] **5.4** Move type storage into symbol table during checking
+- [x] **5.5** Remove `enrichWithTypes` function (replaced by `freezeSymbolTableWithSubst`)
+- [x] **5.6** Update `compileForLSP` to use integrated symbol table
+- [x] **5.7** Update regular `compile` to pass file registry
+- [x] **5.8** Ensure symbol table is populated even in CLI mode
+- [x] **5.9** Run full test suite and fix any issues
 
 ### Phase 6: Module Splitting
 

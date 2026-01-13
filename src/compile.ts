@@ -18,7 +18,7 @@ import {
 } from "./files";
 import { lowerProgram } from "./lower";
 import type { SymbolTable } from "./lsp/symbols";
-import { enrichWithTypes } from "./lsp/symbols";
+import { freezeSymbolTableWithSubst } from "./lsp/symbols";
 import { optimize } from "./optimize";
 import { parse } from "./parser";
 import { resolveProgram } from "./resolve";
@@ -162,6 +162,9 @@ export const compile = async (
     }
   }
 
+  // Freeze file registry
+  const fileRegistry = freezeFileRegistry(registryBuilder);
+
   // Check for parse errors
   if (allDiagnostics.some((d) => d.severity === "error")) {
     return { diagnostics: allDiagnostics, success: false };
@@ -185,15 +188,15 @@ export const compile = async (
   const coreProgram = desugarProgram(combinedProgram);
 
   // 4. Resolve names
-  const resolveResult = resolveProgram(coreProgram);
+  const resolveResult = resolveProgram(coreProgram, fileRegistry);
   allDiagnostics.push(...resolveResult.diagnostics);
 
   if (allDiagnostics.some((d) => d.severity === "error")) {
     return { diagnostics: allDiagnostics, success: false };
   }
 
-  // 5. Type check
-  const checkResult = checkProgram(resolveResult.program);
+  // 5. Type check (types are recorded in symbol table builder)
+  const checkResult = checkProgram(resolveResult.program, resolveResult.symbolTableBuilder);
   allDiagnostics.push(...checkResult.diagnostics);
 
   if (allDiagnostics.some((d) => d.severity === "error")) {
@@ -340,7 +343,7 @@ export type LSPCompileResult = {
   /** All diagnostics from all phases */
   readonly diagnostics: readonly Diagnostic[];
   /** Symbol table for LSP features */
-  readonly symbolTable: SymbolTable | null;
+  readonly symbolTable: SymbolTable;
   /** Type checker output (for type information) */
   readonly checkOutput: CheckOutput | null;
   /** File registry for position mapping */
@@ -390,38 +393,31 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
   // Desugar
   const coreProgram = desugarProgram(combinedProgram);
 
-  // Resolve names (with LSP tracking enabled)
-  const resolveResult = resolveProgram(coreProgram, new Map(), new Set(), new Set(), fileRegistry);
+  // Resolve names
+  const resolveResult = resolveProgram(coreProgram, fileRegistry);
   allDiagnostics.push(...resolveResult.diagnostics);
 
-  // Check for resolve errors - continue anyway for partial results
-  const _hasResolveErrors = allDiagnostics.some((d) => d.severity === "error");
-
   if (hasParseErrors) {
-    // Can't proceed past parsing
+    // Can't proceed past parsing - freeze symbol table without type info
     return {
       success: false,
       diagnostics: allDiagnostics,
-      symbolTable: resolveResult.symbolTable,
+      symbolTable: freezeSymbolTableWithSubst(resolveResult.symbolTableBuilder, new Map()),
       checkOutput: null,
       fileRegistry,
       modules,
     };
   }
 
-  // Type check
-  const checkResult = checkProgram(resolveResult.program);
+  // Type check (types are recorded in symbol table builder)
+  const checkResult = checkProgram(resolveResult.program, resolveResult.symbolTableBuilder);
   allDiagnostics.push(...checkResult.diagnostics);
 
-  // Enrich symbol table with type information (apply final substitution to resolve type vars)
-  const symbolTable = resolveResult.symbolTable
-    ? enrichWithTypes(
-        resolveResult.symbolTable,
-        checkResult.typeMap,
-        checkResult.typeEnv,
-        checkResult.subst,
-      )
-    : null;
+  // Freeze symbol table with final substitution to resolve type variables
+  const symbolTable = freezeSymbolTableWithSubst(
+    resolveResult.symbolTableBuilder,
+    checkResult.subst,
+  );
 
   return {
     success: !allDiagnostics.some((d) => d.severity === "error"),

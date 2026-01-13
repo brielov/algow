@@ -39,7 +39,7 @@ import { getFileById, getFileByPath, type FileRegistry } from "./workspace";
 export type AnalysisResult = {
   readonly success: boolean;
   readonly diagnostics: readonly Diagnostic[];
-  readonly symbolTable: SymbolTable | null;
+  readonly symbolTable: SymbolTable;
   readonly fileRegistry: FileRegistry;
   readonly lineIndices: ReadonlyMap<string, LineIndex>;
   readonly modules: ModuleInfo;
@@ -137,8 +137,6 @@ export const findSymbolAtPosition = (
   | { kind: "definition"; def: SymbolDefinition }
   | { kind: "reference"; targetId: number }
   | null => {
-  if (!result.symbolTable) return null;
-
   const file = getFileByPath(result.fileRegistry, path);
   if (!file) return null;
 
@@ -163,8 +161,6 @@ export const getDefinitionAtPosition = (
   path: string,
   position: Position,
 ): { path: string; range: Range } | null => {
-  if (!result.symbolTable) return null;
-
   const symbol = findSymbolAtPosition(result, path, position);
   if (!symbol) return null;
 
@@ -194,8 +190,6 @@ export const getReferencesAtPosition = (
   position: Position,
   includeDefinition: boolean = true,
 ): { path: string; range: Range }[] => {
-  if (!result.symbolTable) return [];
-
   const symbol = findSymbolAtPosition(result, path, position);
   if (!symbol) return [];
 
@@ -238,8 +232,6 @@ export const getHoverAtPosition = (
   path: string,
   position: Position,
 ): { contents: string; range: Range } | null => {
-  if (!result.symbolTable) return null;
-
   const file = getFileByPath(result.fileRegistry, path);
   if (!file) return null;
 
@@ -462,8 +454,6 @@ export const getDocumentSymbols = (
   result: AnalysisResult,
   path: string,
 ): { name: string; kind: string; range: Range; detail?: string }[] => {
-  if (!result.symbolTable) return [];
-
   const file = getFileByPath(result.fileRegistry, path);
   if (!file) return [];
 

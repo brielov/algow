@@ -6,7 +6,7 @@
  */
 
 import type { FileId, Span } from "../surface";
-import { applySubst, type Scheme, type Subst, type Type } from "../types";
+import { applySubst, type Scheme, type Subst } from "../types";
 
 // Re-export for convenience
 export type { FileId, Span } from "../surface";
@@ -149,56 +149,40 @@ export const addScopeSnapshot = (builder: SymbolTableBuilder, snapshot: ScopeSna
   builder.scopeSnapshots.push(snapshot);
 };
 
-/** Freeze builder into immutable SymbolTable */
-export const freezeSymbolTable = (builder: SymbolTableBuilder): SymbolTable => ({
-  definitions: builder.definitions,
-  references: builder.references,
-  constructors: builder.constructors,
-  types: builder.types,
-  scopeSnapshots: builder.scopeSnapshots,
-});
+/** Update a definition's type scheme */
+export const setDefinitionScheme = (
+  builder: SymbolTableBuilder,
+  nameId: number,
+  scheme: Scheme,
+): void => {
+  const def = builder.definitions.get(nameId);
+  if (def) {
+    builder.definitions.set(nameId, { ...def, scheme });
+  }
+};
 
-// =============================================================================
-// Enrichment with Type Information
-// =============================================================================
-
-/** Enrich symbol definitions with type schemes, applying final substitution */
-export const enrichWithTypes = (
-  table: SymbolTable,
-  typeMap: ReadonlyMap<number, Type>,
-  typeEnv: ReadonlyMap<string, Scheme>,
+/** Apply substitution to all definition schemes and freeze into immutable SymbolTable */
+export const freezeSymbolTableWithSubst = (
+  builder: SymbolTableBuilder,
   subst: Subst,
 ): SymbolTable => {
-  const enrichedDefs = new Map<number, SymbolDefinition>();
-
-  for (const [nameId, def] of table.definitions) {
-    // Try to find scheme in typeEnv (keyed as "{id}:{name}")
-    const schemeKey = `${nameId}:${def.name}`;
-    const envScheme = typeEnv.get(schemeKey);
-
-    if (envScheme) {
-      // Apply substitution to resolve type variables
-      const resolvedType = applySubst(subst, envScheme.type);
-      const scheme: Scheme = { ...envScheme, type: resolvedType };
-      enrichedDefs.set(nameId, { ...def, scheme });
+  // Apply substitution to resolve type variables in all schemes
+  const finalDefs = new Map<number, SymbolDefinition>();
+  for (const [nameId, def] of builder.definitions) {
+    if (def.scheme) {
+      const resolvedType = applySubst(subst, def.scheme.type);
+      finalDefs.set(nameId, { ...def, scheme: { ...def.scheme, type: resolvedType } });
     } else {
-      // Fallback: use typeMap if available
-      const type = typeMap.get(nameId);
-      if (type) {
-        const resolvedType = applySubst(subst, type);
-        enrichedDefs.set(nameId, {
-          ...def,
-          scheme: { vars: [], constraints: [], type: resolvedType },
-        });
-      } else {
-        enrichedDefs.set(nameId, def);
-      }
+      finalDefs.set(nameId, def);
     }
   }
 
   return {
-    ...table,
-    definitions: enrichedDefs,
+    definitions: finalDefs,
+    references: builder.references,
+    constructors: builder.constructors,
+    types: builder.types,
+    scopeSnapshots: builder.scopeSnapshots,
   };
 };
 

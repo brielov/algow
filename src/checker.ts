@@ -9,6 +9,8 @@ import { error as diagError, typeMismatch } from "./diagnostics";
 import type { NodeId, Span } from "./surface";
 import * as C from "./core";
 import type { Name } from "./core";
+import type { SymbolTableBuilder } from "./lsp/symbols";
+import { setDefinitionScheme } from "./lsp/symbols";
 import {
   type Type,
   type Subst,
@@ -16,6 +18,7 @@ import {
   type Constraint,
   type ConstructorRegistry,
   type AliasRegistry,
+  type Scheme,
   tvar,
   tcon,
   tfun,
@@ -52,6 +55,8 @@ type CheckContext = {
   readonly diagnostics: Diagnostic[];
   readonly registry: ConstructorRegistry;
   readonly aliasRegistry: AliasRegistry;
+  // Symbol table builder for recording types on definitions
+  readonly symbolTableBuilder: SymbolTableBuilder;
   // Unified type map: NodeId → Type (for LSP/lowering)
   readonly nodeTypeMap: Map<NodeId, Type>;
   // Span position to NodeId mapping (for LSP position lookup)
@@ -64,12 +69,14 @@ type CheckContext = {
 };
 
 const createContext = (
+  symbolTableBuilder: SymbolTableBuilder,
   registry: ConstructorRegistry = new Map(),
   aliasRegistry: AliasRegistry = new Map(),
 ): CheckContext => ({
   diagnostics: [],
   registry,
   aliasRegistry,
+  symbolTableBuilder,
   nodeTypeMap: new Map(),
   spanToNodeId: new Map(),
   typeMap: new Map(),
@@ -85,6 +92,12 @@ const addError = (ctx: CheckContext, message: string, span?: C.CExpr["span"]): v
 /** Record type for a named binding (legacy - used by lower.ts) */
 const recordType = (ctx: CheckContext, name: Name, type: Type): void => {
   ctx.typeMap.set(name.id, type);
+};
+
+/** Record scheme for a named binding in both typeMap and symbol table */
+const recordScheme = (ctx: CheckContext, name: Name, s: Scheme): void => {
+  ctx.typeMap.set(name.id, s.type);
+  setDefinitionScheme(ctx.symbolTableBuilder, name.id, s);
 };
 
 /** Record the type of an expression by its nodeId and span position */
@@ -389,9 +402,15 @@ const inferLet = (ctx: CheckContext, env: TypeEnv, expr: C.CLet): InferResult =>
 
   const [s2, t2, c2] = inferExpr(ctx, newEnv, expr.body);
 
-  recordType(ctx, expr.name, applySubst(composeSubst(s1, s2), t1));
+  const finalSubst = composeSubst(s1, s2);
+  const finalScheme = scheme(
+    generalizedScheme.vars,
+    applySubst(finalSubst, generalizedScheme.type),
+    generalizedScheme.constraints,
+  );
+  recordScheme(ctx, expr.name, finalScheme);
 
-  return [composeSubst(s1, s2), t2, [...c1, ...c2]];
+  return [finalSubst, t2, [...c1, ...c2]];
 };
 
 const inferLetRec = (ctx: CheckContext, env: TypeEnv, expr: C.CLetRec): InferResult => {
@@ -423,15 +442,22 @@ const inferLetRec = (ctx: CheckContext, env: TypeEnv, expr: C.CLetRec): InferRes
 
   // Generalize and update environment
   const finalEnv = applySubstEnv(subst, newEnv);
+  const bindingSchemes: { name: Name; scheme: Scheme }[] = [];
   for (const b of expr.bindings) {
     const key = `${b.name.id}:${b.name.text}`;
     const t = applySubst(subst, bindingTypes.get(key)!);
     const generalizedScheme = generalize(finalEnv, t);
     finalEnv.set(key, generalizedScheme);
-    recordType(ctx, b.name, t);
+    bindingSchemes.push({ name: b.name, scheme: generalizedScheme });
   }
 
   const [s2, t2, c2] = inferExpr(ctx, finalEnv, expr.body);
+
+  // Record schemes with body substitution applied
+  for (const { name, scheme: s } of bindingSchemes) {
+    const finalScheme = scheme(s.vars, applySubst(s2, s.type), s.constraints);
+    recordScheme(ctx, name, finalScheme);
+  }
 
   return [composeSubst(subst, s2), t2, [...allConstraints, ...c2]];
 };
@@ -1040,12 +1066,13 @@ export type CheckOutput = {
 
 export const checkProgram = (
   program: C.CProgram,
+  symbolTableBuilder: SymbolTableBuilder,
   initialEnv: TypeEnv = new Map(),
   initialRegistry: ConstructorRegistry = new Map(),
 ): CheckOutput => {
   resetTypeVarCounter();
 
-  const ctx = createContext(initialRegistry);
+  const ctx = createContext(symbolTableBuilder, initialRegistry);
   let env = new Map(initialEnv);
   let subst: Subst = new Map();
   const allConstraints: Constraint[] = [];
@@ -1086,7 +1113,7 @@ export const checkProgram = (
       env.set(key, foreignScheme);
       // Also register with module.name key for lookup
       env.set(`${decl.module}.${decl.jsName}`, foreignScheme);
-      recordType(ctx, decl.name, type);
+      recordScheme(ctx, decl.name, foreignScheme);
     }
   }
 
@@ -1126,7 +1153,7 @@ export const checkProgram = (
       const key = `${binding.name.id}:${binding.name.text}`;
       const generalizedScheme = generalize(applySubstEnv(subst, env), t);
       env.set(key, generalizedScheme);
-      recordType(ctx, binding.name, applySubst(subst, t));
+      recordScheme(ctx, binding.name, generalizedScheme);
     } else {
       // Mutually recursive bindings: treat as letrec
       const sccBindings = scc.map((name) => bindingByName.get(name)!);
@@ -1163,7 +1190,7 @@ export const checkProgram = (
         const t = applySubst(subst, bindingTypes.get(key)!);
         const generalizedScheme = generalize(outerEnv, t);
         env.set(key, generalizedScheme);
-        recordType(ctx, b.name, t);
+        recordScheme(ctx, b.name, generalizedScheme);
       }
     }
   }
