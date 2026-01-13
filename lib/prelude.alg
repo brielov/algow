@@ -462,30 +462,30 @@ module Set
 end
 
 -- =============================================================================
--- File Functions (foreign)
+-- File Functions (foreign async)
 -- =============================================================================
 
 module File
-  foreign read   : string -> Either IOError string
-  foreign write  : string -> string -> Either IOError unit
-  foreign append : string -> string -> Either IOError unit
-  foreign remove : string -> Either IOError unit
-  foreign copy   : string -> string -> Either IOError unit
-  foreign rename : string -> string -> Either IOError unit
-  foreign touch  : string -> Either IOError unit
-  foreign exists : string -> bool
-  foreign size   : string -> Either IOError int
+  foreign async read   : string -> Either IOError string
+  foreign async write  : string -> string -> Either IOError unit
+  foreign async append : string -> string -> Either IOError unit
+  foreign async remove : string -> Either IOError unit
+  foreign async copy   : string -> string -> Either IOError unit
+  foreign async rename : string -> string -> Either IOError unit
+  foreign async touch  : string -> Either IOError unit
+  foreign async exists : string -> bool
+  foreign async size   : string -> Either IOError int
 end
 
 -- =============================================================================
--- Dir Functions (foreign)
+-- Dir Functions (foreign async)
 -- =============================================================================
 
 module Dir
-  foreign create : string -> Either IOError unit
-  foreign remove : string -> Either IOError unit
-  foreign list   : string -> Either IOError (List string)
-  foreign exists : string -> bool
+  foreign async create : string -> Either IOError unit
+  foreign async remove : string -> Either IOError unit
+  foreign async list   : string -> Either IOError (List string)
+  foreign async exists : string -> bool
 end
 
 -- =============================================================================

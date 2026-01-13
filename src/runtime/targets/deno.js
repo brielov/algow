@@ -1,5 +1,6 @@
 // Target: Deno
 // IO, File, Dir modules using Deno APIs
+// File and Dir operations are async for transparent async/await support
 
 $foreign.IO = {
   print: (s) => {
@@ -31,76 +32,79 @@ const $denoIoError = (err, path) => {
 };
 
 $foreign.File = {
-  read: (path) => {
+  read: async (path) => {
     try {
-      return [1, Deno.readTextFileSync(path)];
+      const content = await Deno.readTextFile(path);
+      return [1, content];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
   },
-  write: (path) => (content) => {
+  write: (path) => async (content) => {
     try {
-      Deno.writeTextFileSync(path, content);
+      await Deno.writeTextFile(path, content);
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
   },
-  append: (path) => (content) => {
+  append: (path) => async (content) => {
     try {
-      Deno.writeTextFileSync(path, content, { append: true });
+      await Deno.writeTextFile(path, content, { append: true });
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
   },
-  remove: (path) => {
+  remove: async (path) => {
     try {
-      Deno.removeSync(path);
+      await Deno.remove(path);
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
   },
-  copy: (src) => (dest) => {
+  copy: (src) => async (dest) => {
     try {
-      Deno.copyFileSync(src, dest);
+      await Deno.copyFile(src, dest);
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, src)];
     }
   },
-  rename: (src) => (dest) => {
+  rename: (src) => async (dest) => {
     try {
-      Deno.renameSync(src, dest);
+      await Deno.rename(src, dest);
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, src)];
     }
   },
-  touch: (path) => {
+  touch: async (path) => {
     try {
       const now = new Date();
       try {
-        Deno.utimeSync(path, now, now);
+        await Deno.utime(path, now, now);
       } catch {
-        Deno.writeTextFileSync(path, "", { create: true });
+        await Deno.writeTextFile(path, "", { create: true });
       }
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
   },
-  exists: (path) => {
+  exists: async (path) => {
     try {
-      return Deno.statSync(path).isFile;
+      const stat = await Deno.stat(path);
+      return stat.isFile;
     } catch {
       return false;
     }
   },
-  size: (path) => {
+  size: async (path) => {
     try {
-      return [1, Deno.statSync(path).size];
+      const stat = await Deno.stat(path);
+      return [1, stat.size];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
@@ -108,25 +112,28 @@ $foreign.File = {
 };
 
 $foreign.Dir = {
-  create: (path) => {
+  create: async (path) => {
     try {
-      Deno.mkdirSync(path, { recursive: true });
+      await Deno.mkdir(path, { recursive: true });
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
   },
-  remove: (path) => {
+  remove: async (path) => {
     try {
-      Deno.removeSync(path, { recursive: true });
+      await Deno.remove(path, { recursive: true });
       return [1, null];
     } catch (err) {
       return [0, $denoIoError(err, path)];
     }
   },
-  list: (path) => {
+  list: async (path) => {
     try {
-      const entries = [...Deno.readDirSync(path)].map((e) => e.name);
+      const entries = [];
+      for await (const entry of Deno.readDir(path)) {
+        entries.push(entry.name);
+      }
       let result = null;
       for (let i = entries.length - 1; i >= 0; i--) result = { h: entries[i], t: result };
       return [1, result];
@@ -134,9 +141,10 @@ $foreign.Dir = {
       return [0, $denoIoError(err, path)];
     }
   },
-  exists: (path) => {
+  exists: async (path) => {
     try {
-      return Deno.statSync(path).isDirectory;
+      const stat = await Deno.stat(path);
+      return stat.isDirectory;
     } catch {
       return false;
     }

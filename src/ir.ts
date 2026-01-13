@@ -168,6 +168,7 @@ export type IRBForeign = {
   readonly name: string;
   readonly args: readonly Atom[];
   readonly type: Type;
+  readonly isAsync: boolean;
 };
 
 export type IRBMatch = {
@@ -223,7 +224,8 @@ export const irbforeign = (
   name: string,
   args: readonly Atom[],
   type: Type,
-): IRBForeign => ({ kind: "IRBForeign", module, name, args, type });
+  isAsync: boolean,
+): IRBForeign => ({ kind: "IRBForeign", module, name, args, type, isAsync });
 
 export const irbmatch = (scrutinee: Atom, cases: readonly IRCase[], type: Type): IRBMatch => ({
   kind: "IRBMatch",

@@ -1,5 +1,8 @@
 // Target: Node.js / Bun
 // IO, File, Dir modules using Node.js APIs
+// File and Dir operations are async for transparent async/await support
+
+const fs = require("fs").promises;
 
 $foreign.IO = {
   print: (s) => {
@@ -20,85 +23,80 @@ $foreign.IO = {
 };
 
 $foreign.File = {
-  read: (path) => {
+  read: async (path) => {
     try {
-      const fs = require("fs");
-      return [1, fs.readFileSync(path, "utf8")];
+      const content = await fs.readFile(path, "utf8");
+      return [1, content];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
   },
-  write: (path) => (content) => {
+  write: (path) => async (content) => {
     try {
-      const fs = require("fs");
-      fs.writeFileSync(path, content, "utf8");
+      await fs.writeFile(path, content, "utf8");
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
   },
-  append: (path) => (content) => {
+  append: (path) => async (content) => {
     try {
-      const fs = require("fs");
-      fs.appendFileSync(path, content, "utf8");
+      await fs.appendFile(path, content, "utf8");
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
   },
-  remove: (path) => {
+  remove: async (path) => {
     try {
-      const fs = require("fs");
-      fs.unlinkSync(path);
+      await fs.unlink(path);
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
   },
-  copy: (src) => (dest) => {
+  copy: (src) => async (dest) => {
     try {
-      const fs = require("fs");
-      fs.copyFileSync(src, dest);
+      await fs.copyFile(src, dest);
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, src)];
     }
   },
-  rename: (src) => (dest) => {
+  rename: (src) => async (dest) => {
     try {
-      const fs = require("fs");
-      fs.renameSync(src, dest);
+      await fs.rename(src, dest);
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, src)];
     }
   },
-  touch: (path) => {
+  touch: async (path) => {
     try {
-      const fs = require("fs");
       const now = new Date();
       try {
-        fs.utimesSync(path, now, now);
+        await fs.utimes(path, now, now);
       } catch {
-        fs.closeSync(fs.openSync(path, "w"));
+        const handle = await fs.open(path, "w");
+        await handle.close();
       }
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
   },
-  exists: (path) => {
+  exists: async (path) => {
     try {
-      const fs = require("fs");
-      return fs.statSync(path).isFile();
+      const stat = await fs.stat(path);
+      return stat.isFile();
     } catch {
       return false;
     }
   },
-  size: (path) => {
+  size: async (path) => {
     try {
-      const fs = require("fs");
-      return [1, fs.statSync(path).size];
+      const stat = await fs.stat(path);
+      return [1, stat.size];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
@@ -106,28 +104,25 @@ $foreign.File = {
 };
 
 $foreign.Dir = {
-  create: (path) => {
+  create: async (path) => {
     try {
-      const fs = require("fs");
-      fs.mkdirSync(path, { recursive: true });
+      await fs.mkdir(path, { recursive: true });
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
   },
-  remove: (path) => {
+  remove: async (path) => {
     try {
-      const fs = require("fs");
-      fs.rmSync(path, { recursive: true, force: true });
+      await fs.rm(path, { recursive: true, force: true });
       return [1, null];
     } catch (err) {
       return [0, $ioError(err, path)];
     }
   },
-  list: (path) => {
+  list: async (path) => {
     try {
-      const fs = require("fs");
-      const files = fs.readdirSync(path);
+      const files = await fs.readdir(path);
       let result = null;
       for (let i = files.length - 1; i >= 0; i--) result = { h: files[i], t: result };
       return [1, result];
@@ -135,10 +130,10 @@ $foreign.Dir = {
       return [0, $ioError(err, path)];
     }
   },
-  exists: (path) => {
+  exists: async (path) => {
     try {
-      const fs = require("fs");
-      return fs.statSync(path).isDirectory();
+      const stat = await fs.stat(path);
+      return stat.isDirectory();
     } catch {
       return false;
     }

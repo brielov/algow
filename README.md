@@ -149,12 +149,12 @@ Note: `File` and `Dir` modules are only available on Node.js and Deno targets.
 
 Algow supports multiple JavaScript runtimes:
 
-| Target | Description | File/Dir Access |
-|--------|-------------|-----------------|
-| `node` (default) | Node.js / Bun | Yes |
-| `deno` | Deno runtime | Yes |
-| `browser` | Web browsers | No |
-| `cloudflare` | Cloudflare Workers | No |
+| Target           | Description        | File/Dir Access |
+| ---------------- | ------------------ | --------------- |
+| `node` (default) | Node.js / Bun      | Yes             |
+| `deno`           | Deno runtime       | Yes             |
+| `browser`        | Web browsers       | No              |
+| `cloudflare`     | Cloudflare Workers | No              |
 
 ```bash
 # Compile for Deno

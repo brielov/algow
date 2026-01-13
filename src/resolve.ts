@@ -413,7 +413,9 @@ export const resolveProgram = (
 
       case "CDeclForeign": {
         const name = bindingNames.get(decl.name.original)!;
-        resolvedDecls.push(C.cdeclforeign(name, decl.module, decl.jsName, decl.type, decl.span));
+        resolvedDecls.push(
+          C.cdeclforeign(name, decl.module, decl.jsName, decl.type, decl.isAsync, decl.span),
+        );
         break;
       }
     }

@@ -278,6 +278,7 @@ export type CDeclForeign = {
   readonly module: string;
   readonly jsName: string;
   readonly type: CType;
+  readonly isAsync: boolean;
   readonly span?: Span;
 };
 
@@ -426,5 +427,6 @@ export const cdeclforeign = (
   module: string,
   jsName: string,
   type: CType,
+  isAsync: boolean,
   span?: Span,
-): CDeclForeign => ({ kind: "CDeclForeign", name, module, jsName, type, span });
+): CDeclForeign => ({ kind: "CDeclForeign", name, module, jsName, type, isAsync, span });

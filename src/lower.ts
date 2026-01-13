@@ -46,14 +46,20 @@ type LowerContext = {
   exprTypeMap: ReadonlyMap<number, Type>;
   /** Type environment - used to lookup constructor types */
   typeEnv: TypeEnv;
+  /** Set of async foreign function keys (Module.name) */
+  asyncForeignFunctions: ReadonlySet<string>;
 };
 
-const createContext = (checkOutput: CheckOutput): LowerContext => ({
+const createContext = (
+  checkOutput: CheckOutput,
+  asyncForeignFunctions: ReadonlySet<string> = new Set(),
+): LowerContext => ({
   varCounter: 0,
   subst: checkOutput.subst,
   typeMap: checkOutput.typeMap,
   exprTypeMap: checkOutput.exprTypeMap,
   typeEnv: checkOutput.typeEnv,
+  asyncForeignFunctions,
 });
 
 /** Generate a fresh name for temporaries */
@@ -810,8 +816,12 @@ const lowerForeign = (ctx: LowerContext, expr: C.CForeign): IR.IRExpr => {
   // The type comes from the foreign declaration
   const type: Type = { kind: "TVar", name: `_foreign_${expr.name}` };
 
+  // Check if this foreign function is async
+  const foreignKey = `${expr.module}.${expr.name}`;
+  const isAsync = ctx.asyncForeignFunctions.has(foreignKey);
+
   // Create foreign binding
-  const binding = IR.irbforeign(expr.module, expr.name, [], type);
+  const binding = IR.irbforeign(expr.module, expr.name, [], type, isAsync);
   const name = freshName(ctx);
 
   const body = IR.iratom(IR.avar(name, type));
@@ -1102,7 +1112,7 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
         jsName = parts.slice(1).join(".");
       }
 
-      const binding = IR.irbforeign(module, jsName, [], type);
+      const binding = IR.irbforeign(module, jsName, [], type, decl.isAsync);
       return [IR.irdecllet(decl.name, binding)];
     }
   }
@@ -1120,7 +1130,15 @@ export type LowerResult = {
  * Lower a typed Core program to ANF IR.
  */
 export const lowerProgram = (program: C.CProgram, checkOutput: CheckOutput): LowerResult => {
-  const ctx = createContext(checkOutput);
+  // Build set of async foreign functions from declarations
+  const asyncForeignFunctions = new Set<string>();
+  for (const decl of program.decls) {
+    if (decl.kind === "CDeclForeign" && decl.isAsync) {
+      asyncForeignFunctions.add(`${decl.module}.${decl.jsName}`);
+    }
+  }
+
+  const ctx = createContext(checkOutput, asyncForeignFunctions);
 
   // Lower declarations
   const irDecls: IR.IRDecl[] = [];

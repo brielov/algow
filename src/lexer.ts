@@ -46,6 +46,7 @@ export enum TokenKind {
   Module, // module
   Use, // use
   Foreign, // foreign
+  Async, // async
   Do, // do
 
   // Operators
@@ -174,6 +175,7 @@ const keywords: ReadonlyMap<string, TokenKind> = new Map([
   ["module", TokenKind.Module],
   ["use", TokenKind.Use],
   ["foreign", TokenKind.Foreign],
+  ["async", TokenKind.Async],
   ["do", TokenKind.Do],
 ]);
 

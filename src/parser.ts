@@ -404,6 +404,12 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
   const start = state.current[1];
   advance(state); // 'foreign'
 
+  // Check for 'async' modifier
+  const isAsync = at(state, TokenKind.Async);
+  if (isAsync) {
+    advance(state); // 'async'
+  }
+
   let name: string;
 
   // Support operator syntax: foreign (+) : type
@@ -457,7 +463,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
     return null;
   }
 
-  return S.sdeclforeign(name, type, span(start, state.current[1]));
+  return S.sdeclforeign(name, type, isAsync, span(start, state.current[1]));
 };
 
 const isOperatorToken = (kind: TokenKind): boolean =>

@@ -376,10 +376,12 @@ export type SDeclLetRec = {
 };
 
 // Foreign binding: foreign foo : Int -> Int
+// Async foreign: foreign async foo : Int -> Int
 export type SDeclForeign = {
   readonly kind: "SDeclForeign";
   readonly name: string;
   readonly type: SType;
+  readonly isAsync: boolean;
   readonly span?: Span;
 };
 
@@ -601,10 +603,16 @@ export const sdeclletrec = (
   bindings: readonly { name: string; value: SExpr }[],
   span?: Span,
 ): SDeclLetRec => ({ kind: "SDeclLetRec", bindings, span });
-export const sdeclforeign = (name: string, type: SType, span?: Span): SDeclForeign => ({
+export const sdeclforeign = (
+  name: string,
+  type: SType,
+  isAsync: boolean,
+  span?: Span,
+): SDeclForeign => ({
   kind: "SDeclForeign",
   name,
   type,
+  isAsync,
   span,
 });
 export const sdeclmodule = (

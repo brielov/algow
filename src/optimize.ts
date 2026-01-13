@@ -149,6 +149,7 @@ const alphaRenameBinding = (binding: IR.IRBinding, env: RenameEnv): IR.IRBinding
         binding.name,
         binding.args.map((a) => alphaRenameAtom(a, env)),
         binding.type,
+        binding.isAsync,
       );
 
     case "IRBMatch": {
@@ -1348,6 +1349,7 @@ const inlineBinding = (binding: IR.IRBinding, env: InlineEnv): IR.IRBinding => {
         binding.name,
         binding.args.map((a) => inlineAtom(a, env)),
         binding.type,
+        binding.isAsync,
       );
 
     case "IRBMatch": {

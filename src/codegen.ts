@@ -191,10 +191,16 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
         const h = genAtom(ctx, binding.arg);
         return `(t) => ({ h: ${h}, t })`;
       }
+      // Constructor applications don't need await
+      if (binding.func.kind === "ACon") {
+        const func = genAtom(ctx, binding.func);
+        const arg = genAtom(ctx, binding.arg);
+        return `${func}(${arg})`;
+      }
       const func = genAtom(ctx, binding.func);
       const arg = genAtom(ctx, binding.arg);
-      // Direct function call
-      return `${func}(${arg})`;
+      // Await function calls (all user functions are async)
+      return `await ${func}(${arg})`;
     }
 
     case "IRBBinOp": {
@@ -253,6 +259,10 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
       for (const arg of binding.args) {
         result = `${result}(${genAtom(ctx, arg)})`;
       }
+      // Add await for async foreign functions
+      if (binding.isAsync) {
+        result = `await ${result}`;
+      }
       return result;
     }
 
@@ -293,12 +303,12 @@ const genLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
   if (bodyLines.length === 0) {
     // Wrap object literals in parentheses to avoid ambiguity with function body
     const result = bodyResult.startsWith("{") ? `(${bodyResult})` : bodyResult;
-    return `(${param}) => ${result}`;
+    return `async (${param}) => ${result}`;
   }
 
   const indentation = "  ".repeat(ctx.indent + 1);
   const body = bodyLines.map((l) => indentation + l.trimStart()).join("\n");
-  return `(${param}) => {\n${body}\n${"  ".repeat(ctx.indent)}  return ${bodyResult};\n${"  ".repeat(ctx.indent)}}`;
+  return `async (${param}) => {\n${body}\n${"  ".repeat(ctx.indent)}  return ${bodyResult};\n${"  ".repeat(ctx.indent)}}`;
 };
 
 const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
@@ -324,18 +334,18 @@ const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): str
   ctx.declaredNames = savedDeclared;
   ctx.indent--;
 
-  // Build curried function with while loop
+  // Build curried async function with while loop
   if (params.length === 1) {
     const indentation = "  ".repeat(ctx.indent + 1);
     const loopIndent = "  ".repeat(ctx.indent + 2);
     const body = bodyLines.map((l) => loopIndent + l.trimStart()).join("\n");
-    return `(${params[0]}) => {\n${indentation}while (true) {\n${body}\n${loopIndent}return ${bodyResult};\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
+    return `async (${params[0]}) => {\n${indentation}while (true) {\n${body}\n${loopIndent}return ${bodyResult};\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
   }
 
-  // Multi-param: curried function
+  // Multi-param: curried async function
   let result = "";
   for (let i = 0; i < params.length - 1; i++) {
-    result += `(${params[i]}) => `;
+    result += `async (${params[i]}) => `;
   }
 
   const lastParam = params[params.length - 1]!;
@@ -343,7 +353,7 @@ const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): str
   const loopIndent = "  ".repeat(ctx.indent + 2);
   const body = bodyLines.map((l) => loopIndent + l.trimStart()).join("\n");
 
-  result += `(${lastParam}) => {\n${indentation}while (true) {\n${body}\n${loopIndent}return ${bodyResult};\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
+  result += `async (${lastParam}) => {\n${indentation}while (true) {\n${body}\n${loopIndent}return ${bodyResult};\n${indentation}}\n${"  ".repeat(ctx.indent)}}`;
 
   return result;
 };
@@ -416,10 +426,11 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   const hasGuards = match.cases.some((c) => c.guard !== null);
 
   const lines: string[] = [];
+  // Make IIFEs async to support await inside bodies
   if (isSimpleVar) {
-    lines.push("(() => {");
+    lines.push("(async () => {");
   } else {
-    lines.push(`((${scrutineeVar}) => {`);
+    lines.push(`(async (${scrutineeVar}) => {`);
   }
 
   for (let i = 0; i < match.cases.length; i++) {
@@ -512,13 +523,14 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   if (!hasGuards) {
     lines.push("  }");
   }
+  // Await the async IIFE
   if (isSimpleVar) {
     lines.push("})()");
   } else {
     lines.push(`})(${scrutineeExpr})`);
   }
 
-  return lines.join("\n" + "  ".repeat(ctx.indent));
+  return "await " + lines.join("\n" + "  ".repeat(ctx.indent));
 };
 
 // =============================================================================
@@ -793,9 +805,9 @@ export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}):
     runtime,
     "// Generated code",
     ...ctx.lines,
-    // Build argv as a List (linked list) and call main
+    // Build argv as a List (linked list) and call main (await since functions are async)
     mainName ? `const $argv = ${argvExpr}.reduceRight((t, h) => ({ h, t }), null);` : "",
-    mainName ? `${mainName}($argv);` : "",
+    mainName ? `await ${mainName}($argv);` : "",
   ]
     .filter(Boolean)
     .join("\n");

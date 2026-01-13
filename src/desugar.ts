@@ -562,6 +562,7 @@ const desugarDecl = (decl: S.SDecl): C.CDecl | C.CDecl[] | null => {
         "", // module - to be filled during resolution
         decl.name, // jsName - same as name by default
         desugarType(decl.type),
+        decl.isAsync,
         decl.span,
       );
 
@@ -1088,6 +1089,7 @@ const desugarDeclInModuleWithImports = (
         moduleName,
         decl.name, // jsName is the unqualified name
         desugarType(decl.type),
+        decl.isAsync,
         decl.span,
       );
     }
