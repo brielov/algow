@@ -28,10 +28,11 @@ A small, experimental programming language with Hindley-Milner type inference th
 
 ### Compiler
 
-- Compiles to JavaScript
+- Compiles to JavaScript with **multi-target support**: Node.js, Deno, Browser, Cloudflare Workers
 - A-Normal Form intermediate representation
 - Basic optimizations (constant folding, dead code elimination)
 - Comprehensive standard library (prelude)
+- Required `main : List String -> a` entry point with command-line arguments
 
 ## Quick Start
 
@@ -42,18 +43,26 @@ bun install
 # Type check a file
 bun run src/index.ts check examples/basics/main.alg
 
-# Compile and run
-bun run src/index.ts compile examples/basics/main.alg | bun run -
+# Compile and run (with arguments)
+bun run src/index.ts run examples/basics/main.alg -- arg1 arg2
 
-# Or use the shorthand
-bun run src/index.ts -t file.alg  # type check
-bun run src/index.ts -c file.alg  # compile
+# Compile to JavaScript
+bun run src/index.ts compile examples/basics/main.alg > out.js
+
+# Compile for different targets
+bun run src/index.ts compile --target deno file.alg      # Deno
+bun run src/index.ts compile --target browser file.alg   # Browser
+bun run src/index.ts compile --target cloudflare file.alg # Cloudflare Workers
 ```
 
 ## Syntax Overview
 
 ```
 -- Line comments start with --
+
+-- Every program needs a main function
+let main = args ->
+  IO.printLine "Hello, World!"
 
 -- Type declarations
 type Maybe a = Nothing | Just a
@@ -132,7 +141,29 @@ The prelude provides common types and functions:
 
 **List**: `map`, `filter`, `foldl`, `foldr`, `length`, `reverse`, `append`, `concat`, `head`, `tail`, `take`, `drop`, `zip`, `any`, `all`, `find`, `elem`, `nub`, `sortBy`
 
-**Foreign modules**: `String`, `Char`, `Int`, `Float`, `IO`, `Debug`, `Map`, `Set`
+**Foreign modules**: `String`, `Char`, `Int`, `Float`, `IO`, `Debug`, `Map`, `Set`, `File`, `Dir`, `Path`
+
+Note: `File` and `Dir` modules are only available on Node.js and Deno targets.
+
+## Compilation Targets
+
+Algow supports multiple JavaScript runtimes:
+
+| Target | Description | File/Dir Access |
+|--------|-------------|-----------------|
+| `node` (default) | Node.js / Bun | Yes |
+| `deno` | Deno runtime | Yes |
+| `browser` | Web browsers | No |
+| `cloudflare` | Cloudflare Workers | No |
+
+```bash
+# Compile for Deno
+bun run src/index.ts compile --target deno app.alg > app.js
+deno run --allow-read app.js
+
+# Compile for browser (outputs ES module)
+bun run src/index.ts compile --target browser app.alg > app.js
+```
 
 ## Examples
 
