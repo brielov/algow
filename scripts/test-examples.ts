@@ -12,7 +12,8 @@ async function findAlgFiles(dir: string): Promise<string[]> {
     const s = await stat(path);
     if (s.isDirectory()) {
       files.push(...(await findAlgFiles(path)));
-    } else if (entry.endsWith(".alg")) {
+    } else if (entry === "main.alg") {
+      // Only test main.alg files - other .alg files are helper modules or error examples
       files.push(path);
     }
   }
@@ -21,7 +22,7 @@ async function findAlgFiles(dir: string): Promise<string[]> {
 
 async function runWithTimeout(file: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const proc = Bun.spawn(["bun", "run", "src/index.ts", "-t", file], {
+    const proc = Bun.spawn(["bun", "run", "src/index.ts", "check", file], {
       stdout: "pipe",
       stderr: "pipe",
     });
