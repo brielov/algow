@@ -9,12 +9,13 @@ Algow is a statically-typed ML-like language that compiles to JavaScript. It imp
 ## Commands
 
 ```bash
-bun install                                    # Install dependencies
-bun run src/index.ts -t file.alg               # Type check only
-bun run src/index.ts -c file.alg               # Compile to JavaScript
-bun run src/index.ts compile file.alg | bun -  # Compile and run
-bun test                                       # Run example tests
-bunx oxlint                                    # Run linter
+bun install                                        # Install dependencies
+bun run src/index.ts check file.alg                # Type check only
+bun run src/index.ts compile file.alg              # Compile to JavaScript (node target)
+bun run src/index.ts compile --target deno file.alg # Compile for Deno
+bun run src/index.ts run file.alg -- arg1 arg2     # Compile and run with args
+bun test                                           # Run example tests
+bunx oxlint                                        # Run linter
 ```
 
 ## Architecture
@@ -86,7 +87,7 @@ Constant folding, dead code elimination, simple inlining.
 
 ### `src/codegen.ts` — JavaScript Backend
 
-Generates JS from IR. Runtime representations:
+Generates JS from IR with multi-target support. Runtime representations:
 
 - Lists: `Nil` → `null`, `Cons h t` → `{ h, t }`
 - Other ADTs: `[tag, arg1, arg2, ...]` with numeric tags
@@ -94,13 +95,25 @@ Generates JS from IR. Runtime representations:
 - Records: Plain objects
 - Functions: Native closures
 
+Targets: `node` (default), `deno`, `browser`, `cloudflare`
+
+### `src/runtime/` — Target-Specific Runtimes
+
+Modular runtime system:
+
+- `base.js` — Core utilities (`$eq`, `$ioError`, `$unavailable`, `$foreign`)
+- `modules/` — Cross-platform modules (string, char, int, float, debug, map, set, path)
+- `targets/` — Target-specific implementations (node, deno, browser, cloudflare)
+- `index.ts` — Runtime builder that assembles modules by target
+
 ### `src/compile.ts` — Pipeline Orchestration
 
-`compile(sources, options)` chains all phases, collecting diagnostics. Supports multi-file compilation with single entry point detection.
+`compile(sources, options)` chains all phases, collecting diagnostics. Validates `main : List String -> a` entry point. Supports multi-file compilation.
 
 ## Language Features
 
 ```
+let main = args -> IO.printLine "Hello"   -- Required entry point (List String -> a)
 type Maybe a = Nothing | Just a           -- ADTs
 let double = x -> x * 2                   -- Lambdas (always arrow syntax)
 let rec fact = n -> if n <= 1 then 1 else n * fact (n - 1)
@@ -114,4 +127,4 @@ x |> f |> g                               -- Pipe → g (f x)
 
 ## Runtime
 
-Use Bun, not Node.js.
+Use Bun, not Node.js. Programs require a `main` function that receives command-line arguments as `List String`.
