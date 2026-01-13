@@ -922,25 +922,25 @@ export type Token = {
 
 ### Phase 6: Module Splitting
 
-- [ ] **6.1** Create `src/checker/` directory
-- [ ] **6.2** Extract `CheckContext` type and functions to `src/checker/context.ts`
-- [ ] **6.3** Extract unification to `src/checker/unify.ts`
-- [ ] **6.4** Extract expression inference to `src/checker/infer.ts`
-- [ ] **6.5** Extract pattern inference to `src/checker/patterns.ts`
-- [ ] **6.6** Extract exhaustiveness checking to `src/checker/exhaustiveness.ts`
-- [ ] **6.7** Extract SCC analysis to `src/checker/scc.ts`
-- [ ] **6.8** Create `src/checker/index.ts` that re-exports public API
-- [ ] **6.9** Create `src/optimize/` directory
-- [ ] **6.10** Define `Pass` interface in `src/optimize/pass.ts`
-- [ ] **6.11** Extract constant folding to `src/optimize/fold.ts`
-- [ ] **6.12** Extract beta reduction to `src/optimize/beta.ts`
+- [x] **6.1** Create `src/checker/` directory
+- [x] **6.2** Extract `CheckContext` type and functions to `src/checker/context.ts`
+- [x] **6.3** Extract unification to `src/checker/unify.ts`
+- [x] **6.4** Extract expression inference to `src/checker/infer.ts`
+- [x] **6.5** Extract pattern inference to `src/checker/patterns.ts`
+- [x] **6.6** Extract exhaustiveness checking to `src/checker/exhaustiveness.ts`
+- [x] **6.7** Extract SCC analysis to `src/checker/scc.ts`
+- [x] **6.8** Create `src/checker/index.ts` that re-exports public API
+- [x] **6.9** Create `src/optimize/` directory
+- [x] **6.10** ~~Define `Pass` interface in `src/optimize/pass.ts`~~ Created `src/optimize/types.ts` with shared types instead
+- [x] **6.11** Extract constant folding to `src/optimize/fold.ts` (includes beta reduction, case-of-known, eta reduction)
+- [x] **6.12** ~~Extract beta reduction to `src/optimize/beta.ts`~~ Combined in fold.ts
 - [ ] **6.13** Extract dead code elimination to `src/optimize/dce.ts`
 - [ ] **6.14** Extract tail call optimization to `src/optimize/tco.ts`
-- [ ] **6.15** Extract case-of-known to `src/optimize/case-of-known.ts`
+- [x] **6.15** ~~Extract case-of-known to `src/optimize/case-of-known.ts`~~ Combined in fold.ts
 - [ ] **6.16** Extract case-of-case to `src/optimize/case-of-case.ts`
 - [ ] **6.17** Extract let floating to `src/optimize/float.ts`
 - [ ] **6.18** Extract function inlining to `src/optimize/inline.ts`
-- [ ] **6.19** Create common traversal utilities in `src/optimize/traverse.ts`
+- [x] **6.19** ~~Create common traversal utilities in `src/optimize/traverse.ts`~~ Created `src/optimize/types.ts` and `src/optimize/alpha.ts`
 - [ ] **6.20** Create `src/optimize/index.ts` that orchestrates passes
 - [ ] **6.21** Update imports throughout codebase
 - [ ] **6.22** Run full test suite and fix any issues
