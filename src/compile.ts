@@ -8,13 +8,17 @@
 import { parse } from "./parser";
 import { desugarProgram } from "./desugar";
 import { resolveProgram } from "./resolve";
-import { checkProgram, typeToString } from "./checker";
+import { checkProgram, typeToString, type CheckOutput } from "./checker";
 import { lowerProgram } from "./lower";
 import { optimize } from "./optimize";
 import { generateJS, type Target, DEFAULT_TARGET } from "./codegen";
 import type { Diagnostic } from "./diagnostics";
 import type { SDecl, SProgram } from "./surface";
 import { type Type, type Scheme, applySubst } from "./types";
+import type { SymbolTable } from "./lsp/symbols";
+import { enrichWithTypes } from "./lsp/symbols";
+import type { FileRegistry } from "./lsp/workspace";
+import { createFileRegistryBuilder, registerFile, freezeFileRegistry } from "./lsp/workspace";
 
 // Re-export Target type and helpers
 export type { Target } from "./codegen";
@@ -261,4 +265,95 @@ const combinePrograms = (files: readonly ParsedFile[]): SProgram => {
 
   // No tail expression - entry point is main function
   return { decls: allDecls, expr: null };
+};
+
+// =============================================================================
+// LSP Compilation
+// =============================================================================
+
+/** Result of LSP-focused compilation */
+export type LSPCompileResult = {
+  /** Whether compilation succeeded (no errors) */
+  readonly success: boolean;
+  /** All diagnostics from all phases */
+  readonly diagnostics: readonly Diagnostic[];
+  /** Symbol table for LSP features */
+  readonly symbolTable: SymbolTable | null;
+  /** Type checker output (for type information) */
+  readonly checkOutput: CheckOutput | null;
+  /** File registry for position mapping */
+  readonly fileRegistry: FileRegistry;
+};
+
+/**
+ * Compile source files for LSP analysis.
+ *
+ * Unlike the regular compile function, this:
+ * - Tracks symbol definitions and references
+ * - Returns the symbol table for LSP features
+ * - Does not generate code
+ * - Does not require a main function
+ *
+ * @param sources - Array of source files (path + content)
+ * @returns Compilation result with symbol table and diagnostics
+ */
+export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult => {
+  const allDiagnostics: Diagnostic[] = [];
+
+  // Build file registry (tracks file identity through compilation)
+  const registryBuilder = createFileRegistryBuilder();
+  const parsedFiles: ParsedFile[] = [];
+
+  for (const { path, content } of sources) {
+    registerFile(registryBuilder, path, content);
+    const parseResult = parse(content);
+    allDiagnostics.push(...parseResult.diagnostics);
+    parsedFiles.push({ path, source: content, program: parseResult.program });
+  }
+
+  const fileRegistry = freezeFileRegistry(registryBuilder);
+
+  // Check for parse errors - continue anyway for partial results
+  const hasParseErrors = allDiagnostics.some((d) => d.severity === "error");
+
+  // Combine all programs
+  const combinedProgram = combinePrograms(parsedFiles);
+
+  // Desugar
+  const coreProgram = desugarProgram(combinedProgram);
+
+  // Resolve names (with LSP tracking enabled)
+  const resolveResult = resolveProgram(coreProgram, new Map(), new Set(), new Set(), fileRegistry);
+  allDiagnostics.push(...resolveResult.diagnostics);
+
+  // Check for resolve errors - continue anyway for partial results
+  const _hasResolveErrors = allDiagnostics.some((d) => d.severity === "error");
+
+  if (hasParseErrors) {
+    // Can't proceed past parsing
+    return {
+      success: false,
+      diagnostics: allDiagnostics,
+      symbolTable: resolveResult.symbolTable,
+      checkOutput: null,
+      fileRegistry,
+    };
+  }
+
+  // Type check
+  const checkResult = checkProgram(resolveResult.program);
+  allDiagnostics.push(...checkResult.diagnostics);
+
+  // Enrich symbol table with type information
+  const symbolTable = resolveResult.symbolTable
+    ? enrichWithTypes(resolveResult.symbolTable, checkResult.typeMap, checkResult.typeEnv)
+    : null;
+
+  return {
+    success: !allDiagnostics.some((d) => d.severity === "error"),
+    diagnostics: allDiagnostics,
+    symbolTable,
+    checkOutput: checkResult,
+    fileRegistry,
+  };
 };

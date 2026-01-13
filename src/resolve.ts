@@ -3,18 +3,39 @@
  *
  * Assigns unique identifiers to all bindings and resolves variable references.
  * After this phase, all CVar nodes have valid Name.id values.
+ *
+ * When LSP tracking is enabled, also collects:
+ * - Symbol definitions (where bindings are declared)
+ * - Symbol references (where bindings are used)
+ * - Scope snapshots (for autocomplete)
  */
 
 import type { Diagnostic } from "./diagnostics";
 import { error as diagError } from "./diagnostics";
 import * as C from "./core";
 import { freshName, resetNameCounter, type Name } from "./core";
+import type { SymbolTable, SymbolTableBuilder, SymbolKind, ScopeSnapshot } from "./lsp/symbols";
+import {
+  createSymbolTableBuilder,
+  addDefinition,
+  addReference,
+  addScopeSnapshot,
+  freezeSymbolTable,
+} from "./lsp/symbols";
+import type { FileRegistry } from "./lsp/workspace";
+import { spanToLocation } from "./lsp/workspace";
 
 // =============================================================================
 // Resolution Context
 // =============================================================================
 
 type Env = Map<string, Name>;
+
+/** LSP tracking state (optional) */
+type LSPTracking = {
+  readonly builder: SymbolTableBuilder;
+  readonly fileRegistry: FileRegistry;
+};
 
 type ResolveContext = {
   readonly env: Env;
@@ -25,43 +46,95 @@ type ResolveContext = {
   readonly types: Set<string>;
   // Constructor aliases: alias name → qualified name (e.g., "Ok" → "Result.Ok")
   readonly constructorAliases: Map<string, string>;
+  // LSP tracking (null when not needed)
+  readonly lsp: LSPTracking | null;
 };
 
 const createContext = (
   constructors: Set<string> = new Set(),
   types: Set<string> = new Set(),
+  lsp: LSPTracking | null = null,
 ): ResolveContext => ({
   env: new Map(),
   diagnostics: [],
   constructors,
   types,
   constructorAliases: new Map(),
+  lsp,
 });
 
-const extendEnv = (ctx: ResolveContext, original: string): [ResolveContext, Name] => {
+const extendEnv = (
+  ctx: ResolveContext,
+  original: string,
+  kind: SymbolKind = "variable",
+  span?: C.CExpr["span"],
+): [ResolveContext, Name] => {
   const name = freshName(original);
   const newEnv = new Map(ctx.env);
   newEnv.set(original, name);
+
+  // Track definition for LSP
+  if (ctx.lsp && span) {
+    const location = spanToLocation(ctx.lsp.fileRegistry, span);
+    if (location) {
+      addDefinition(ctx.lsp.builder, {
+        nameId: name.id,
+        name: original,
+        kind,
+        location,
+      });
+    }
+  }
+
   return [{ ...ctx, env: newEnv }, name];
 };
 
 const extendEnvMany = (
   ctx: ResolveContext,
   originals: readonly string[],
+  kind: SymbolKind = "variable",
+  spans?: readonly (C.CExpr["span"] | undefined)[],
 ): [ResolveContext, Name[]] => {
   const newEnv = new Map(ctx.env);
   const names: Name[] = [];
-  for (const original of originals) {
+  for (let i = 0; i < originals.length; i++) {
+    const original = originals[i]!;
     const name = freshName(original);
     newEnv.set(original, name);
     names.push(name);
+
+    // Track definition for LSP
+    const span = spans?.[i];
+    if (ctx.lsp && span) {
+      const location = spanToLocation(ctx.lsp.fileRegistry, span);
+      if (location) {
+        addDefinition(ctx.lsp.builder, {
+          nameId: name.id,
+          name: original,
+          kind,
+          location,
+        });
+      }
+    }
   }
   return [{ ...ctx, env: newEnv }, names];
 };
 
 const lookup = (ctx: ResolveContext, original: string, span?: C.CExpr["span"]): Name | null => {
   const name = ctx.env.get(original);
-  if (name) return name;
+  if (name) {
+    // Track reference for LSP
+    if (ctx.lsp && span) {
+      const location = spanToLocation(ctx.lsp.fileRegistry, span);
+      if (location) {
+        addReference(ctx.lsp.builder, {
+          targetId: name.id,
+          location,
+        });
+      }
+    }
+    return name;
+  }
 
   // Check if it's a constructor
   if (ctx.constructors.has(original)) {
@@ -74,6 +147,18 @@ const lookup = (ctx: ResolveContext, original: string, span?: C.CExpr["span"]): 
     diagError(span?.start ?? 0, span?.end ?? 0, `Unbound variable: ${original}`),
   );
   return null;
+};
+
+/** Record a scope snapshot at a given position (for autocomplete) */
+const _recordScope = (ctx: ResolveContext, offset: number): void => {
+  if (!ctx.lsp) return;
+
+  const snapshot: ScopeSnapshot = {
+    offset,
+    bindings: new Map(Array.from(ctx.env.entries()).map(([name, nameObj]) => [name, nameObj.id])),
+    constructors: new Set(ctx.constructors),
+  };
+  addScopeSnapshot(ctx.lsp.builder, snapshot);
 };
 
 // =============================================================================
@@ -296,6 +381,8 @@ const resolveCase = (ctx: ResolveContext, c: C.CCase): C.CCase => {
 export type ResolveResult = {
   program: C.CProgram;
   diagnostics: readonly Diagnostic[];
+  /** Symbol table for LSP features (only present when fileRegistry is provided) */
+  symbolTable: SymbolTable | null;
 };
 
 export const resolveProgram = (
@@ -303,10 +390,16 @@ export const resolveProgram = (
   preludeEnv: Map<string, Name> = new Map(),
   preludeConstructors: Set<string> = new Set(),
   preludeTypes: Set<string> = new Set(),
+  fileRegistry: FileRegistry | null = null,
 ): ResolveResult => {
   resetNameCounter();
 
-  let ctx = createContext(preludeConstructors, preludeTypes);
+  // Set up LSP tracking if file registry is provided
+  const lsp: LSPTracking | null = fileRegistry
+    ? { builder: createSymbolTableBuilder(), fileRegistry }
+    : null;
+
+  let ctx = createContext(preludeConstructors, preludeTypes, lsp);
 
   // Add prelude bindings to initial environment
   ctx = { ...ctx, env: new Map([...ctx.env, ...preludeEnv]) };
@@ -350,19 +443,60 @@ export const resolveProgram = (
         break;
       }
 
-      case "CDeclLet":
-        bindingNames.set(decl.name.original, freshName(decl.name.original));
+      case "CDeclLet": {
+        const name = freshName(decl.name.original);
+        bindingNames.set(decl.name.original, name);
+        // Track definition for LSP
+        if (ctx.lsp && decl.span) {
+          const location = spanToLocation(ctx.lsp.fileRegistry, decl.span);
+          if (location) {
+            addDefinition(ctx.lsp.builder, {
+              nameId: name.id,
+              name: decl.name.original,
+              kind: "function",
+              location,
+            });
+          }
+        }
         break;
+      }
 
       case "CDeclLetRec":
         for (const b of decl.bindings) {
-          bindingNames.set(b.name.original, freshName(b.name.original));
+          const name = freshName(b.name.original);
+          bindingNames.set(b.name.original, name);
+          // Track definition for LSP
+          if (ctx.lsp && b.value.span) {
+            const location = spanToLocation(ctx.lsp.fileRegistry, b.value.span);
+            if (location) {
+              addDefinition(ctx.lsp.builder, {
+                nameId: name.id,
+                name: b.name.original,
+                kind: "function",
+                location,
+              });
+            }
+          }
         }
         break;
 
-      case "CDeclForeign":
-        bindingNames.set(decl.name.original, freshName(decl.name.original));
+      case "CDeclForeign": {
+        const name = freshName(decl.name.original);
+        bindingNames.set(decl.name.original, name);
+        // Track definition for LSP
+        if (ctx.lsp && decl.span) {
+          const location = spanToLocation(ctx.lsp.fileRegistry, decl.span);
+          if (location) {
+            addDefinition(ctx.lsp.builder, {
+              nameId: name.id,
+              name: decl.name.original,
+              kind: "foreign",
+              location,
+            });
+          }
+        }
         break;
+      }
     }
   }
 
@@ -423,9 +557,13 @@ export const resolveProgram = (
 
   const resolvedExpr = program.expr ? resolveExpr(ctx, program.expr) : null;
 
+  // Build symbol table if LSP tracking was enabled
+  const symbolTable = ctx.lsp ? freezeSymbolTable(ctx.lsp.builder) : null;
+
   return {
     program: { decls: resolvedDecls, expr: resolvedExpr },
     diagnostics: ctx.diagnostics,
+    symbolTable,
   };
 };
 
