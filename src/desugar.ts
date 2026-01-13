@@ -25,16 +25,30 @@ type DesugarState = {
   readonly nodeIds: NodeIdGenerator;
 };
 
-const createDesugarState = (): DesugarState => ({
-  nodeIds: createNodeIdGenerator(),
+const createDesugarState = (nodeIds?: NodeIdGenerator): DesugarState => ({
+  nodeIds: nodeIds ?? createNodeIdGenerator(),
 });
 
 // Helper to generate new node IDs for synthetic nodes
 const freshNodeId = (state: DesugarState): NodeId => state.nodeIds.next();
 
-// Helper to create unresolved Name (with placeholder ID -1)
-// ID will be assigned during name resolution
-const unresolvedName = (text: string, span: S.Span): C.Name => ({ id: -1, text, span });
+/**
+ * Create an unresolved Name with placeholder id (-1) and a fresh nodeId.
+ * The id will be assigned during name resolution.
+ */
+const unresolvedName = (state: DesugarState, text: string, span: S.Span): C.Name => ({
+  id: -1,
+  nodeId: freshNodeId(state),
+  text,
+  span,
+});
+
+/**
+ * Check if a name starts with an uppercase letter (indicating a constructor).
+ * Used for qualified names like Module.Constructor vs Module.function.
+ */
+const isConstructorName = (name: string): boolean =>
+  name.length > 0 && name[0] === name[0]!.toUpperCase();
 
 // =============================================================================
 // Expression Desugaring (Section 6.1)
@@ -47,7 +61,7 @@ const unresolvedName = (text: string, span: S.Span): C.Name => ({ id: -1, text, 
 export const desugarExpr = (state: DesugarState, expr: S.SExpr): C.CExpr => {
   switch (expr.kind) {
     case "SVar":
-      return C.cvar(expr.nodeId, unresolvedName(expr.name.text, expr.name.span), expr.span);
+      return C.cvar(expr.nodeId, unresolvedName(state, expr.name.text, expr.name.span), expr.span);
 
     case "SLit":
       // D⟦ SLit l ⟧ = CLit l
@@ -74,7 +88,7 @@ export const desugarExpr = (state: DesugarState, expr: S.SExpr): C.CExpr => {
       // Direct mapping: preserve nodeId from Surface AST
       return C.clet(
         expr.nodeId,
-        unresolvedName(expr.name.text, expr.name.span),
+        unresolvedName(state, expr.name.text, expr.name.span),
         desugarExpr(state, expr.value),
         desugarExpr(state, expr.body),
         expr.span,
@@ -86,7 +100,7 @@ export const desugarExpr = (state: DesugarState, expr: S.SExpr): C.CExpr => {
       return C.cletrec(
         expr.nodeId,
         expr.bindings.map((b) => ({
-          name: unresolvedName(b.name.text, b.name.span),
+          name: unresolvedName(state, b.name.text, b.name.span),
           value: desugarExpr(state, b.value),
         })),
         desugarExpr(state, expr.body),
@@ -166,7 +180,7 @@ export const desugarExpr = (state: DesugarState, expr: S.SExpr): C.CExpr => {
         const qualifiedName = `${expr.record.name}.${expr.field}`;
         // If field starts with uppercase, it's a constructor (Module.Constructor)
         // Otherwise it's a function/variable (Module.func)
-        if (expr.field[0] && expr.field[0] === expr.field[0].toUpperCase()) {
+        if (isConstructorName(expr.field)) {
           // Direct mapping: preserve nodeId from Surface AST
           return C.ccon(expr.nodeId, qualifiedName, expr.span);
         }
@@ -174,7 +188,7 @@ export const desugarExpr = (state: DesugarState, expr: S.SExpr): C.CExpr => {
         // Direct mapping: preserve nodeId from Surface AST
         return C.cvar(
           expr.nodeId,
-          unresolvedName(qualifiedName, expr.fieldSpan),
+          unresolvedName(state, qualifiedName, expr.fieldSpan),
           expr.span,
           expr.record.span,
           expr.fieldSpan,
@@ -304,7 +318,7 @@ const desugarAbs = (
     const lambdaNodeId = i === 0 ? nodeId : freshNodeId(state);
     result = C.cabs(
       lambdaNodeId,
-      unresolvedName(param.name.text, param.name.span),
+      unresolvedName(state, param.name.text, param.name.span),
       result,
       lambdaSpan,
       param.name.span,
@@ -386,10 +400,10 @@ const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Spa
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName("flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
-                unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+                unresolvedName(state, stmt.pattern.name.text, stmt.pattern.name.span),
                 result,
                 stmtSpan,
               ),
@@ -408,13 +422,13 @@ const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Spa
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName("flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
-                unresolvedName(tmp, stmtSpan),
+                unresolvedName(state, tmp, stmtSpan),
                 C.cmatch(
                   freshNodeId(state),
-                  C.cvar(freshNodeId(state), unresolvedName(tmp, stmtSpan), stmtSpan),
+                  C.cvar(freshNodeId(state), unresolvedName(state, tmp, stmtSpan), stmtSpan),
                   [{ pattern: desugarPattern(state, stmt.pattern), guard: null, body: result }],
                   stmtSpan,
                 ),
@@ -435,7 +449,7 @@ const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Spa
         if (stmt.pattern.kind === "SPVar") {
           result = C.clet(
             freshNodeId(state),
-            unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+            unresolvedName(state, stmt.pattern.name.text, stmt.pattern.name.span),
             desugarExpr(state, stmt.expr),
             result,
             stmtSpan,
@@ -460,8 +474,8 @@ const desugarDo = (state: DesugarState, stmts: readonly S.SDoStmt[], span: S.Spa
           freshNodeId(state),
           C.capp(
             freshNodeId(state),
-            C.cvar(freshNodeId(state), unresolvedName("flatMap", stmtSpan), stmtSpan),
-            C.cabs(freshNodeId(state), unresolvedName(tmp, stmtSpan), result, stmtSpan),
+            C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+            C.cabs(freshNodeId(state), unresolvedName(state, tmp, stmtSpan), result, stmtSpan),
             stmtSpan,
           ),
           desugarExpr(state, stmt.expr),
@@ -535,7 +549,7 @@ const desugarPattern = (state: DesugarState, pattern: S.SPattern): C.CPattern =>
       // Direct mapping: preserve nodeId from Surface AST
       return C.cpvar(
         pattern.nodeId,
-        unresolvedName(pattern.name.text, pattern.name.span),
+        unresolvedName(state, pattern.name.text, pattern.name.span),
         pattern.span,
       );
 
@@ -572,7 +586,7 @@ const desugarPattern = (state: DesugarState, pattern: S.SPattern): C.CPattern =>
       // Direct mapping: preserve nodeId from Surface AST
       return C.cpas(
         pattern.nodeId,
-        unresolvedName(pattern.name.text, pattern.name.span),
+        unresolvedName(state, pattern.name.text, pattern.name.span),
         desugarPattern(state, pattern.pattern),
         pattern.span,
       );
@@ -666,7 +680,7 @@ const desugarPatternInModuleWithImports = (
       // Direct mapping: preserve nodeId from Surface AST
       return C.cpvar(
         pattern.nodeId,
-        unresolvedName(pattern.name.text, pattern.name.span),
+        unresolvedName(state, pattern.name.text, pattern.name.span),
         pattern.span,
       );
 
@@ -699,7 +713,7 @@ const desugarPatternInModuleWithImports = (
       // Direct mapping: preserve nodeId from Surface AST
       return C.cpas(
         pattern.nodeId,
-        unresolvedName(pattern.name.text, pattern.name.span),
+        unresolvedName(state, pattern.name.text, pattern.name.span),
         recurse(pattern.pattern),
         pattern.span,
       );
@@ -787,7 +801,7 @@ const desugarDecl = (state: DesugarState, decl: S.SDecl): C.CDecl | C.CDecl[] | 
       // Direct mapping: preserve nodeId from Surface AST
       return C.cdecllet(
         decl.nodeId,
-        unresolvedName(decl.name.text, decl.name.span),
+        unresolvedName(state, decl.name.text, decl.name.span),
         desugarExpr(state, decl.value),
         decl.span,
       );
@@ -797,7 +811,7 @@ const desugarDecl = (state: DesugarState, decl: S.SDecl): C.CDecl | C.CDecl[] | 
       return C.cdeclletrec(
         decl.nodeId,
         decl.bindings.map((b) => ({
-          name: unresolvedName(b.name.text, b.name.span),
+          name: unresolvedName(state, b.name.text, b.name.span),
           value: desugarExpr(state, b.value),
         })),
         decl.span,
@@ -807,7 +821,7 @@ const desugarDecl = (state: DesugarState, decl: S.SDecl): C.CDecl | C.CDecl[] | 
       // Direct mapping: preserve nodeId from Surface AST
       return C.cdeclforeign(
         decl.nodeId,
-        unresolvedName(decl.name.text, decl.name.span),
+        unresolvedName(state, decl.name.text, decl.name.span),
         "", // module - to be filled during resolution
         decl.name.text, // jsName - same as name by default
         desugarType(decl.type),
@@ -830,14 +844,18 @@ const desugarDecl = (state: DesugarState, decl: S.SDecl): C.CDecl | C.CDecl[] | 
       const bindings: C.CDecl[] = [];
       for (const name of decl.imports) {
         const qualifiedName = `${decl.module}.${name}`;
-        const isConstructor = name[0] === name[0]?.toUpperCase();
+        const isConstructor = isConstructorName(name);
         bindings.push(
           C.cdecllet(
             freshNodeId(state),
-            unresolvedName(name, decl.span),
+            unresolvedName(state, name, decl.span),
             isConstructor
               ? C.ccon(freshNodeId(state), qualifiedName, decl.span)
-              : C.cvar(freshNodeId(state), unresolvedName(qualifiedName, decl.span), decl.span),
+              : C.cvar(
+                  freshNodeId(state),
+                  unresolvedName(state, qualifiedName, decl.span),
+                  decl.span,
+                ),
             decl.span,
           ),
         );
@@ -933,7 +951,7 @@ const desugarExprInModuleWithImports = (
       if (moduleNames.has(expr.name.text)) {
         return C.cvar(
           expr.nodeId,
-          unresolvedName(`${moduleName}.${expr.name.text}`, expr.name.span),
+          unresolvedName(state, `${moduleName}.${expr.name.text}`, expr.name.span),
           expr.span,
         );
       }
@@ -942,12 +960,12 @@ const desugarExprInModuleWithImports = (
       if (sourceModule) {
         return C.cvar(
           expr.nodeId,
-          unresolvedName(`${sourceModule}.${expr.name.text}`, expr.name.span),
+          unresolvedName(state, `${sourceModule}.${expr.name.text}`, expr.name.span),
           expr.span,
         );
       }
       // Otherwise leave unqualified
-      return C.cvar(expr.nodeId, unresolvedName(expr.name.text, expr.name.span), expr.span);
+      return C.cvar(expr.nodeId, unresolvedName(state, expr.name.text, expr.name.span), expr.span);
     }
 
     case "SLit":
@@ -979,7 +997,7 @@ const desugarExprInModuleWithImports = (
       // Direct mapping: preserve nodeId from Surface AST
       return C.clet(
         expr.nodeId,
-        unresolvedName(expr.name.text, expr.name.span),
+        unresolvedName(state, expr.name.text, expr.name.span),
         recurse(expr.value),
         desugarExprInModuleWithImports(
           state,
@@ -1012,7 +1030,7 @@ const desugarExprInModuleWithImports = (
       return C.cletrec(
         expr.nodeId,
         expr.bindings.map((b) => ({
-          name: unresolvedName(b.name.text, b.name.span),
+          name: unresolvedName(state, b.name.text, b.name.span),
           value: recurseWithShadow(b.value),
         })),
         recurseWithShadow(expr.body),
@@ -1117,7 +1135,7 @@ const desugarExprInModuleWithImports = (
         const qualifiedName = `${expr.record.name}.${expr.field}`;
         // If field starts with uppercase, it's a constructor (Module.Constructor)
         // Otherwise it's a function/variable (Module.func)
-        if (expr.field[0] && expr.field[0] === expr.field[0].toUpperCase()) {
+        if (isConstructorName(expr.field)) {
           // Direct mapping: preserve nodeId from Surface AST
           return C.ccon(expr.nodeId, qualifiedName, expr.span);
         }
@@ -1125,7 +1143,7 @@ const desugarExprInModuleWithImports = (
         // Direct mapping: preserve nodeId from Surface AST
         return C.cvar(
           expr.nodeId,
-          unresolvedName(qualifiedName, expr.fieldSpan),
+          unresolvedName(state, qualifiedName, expr.fieldSpan),
           expr.span,
           expr.record.span,
           expr.fieldSpan,
@@ -1260,7 +1278,7 @@ const desugarAbsInModuleWithImports = (
     const lambdaNodeId = i === 0 ? nodeId : freshNodeId(state);
     result = C.cabs(
       lambdaNodeId,
-      unresolvedName(param.name.text, param.name.span),
+      unresolvedName(state, param.name.text, param.name.span),
       result,
       lambdaSpan,
       param.name.span,
@@ -1347,10 +1365,10 @@ const desugarDoInModuleWithImports = (
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName("flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
-                unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+                unresolvedName(state, stmt.pattern.name.text, stmt.pattern.name.span),
                 result,
                 stmtSpan,
               ),
@@ -1365,13 +1383,13 @@ const desugarDoInModuleWithImports = (
             freshNodeId(state),
             C.capp(
               freshNodeId(state),
-              C.cvar(freshNodeId(state), unresolvedName("flatMap", stmtSpan), stmtSpan),
+              C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
               C.cabs(
                 freshNodeId(state),
-                unresolvedName(tmp, stmtSpan),
+                unresolvedName(state, tmp, stmtSpan),
                 C.cmatch(
                   freshNodeId(state),
-                  C.cvar(freshNodeId(state), unresolvedName(tmp, stmtSpan), stmtSpan),
+                  C.cvar(freshNodeId(state), unresolvedName(state, tmp, stmtSpan), stmtSpan),
                   [
                     {
                       pattern: desugarPatternInModuleWithImports(
@@ -1403,7 +1421,7 @@ const desugarDoInModuleWithImports = (
         if (stmt.pattern.kind === "SPVar") {
           result = C.clet(
             freshNodeId(state),
-            unresolvedName(stmt.pattern.name.text, stmt.pattern.name.span),
+            unresolvedName(state, stmt.pattern.name.text, stmt.pattern.name.span),
             recurse(stmt.expr),
             result,
             stmtSpan,
@@ -1438,8 +1456,8 @@ const desugarDoInModuleWithImports = (
           freshNodeId(state),
           C.capp(
             freshNodeId(state),
-            C.cvar(freshNodeId(state), unresolvedName("flatMap", stmtSpan), stmtSpan),
-            C.cabs(freshNodeId(state), unresolvedName(tmp, stmtSpan), result, stmtSpan),
+            C.cvar(freshNodeId(state), unresolvedName(state, "flatMap", stmtSpan), stmtSpan),
+            C.cabs(freshNodeId(state), unresolvedName(state, tmp, stmtSpan), result, stmtSpan),
             stmtSpan,
           ),
           recurse(stmt.expr),
@@ -1485,7 +1503,7 @@ const desugarDeclInModuleWithImports = (
       // Direct mapping: preserve nodeId from Surface AST
       return C.cdeclforeign(
         decl.nodeId,
-        unresolvedName(qualifiedName, decl.name.span),
+        unresolvedName(state, qualifiedName, decl.name.span),
         moduleName,
         decl.name.text, // jsName is the unqualified name
         desugarType(decl.type),
@@ -1500,7 +1518,7 @@ const desugarDeclInModuleWithImports = (
       // Direct mapping: preserve nodeId from Surface AST
       return C.cdecllet(
         decl.nodeId,
-        unresolvedName(qualifiedName, decl.name.span),
+        unresolvedName(state, qualifiedName, decl.name.span),
         desugarExprInModuleWithImports(state, decl.value, moduleName, moduleNames, importedNames),
         decl.span,
       );
@@ -1512,7 +1530,7 @@ const desugarDeclInModuleWithImports = (
       return C.cdeclletrec(
         decl.nodeId,
         decl.bindings.map((b) => ({
-          name: unresolvedName(`${moduleName}.${b.name.text}`, b.name.span),
+          name: unresolvedName(state, `${moduleName}.${b.name.text}`, b.name.span),
           value: desugarExprInModuleWithImports(
             state,
             b.value,
@@ -1574,9 +1592,9 @@ const collectModuleExports = (decls: readonly S.SDecl[]): Map<string, Set<string
  * Desugar a Surface program to a Core program.
  * Transforms all declarations and the main expression.
  */
-export const desugarProgram = (program: S.SProgram): C.CProgram => {
+export const desugarProgram = (program: S.SProgram, nodeIds?: NodeIdGenerator): C.CProgram => {
   resetTempCounter();
-  const state = createDesugarState();
+  const state = createDesugarState(nodeIds);
 
   // First pass: collect all module exports
   const moduleExports = collectModuleExports(program.decls);
@@ -1620,14 +1638,18 @@ const desugarDeclWithModuleInfo = (
       for (const name of exports) {
         const qualifiedName = `${decl.module}.${name}`;
         // Constructors (uppercase) use CCon, functions (lowercase) use CVar
-        const isConstructor = name[0] === name[0]?.toUpperCase();
+        const isConstructor = isConstructorName(name);
         bindings.push(
           C.cdecllet(
             freshNodeId(state),
-            unresolvedName(name, decl.span),
+            unresolvedName(state, name, decl.span),
             isConstructor
               ? C.ccon(freshNodeId(state), qualifiedName, decl.span)
-              : C.cvar(freshNodeId(state), unresolvedName(qualifiedName, decl.span), decl.span),
+              : C.cvar(
+                  freshNodeId(state),
+                  unresolvedName(state, qualifiedName, decl.span),
+                  decl.span,
+                ),
             decl.span,
           ),
         );

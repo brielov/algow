@@ -15,7 +15,8 @@ export type DiagnosticKind =
   | "missing-field"
   | "non-exhaustive"
   | "syntax-error"
-  | "duplicate-definition";
+  | "duplicate-definition"
+  | "internal-error";
 
 export type Diagnostic = {
   readonly start: number;
@@ -96,6 +97,23 @@ export const unboundVariable = (
   severity: "error",
   kind: "unbound-variable",
   suggestions,
+});
+
+/**
+ * Create an internal compiler error diagnostic.
+ * These indicate bugs in the compiler itself, not user errors.
+ */
+export const internalError = (
+  start: number,
+  end: number,
+  context: string,
+  details: string,
+): Diagnostic => ({
+  start,
+  end,
+  message: `Internal compiler error in ${context}: ${details}. Please report this bug at https://github.com/anthropics/algow/issues`,
+  severity: "error",
+  kind: "internal-error",
 });
 
 /**

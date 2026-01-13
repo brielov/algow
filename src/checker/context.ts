@@ -3,6 +3,29 @@
  *
  * Contains the CheckContext type and helper functions for managing
  * diagnostics, type recording, and tuple projections.
+ *
+ * ## Module Architecture
+ *
+ * The checker module is split into focused files:
+ * - context.ts: State management (CheckContext) and helper functions
+ * - unify.ts: Type unification algorithm
+ * - infer.ts: Expression type inference
+ * - patterns.ts: Pattern type inference
+ * - scc.ts: Strongly connected components for dependency analysis
+ * - exhaustiveness.ts: Pattern exhaustiveness checking
+ * - index.ts: Module entry point and program-level checking
+ *
+ * ## Circular Dependency Resolution
+ *
+ * A circular dependency exists between context.ts and unify.ts:
+ * - context.ts defines `resolveTupleProjections()` which needs `unify()`
+ * - unify.ts imports `CheckContext` type from context.ts
+ *
+ * This is resolved via dependency injection: `resolveTupleProjections()`
+ * accepts the `unify` function as a parameter rather than importing it
+ * directly. The caller (infer.ts) imports both and passes unify explicitly.
+ *
+ * This pattern maintains type safety and avoids runtime import cycles.
  */
 
 import type { Diagnostic } from "../diagnostics";
@@ -33,12 +56,10 @@ export type CheckContext = {
   readonly aliasRegistry: AliasRegistry;
   // Symbol table builder for recording types on definitions
   readonly symbolTableBuilder: SymbolTableBuilder;
-  // Unified type map: NodeId → Type (for LSP/lowering)
+  // Unified type map: NodeId → Type (for all expressions and bindings)
   readonly nodeTypeMap: Map<NodeId, Type>;
   // Span position to NodeId mapping (for LSP position lookup)
   readonly spanToNodeId: Map<number, NodeId>;
-  // Legacy map from Name.id to inferred type (for bindings - will be removed)
-  readonly typeMap: Map<number, Type>;
   // Deferred tuple projections: TVar name -> (index -> element type)
   // Used to collect all tuple index accesses before creating the tuple type
   readonly tupleProjections: Map<string, Map<number, Type>>;
@@ -55,7 +76,6 @@ export const createContext = (
   symbolTableBuilder,
   nodeTypeMap: new Map(),
   spanToNodeId: new Map(),
-  typeMap: new Map(),
   tupleProjections: new Map(),
 });
 
@@ -65,14 +85,22 @@ export const addError = (ctx: CheckContext, message: string, span?: Span): void 
   ctx.diagnostics.push(diagError(start, end, message));
 };
 
-/** Record type for a named binding (legacy - used by lower.ts) */
+/**
+ * Record type for a named binding in the unified nodeTypeMap.
+ */
 export const recordType = (ctx: CheckContext, name: Name, type: Type): void => {
-  ctx.typeMap.set(name.id, type);
+  if (name.nodeId >= 0) {
+    ctx.nodeTypeMap.set(name.nodeId, type);
+  }
 };
 
-/** Record scheme for a named binding in both typeMap and symbol table */
+/**
+ * Record scheme for a named binding in nodeTypeMap and symbol table for LSP.
+ */
 export const recordScheme = (ctx: CheckContext, name: Name, s: Scheme): void => {
-  ctx.typeMap.set(name.id, s.type);
+  if (name.nodeId >= 0) {
+    ctx.nodeTypeMap.set(name.nodeId, s.type);
+  }
   setDefinitionScheme(ctx.symbolTableBuilder, name.id, s);
 };
 
@@ -108,8 +136,8 @@ export const recordTupleProjection = (
  * Resolve all pending tuple projections for a type variable into a proper tuple type.
  * Returns a substitution binding the type variable to a tuple.
  *
- * Note: This function needs access to unify, which creates a circular dependency.
- * The unify function is passed as a parameter to break the cycle.
+ * The `unify` parameter is injected to break the circular dependency between
+ * context.ts and unify.ts. See module-level documentation for details.
  */
 export const resolveTupleProjections = (
   ctx: CheckContext,

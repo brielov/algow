@@ -257,6 +257,70 @@ export const collectPatternBound = (pattern: IR.IRPattern, bound: Set<string>): 
 };
 
 // =============================================================================
+// Bind Result Helper
+// =============================================================================
+
+/**
+ * Bind the result of an expression to a name and continue.
+ * Used for beta reduction and function inlining to capture expression results.
+ *
+ * Transforms expressions in ANF-preserving way:
+ * - IRAtom: let name = atom in cont
+ * - IRLet: let x = b in (bindResultTo body name cont)
+ * - IRLetRec: letrec bindings in (bindResultTo body name cont)
+ * - IRMatch: let name = match ... in cont
+ */
+export const bindResultTo = (expr: IR.IRExpr, name: Name, cont: IR.IRExpr): IR.IRExpr => {
+  switch (expr.kind) {
+    case "IRAtom":
+      return IR.irlet(name, IR.irbatom(expr.atom), cont);
+    case "IRLet":
+      return IR.irlet(expr.name, expr.binding, bindResultTo(expr.body, name, cont));
+    case "IRLetRec":
+      return IR.irletrec(expr.bindings, bindResultTo(expr.body, name, cont));
+    case "IRMatch":
+      return IR.irlet(name, IR.irbmatch(expr.scrutinee, expr.cases, expr.type), cont);
+  }
+};
+
+// =============================================================================
+// Eta Reduction
+// =============================================================================
+
+/**
+ * Check if an atom contains a reference to a given name.
+ * Used for eta reduction safety check.
+ */
+export const atomContains = (atom: IR.Atom, name: Name): boolean => {
+  if (atom.kind === "AVar") {
+    return nameEq(atom.name, name);
+  }
+  return false;
+};
+
+/**
+ * Try to eta-reduce a lambda: λx. f x → f
+ * Only valid when x doesn't appear free in f.
+ *
+ * Pattern: λparam. let temp = f(param) in temp
+ * Reduces to: f (as an atom binding)
+ */
+export const tryEtaReduce = (param: Name, body: IR.IRExpr): IR.IRBinding | null => {
+  if (body.kind !== "IRLet") return null;
+
+  const binding = body.binding;
+  if (binding.kind !== "IRBApp") return null;
+  if (binding.arg.kind !== "AVar") return null;
+  if (!nameEq(binding.arg.name, param)) return null;
+  if (body.body.kind !== "IRAtom") return null;
+  if (body.body.atom.kind !== "AVar") return null;
+  if (!nameEq(body.body.atom.name, body.name)) return null;
+  if (atomContains(binding.func, param)) return null;
+
+  return IR.irbatom(binding.func);
+};
+
+// =============================================================================
 // Side Effect Detection
 // =============================================================================
 

@@ -6,9 +6,30 @@
  */
 
 import * as IR from "../ir";
-import { freshName, type Name } from "../core";
-import { type InlineEnv, type RenameEnv, nameKey, collectFreeVars, hasSideEffects } from "./types";
+import type { Name } from "../core";
+import type { Span } from "../surface";
+import {
+  type InlineEnv,
+  type RenameEnv,
+  nameKey,
+  collectFreeVars,
+  hasSideEffects,
+  bindResultTo,
+} from "./types";
 import { alphaRenameExpr } from "./alpha";
+
+/**
+ * Counter for generating fresh names during inlining.
+ * Uses negative IDs to avoid collision with resolved names.
+ * These Names are never used for type lookup (optimization happens after
+ * type checking and types are already embedded in IR nodes).
+ */
+let inlineCounter = 0;
+const syntheticSpan: Span = { fileId: 0, start: 0, end: 0 };
+const freshName = (text: string, span: Span): Name => {
+  const id = --inlineCounter;
+  return { id, nodeId: id, text, span: span ?? syntheticSpan };
+};
 
 // =============================================================================
 // Trivial Binding Inlining
@@ -292,19 +313,31 @@ const inlineFunctionsExpr = (expr: IR.IRExpr, env: FunctionEnv, counts: UseCount
             return newBody;
           }
 
-          return IR.irlet(expr.name, inlineFunctionsBinding(lambda, env, counts), newBody);
+          const processedLambda = inlineFunctionsBindingInner(lambda, env, counts);
+          return IR.irlet(expr.name, processedLambda, newBody);
         }
       }
 
-      const newBinding = inlineFunctionsBinding(expr.binding, env, counts);
+      // Try to inline the binding if it's an application
+      const bindingResult = inlineFunctionsBindingWithResult(expr.binding, env, counts);
       const newBody = inlineFunctionsExpr(expr.body, env, counts);
-      return IR.irlet(expr.name, newBinding, newBody);
+
+      if (bindingResult.kind === "inlined") {
+        // Transform: let x = f(arg) in body
+        // Into: let param = arg in (bindResultTo inlinedBody x body)
+        // This uses canonical IRLet instead of IRBMatch
+        const { paramName, argAtom, body: inlinedBody } = bindingResult;
+        const boundBody = bindResultTo(inlinedBody, expr.name, newBody);
+        return IR.irlet(paramName, IR.irbatom(argAtom), boundBody);
+      }
+
+      return IR.irlet(expr.name, bindingResult.binding, newBody);
     }
 
     case "IRLetRec": {
       const newBindings = expr.bindings.map((b) => ({
         name: b.name,
-        binding: inlineFunctionsBinding(b.binding, env, counts),
+        binding: inlineFunctionsBindingInner(b.binding, env, counts),
       }));
       const newBody = inlineFunctionsExpr(expr.body, env, counts);
       return IR.irletrec(newBindings, newBody);
@@ -321,13 +354,27 @@ const inlineFunctionsExpr = (expr: IR.IRExpr, env: FunctionEnv, counts: UseCount
   }
 };
 
-const inlineFunctionsBinding = (
+/**
+ * Result of inlining a function application.
+ * When inlining happens, we need to return the parameter binding separately
+ * so the caller can create canonical `let param = arg in ...` structure.
+ */
+type InlineBindingResult =
+  | { kind: "unchanged"; binding: IR.IRBinding }
+  | { kind: "inlined"; paramName: Name; argAtom: IR.Atom; body: IR.IRExpr };
+
+/**
+ * Process a binding without inlining applications.
+ * Used for lambda bindings and letrec where inlining at the binding level is not appropriate.
+ */
+const inlineFunctionsBindingInner = (
   binding: IR.IRBinding,
   env: FunctionEnv,
   counts: UseCounts,
 ): IR.IRBinding => {
   switch (binding.kind) {
     case "IRBAtom":
+    case "IRBApp":
     case "IRBBinOp":
     case "IRBTuple":
     case "IRBRecord":
@@ -335,32 +382,6 @@ const inlineFunctionsBinding = (
     case "IRBField":
     case "IRBForeign":
       return binding;
-
-    case "IRBApp": {
-      if (binding.func.kind === "AVar") {
-        const funcInfo = env.get(nameKey(binding.func.name));
-        if (funcInfo) {
-          const lambda = funcInfo.binding;
-          const freshParam = freshName(lambda.param.text, lambda.param.span);
-          const renameEnv: RenameEnv = new Map();
-          renameEnv.set(nameKey(lambda.param), freshParam);
-          const renamedBody = alphaRenameExpr(lambda.body, renameEnv);
-
-          return IR.irbmatch(
-            binding.arg,
-            [
-              {
-                pattern: IR.irpvar(freshParam, binding.arg.type),
-                guard: null,
-                body: inlineFunctionsExpr(renamedBody, env, counts),
-              },
-            ],
-            binding.type,
-          );
-        }
-      }
-      return binding;
-    }
 
     case "IRBLambda":
       return IR.irblambda(
@@ -376,6 +397,65 @@ const inlineFunctionsBinding = (
         body: inlineFunctionsExpr(c.body, env, counts),
       }));
       return IR.irbmatch(binding.scrutinee, cases, binding.type);
+    }
+  }
+};
+
+const inlineFunctionsBindingWithResult = (
+  binding: IR.IRBinding,
+  env: FunctionEnv,
+  counts: UseCounts,
+): InlineBindingResult => {
+  switch (binding.kind) {
+    case "IRBAtom":
+    case "IRBBinOp":
+    case "IRBTuple":
+    case "IRBRecord":
+    case "IRBRecordUpdate":
+    case "IRBField":
+    case "IRBForeign":
+      return { kind: "unchanged", binding };
+
+    case "IRBApp": {
+      if (binding.func.kind === "AVar") {
+        const funcInfo = env.get(nameKey(binding.func.name));
+        if (funcInfo) {
+          const lambda = funcInfo.binding;
+          const freshParam = freshName(lambda.param.text, lambda.param.span);
+          const renameEnv: RenameEnv = new Map();
+          renameEnv.set(nameKey(lambda.param), freshParam);
+          const renamedBody = alphaRenameExpr(lambda.body, renameEnv);
+
+          // Return inlined result with parameter binding info
+          // Caller will create canonical: let param = arg in body
+          return {
+            kind: "inlined",
+            paramName: freshParam,
+            argAtom: binding.arg,
+            body: inlineFunctionsExpr(renamedBody, env, counts),
+          };
+        }
+      }
+      return { kind: "unchanged", binding };
+    }
+
+    case "IRBLambda":
+      return {
+        kind: "unchanged",
+        binding: IR.irblambda(
+          binding.param,
+          inlineFunctionsExpr(binding.body, env, counts),
+          binding.type,
+        ),
+      };
+
+    case "IRBMatch": {
+      const cases = binding.cases.map((c) => ({
+        pattern: c.pattern,
+        guard: c.guard ? inlineFunctionsExpr(c.guard, env, counts) : null,
+        body: inlineFunctionsExpr(c.body, env, counts),
+      }));
+      return { kind: "unchanged", binding: IR.irbmatch(binding.scrutinee, cases, binding.type) };
     }
   }
 };

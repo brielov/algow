@@ -20,6 +20,8 @@ export type { Diagnostic, DiagnosticSeverity } from "./diagnostics";
 export type ParseResult = {
   readonly program: S.SProgram;
   readonly diagnostics: readonly Diagnostic[];
+  /** The NodeIdGenerator state after parsing (for chaining to next phase) */
+  readonly nodeIds: NodeIdGenerator;
 };
 
 // =============================================================================
@@ -56,13 +58,13 @@ const enum Bp {
 // STATE HELPERS
 // =============================================================================
 
-const createParser = (source: string, fileId: FileId): ParserState => {
+const createParser = (source: string, fileId: FileId, nodeIds?: NodeIdGenerator): ParserState => {
   const lexer = createLexer(source);
   return {
     fileId,
     lexer,
     diagnostics: [],
-    nodeIds: createNodeIdGenerator(),
+    nodeIds: nodeIds ?? createNodeIdGenerator(),
     current: nextToken(lexer),
   };
 };
@@ -175,10 +177,15 @@ const parseLambda = (state: ParserState): S.SAbs => {
  * Parse source code into a surface AST.
  * @param source The source code to parse
  * @param fileId The file ID for span tracking (default 0)
- * @returns Parse result with AST and any syntax errors
+ * @param nodeIds Optional NodeIdGenerator to continue from (for multi-file compilation)
+ * @returns Parse result with AST, any syntax errors, and the nodeId generator state
  */
-export const parse = (source: string, fileId: FileId = 0): ParseResult => {
-  const state = createParser(source, fileId);
+export const parse = (
+  source: string,
+  fileId: FileId = 0,
+  nodeIds?: NodeIdGenerator,
+): ParseResult => {
+  const state = createParser(source, fileId, nodeIds);
   const decls: S.SDecl[] = [];
   let expr: S.SExpr | null = null;
 
@@ -225,6 +232,7 @@ export const parse = (source: string, fileId: FileId = 0): ParseResult => {
   return {
     program: { decls, expr },
     diagnostics: state.diagnostics,
+    nodeIds: state.nodeIds,
   };
 };
 

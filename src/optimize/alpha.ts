@@ -5,8 +5,22 @@
  */
 
 import * as IR from "../ir";
-import { freshName, type Name } from "../core";
+import type { Name } from "../core";
+import type { Span } from "../surface";
 import { type RenameEnv, nameKey } from "./types";
+
+/**
+ * Counter for generating fresh names during alpha renaming.
+ * Uses negative IDs to avoid collision with resolved names.
+ * These Names are never used for type lookup (optimization happens after
+ * type checking and types are already embedded in IR nodes).
+ */
+let alphaCounter = 0;
+const syntheticSpan: Span = { fileId: 0, start: 0, end: 0 };
+const freshName = (text: string, span: Span): Name => {
+  const id = --alphaCounter;
+  return { id, nodeId: id, text, span: span ?? syntheticSpan };
+};
 
 /** Freshen a name if it's in the rename environment, otherwise keep it */
 const renameName = (name: Name, env: RenameEnv): Name => {

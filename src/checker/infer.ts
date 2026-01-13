@@ -193,7 +193,8 @@ const inferLetRec = (ctx: CheckContext, env: TypeEnv, expr: C.CLetRec): InferRes
     subst = composeSubst(subst, s);
     allConstraints.push(...c);
 
-    const expectedType = bindingTypes.get(key)!;
+    // bindingTypes was populated from expr.bindings, so key always exists
+    const expectedType = bindingTypes.get(key) ?? freshTypeVar();
     const s2 = unify(ctx, applySubst(subst, expectedType), t, b.value.span);
     subst = composeSubst(subst, s2);
   }
@@ -203,7 +204,8 @@ const inferLetRec = (ctx: CheckContext, env: TypeEnv, expr: C.CLetRec): InferRes
   const bindingSchemes: { name: C.Name; scheme: Scheme }[] = [];
   for (const b of expr.bindings) {
     const key = `${b.name.id}:${b.name.text}`;
-    const t = applySubst(subst, bindingTypes.get(key)!);
+    // bindingTypes was populated from expr.bindings, so key always exists
+    const t = applySubst(subst, bindingTypes.get(key) ?? freshTypeVar());
     const generalizedScheme = generalize(finalEnv, t);
     finalEnv.set(key, generalizedScheme);
     bindingSchemes.push({ name: b.name, scheme: generalizedScheme });

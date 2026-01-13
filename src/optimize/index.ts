@@ -14,7 +14,13 @@
  */
 
 import * as IR from "../ir";
-import { type ExtendedEnv, type InlineEnv, nameKey, getExtendedValueFromBinding } from "./types";
+import {
+  type ExtendedEnv,
+  type InlineEnv,
+  nameKey,
+  getExtendedValueFromBinding,
+  tryEtaReduce,
+} from "./types";
 import { foldExpr, tryFoldBinOp } from "./fold";
 import { collectUses, removeUnused } from "./dce";
 import { transformTCO } from "./tco";
@@ -94,32 +100,6 @@ const optimizeBinding = (binding: IR.IRBinding): IR.IRBinding => {
       return IR.irblambda(binding.param, optimizedBody, binding.type);
     }
   }
-};
-
-/** Try eta reduction */
-import type { Name } from "../core";
-import { nameEq } from "./types";
-
-const tryEtaReduce = (param: Name, body: IR.IRExpr): IR.IRBinding | null => {
-  if (body.kind !== "IRLet") return null;
-
-  const binding = body.binding;
-  if (binding.kind !== "IRBApp") return null;
-  if (binding.arg.kind !== "AVar") return null;
-  if (!nameEq(binding.arg.name, param)) return null;
-  if (body.body.kind !== "IRAtom") return null;
-  if (body.body.atom.kind !== "AVar") return null;
-  if (!nameEq(body.body.atom.name, body.name)) return null;
-  if (atomContains(binding.func, param)) return null;
-
-  return IR.irbatom(binding.func);
-};
-
-const atomContains = (atom: IR.Atom, name: Name): boolean => {
-  if (atom.kind === "AVar") {
-    return nameEq(atom.name, name);
-  }
-  return false;
 };
 
 // =============================================================================

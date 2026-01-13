@@ -5,43 +5,32 @@
  */
 
 import * as IR from "../ir";
-import { freshName, type Name } from "../core";
-import type { Literal } from "../surface";
+import type { Name } from "../core";
+import type { Literal, Span } from "../surface";
 import {
   type ExtendedEnv,
   type ConstEnv,
   type RenameEnv,
   nameKey,
-  nameEq,
   literalToConst,
   getExtendedValueFromBinding,
   toConstEnv,
+  tryEtaReduce,
+  bindResultTo,
 } from "./types";
 import { alphaRenameExpr } from "./alpha";
 
-// =============================================================================
-// Bind Result Helper
-// =============================================================================
-
 /**
- * Bind the result of an expression to a name and continue.
- * Used for beta reduction to capture the result of a lambda body.
+ * Counter for generating fresh names during folding.
+ * Uses negative IDs to avoid collision with resolved names.
+ * These Names are never used for type lookup (optimization happens after
+ * type checking and types are already embedded in IR nodes).
  */
-const bindResultTo = (expr: IR.IRExpr, name: Name, cont: IR.IRExpr): IR.IRExpr => {
-  switch (expr.kind) {
-    case "IRAtom":
-      // The result is the atom, bind it to name and continue
-      return IR.irlet(name, IR.irbatom(expr.atom), cont);
-    case "IRLet":
-      // Recurse into body
-      return IR.irlet(expr.name, expr.binding, bindResultTo(expr.body, name, cont));
-    case "IRLetRec":
-      return IR.irletrec(expr.bindings, bindResultTo(expr.body, name, cont));
-    case "IRMatch":
-      // For match, bind the whole match result to name
-      // This creates: let name = match ... in cont
-      return IR.irlet(name, IR.irbmatch(expr.scrutinee, expr.cases, expr.type), cont);
-  }
+let foldCounter = 0;
+const syntheticSpan: Span = { fileId: 0, start: 0, end: 0 };
+const freshName = (text: string, span: Span): Name => {
+  const id = --foldCounter;
+  return { id, nodeId: id, text, span: span ?? syntheticSpan };
 };
 
 // =============================================================================
@@ -467,32 +456,6 @@ export const tryFoldBinOp = (
   }
 
   return null;
-};
-
-// =============================================================================
-// Eta Reduction
-// =============================================================================
-
-const tryEtaReduce = (param: Name, body: IR.IRExpr): IR.IRBinding | null => {
-  if (body.kind !== "IRLet") return null;
-
-  const binding = body.binding;
-  if (binding.kind !== "IRBApp") return null;
-  if (binding.arg.kind !== "AVar") return null;
-  if (!nameEq(binding.arg.name, param)) return null;
-  if (body.body.kind !== "IRAtom") return null;
-  if (body.body.atom.kind !== "AVar") return null;
-  if (!nameEq(body.body.atom.name, body.name)) return null;
-  if (atomContains(binding.func, param)) return null;
-
-  return IR.irbatom(binding.func);
-};
-
-const atomContains = (atom: IR.Atom, name: Name): boolean => {
-  if (atom.kind === "AVar") {
-    return nameEq(atom.name, name);
-  }
-  return false;
 };
 
 // =============================================================================

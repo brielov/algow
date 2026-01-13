@@ -22,7 +22,7 @@ import { freezeSymbolTableWithSubst } from "./lsp/symbols";
 import { optimize } from "./optimize";
 import { parse } from "./parser";
 import { resolveProgram } from "./resolve";
-import type { SDecl, SProgram } from "./surface";
+import type { NodeIdGenerator, SDecl, SProgram } from "./surface";
 import { applySubst, type Scheme, type Type } from "./types";
 
 // Re-export Target type and helpers
@@ -70,6 +70,7 @@ type ParsedFile = {
   path: string;
   source: string;
   program: SProgram;
+  nodeIds: NodeIdGenerator;
 };
 
 // =============================================================================
@@ -135,16 +136,24 @@ export const compile = async (
   const allDiagnostics: Diagnostic[] = [];
 
   // 1. Parse all sources and track main declarations
+  // Thread nodeIds across files so each file continues from previous counter
   const registryBuilder = createFileRegistryBuilder();
   const parsedFiles: ParsedFile[] = [];
   const mainFiles: string[] = [];
+  let sharedNodeIds: NodeIdGenerator | undefined;
 
   for (const { path, content } of sources) {
     const fileId = registerFile(registryBuilder, path, content);
-    const parseResult = parse(content, fileId);
+    const parseResult = parse(content, fileId, sharedNodeIds);
+    sharedNodeIds = parseResult.nodeIds; // Continue from where parser left off
 
     allDiagnostics.push(...parseResult.diagnostics);
-    parsedFiles.push({ path, source: content, program: parseResult.program });
+    parsedFiles.push({
+      path,
+      source: content,
+      program: parseResult.program,
+      nodeIds: parseResult.nodeIds,
+    });
 
     // Track files that declare main
     if (parseResult.program.decls.some(hasMainDecl)) {
@@ -184,11 +193,11 @@ export const compile = async (
   // 2. Combine all programs (no entry index needed anymore)
   const combinedProgram = combinePrograms(parsedFiles);
 
-  // 3. Desugar
-  const coreProgram = desugarProgram(combinedProgram);
+  // 3. Desugar (continue with shared nodeIds)
+  const coreProgram = desugarProgram(combinedProgram, sharedNodeIds);
 
-  // 4. Resolve names
-  const resolveResult = resolveProgram(coreProgram, fileRegistry);
+  // 4. Resolve names (continue with shared nodeIds)
+  const resolveResult = resolveProgram(coreProgram, fileRegistry, sharedNodeIds);
   allDiagnostics.push(...resolveResult.diagnostics);
 
   if (allDiagnostics.some((d) => d.severity === "error")) {
@@ -245,6 +254,11 @@ export const compile = async (
 
   // 7. Lower to IR
   const lowerResult = lowerProgram(resolveResult.program, checkResult);
+  allDiagnostics.push(...lowerResult.diagnostics);
+
+  if (allDiagnostics.some((d) => d.severity === "error")) {
+    return { diagnostics: allDiagnostics, success: false };
+  }
 
   // 8. Optimize (optional)
   const irProgram = shouldOptimize ? optimize(lowerResult.program) : lowerResult.program;
@@ -369,14 +383,22 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
 
   // Build file registry (tracks file identity through compilation)
   // File-aware spans: each span includes fileId, no offset adjustment needed
+  // Thread nodeIds across files so each file continues from previous counter
   const registryBuilder = createFileRegistryBuilder();
   const parsedFiles: ParsedFile[] = [];
+  let sharedNodeIds: NodeIdGenerator | undefined;
 
   for (const { path, content } of sources) {
     const fileId = registerFile(registryBuilder, path, content);
-    const parseResult = parse(content, fileId);
+    const parseResult = parse(content, fileId, sharedNodeIds);
+    sharedNodeIds = parseResult.nodeIds;
     allDiagnostics.push(...parseResult.diagnostics);
-    parsedFiles.push({ path, source: content, program: parseResult.program });
+    parsedFiles.push({
+      path,
+      source: content,
+      program: parseResult.program,
+      nodeIds: parseResult.nodeIds,
+    });
   }
 
   const fileRegistry = freezeFileRegistry(registryBuilder);
@@ -390,11 +412,11 @@ export const compileForLSP = (sources: readonly SourceFile[]): LSPCompileResult 
   // Collect module information before desugaring (for LSP completions)
   const modules = collectModules(combinedProgram.decls);
 
-  // Desugar
-  const coreProgram = desugarProgram(combinedProgram);
+  // Desugar (continue with shared nodeIds)
+  const coreProgram = desugarProgram(combinedProgram, sharedNodeIds);
 
-  // Resolve names
-  const resolveResult = resolveProgram(coreProgram, fileRegistry);
+  // Resolve names (continue with shared nodeIds)
+  const resolveResult = resolveProgram(coreProgram, fileRegistry, sharedNodeIds);
   allDiagnostics.push(...resolveResult.diagnostics);
 
   if (hasParseErrors) {

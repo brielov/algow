@@ -14,7 +14,8 @@ import type { Diagnostic } from "./diagnostics";
 import { error as diagError } from "./diagnostics";
 import * as C from "./core";
 import { freshName, resetNameCounter, type Name } from "./core";
-import type { Span } from "./surface";
+import type { NodeId, NodeIdGenerator, Span } from "./surface";
+import { createNodeIdGenerator } from "./surface";
 import type { SymbolTableBuilder, SymbolKind } from "./lsp/symbols";
 import { createSymbolTableBuilder, addDefinition, addReference } from "./lsp/symbols";
 import type { FileRegistry } from "./files";
@@ -44,12 +45,15 @@ type ResolveContext = {
   readonly constructorIds: Map<string, number>;
   // Symbol table tracking
   readonly lsp: LSPTracking;
+  // NodeId generator for creating new nodeIds for Names
+  readonly nodeIds: NodeIdGenerator;
 };
 
 const createContext = (
   constructors: Set<string>,
   types: Set<string>,
   lsp: LSPTracking,
+  nodeIds: NodeIdGenerator,
 ): ResolveContext => ({
   env: new Map(),
   diagnostics: [],
@@ -58,7 +62,11 @@ const createContext = (
   constructorAliases: new Map(),
   constructorIds: new Map(),
   lsp,
+  nodeIds,
 });
+
+/** Generate a fresh NodeId from context */
+const freshNodeId = (ctx: ResolveContext): NodeId => ctx.nodeIds.next();
 
 const syntheticSpan: Span = { fileId: 0, start: 0, end: 0 };
 
@@ -68,7 +76,7 @@ const extendEnv = (
   kind: SymbolKind = "variable",
   span?: Span,
 ): [ResolveContext, Name] => {
-  const name = freshName(original, span ?? syntheticSpan);
+  const name = freshName(original, freshNodeId(ctx), span ?? syntheticSpan);
   const newEnv = new Map(ctx.env);
   newEnv.set(original, name);
 
@@ -96,7 +104,7 @@ const extendEnvMany = (
   for (let i = 0; i < originals.length; i++) {
     const original = originals[i]!;
     const span = spans?.[i];
-    const name = freshName(original, span ?? syntheticSpan);
+    const name = freshName(original, freshNodeId(ctx), span ?? syntheticSpan);
     newEnv.set(original, name);
     names.push(name);
 
@@ -128,8 +136,9 @@ const lookup = (ctx: ResolveContext, original: string, span?: C.CExpr["span"]): 
 
   // Check if it's a constructor
   if (ctx.constructors.has(original)) {
-    // Constructors don't need unique IDs, they're identified by name
-    return { id: -1, text: original, span: span ?? syntheticSpan };
+    // Constructors are identified by name, not by Name.id. Generate a proper nodeId
+    // even though it won't be used for type lookup (constructors use CCon, not CVar).
+    return { id: -1, nodeId: freshNodeId(ctx), text: original, span: span ?? syntheticSpan };
   }
 
   // Unbound variable error
@@ -274,7 +283,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
       return { pattern, bindings: [] };
 
     case "CPVar": {
-      const name = freshName(pattern.name.text, pattern.name.span);
+      const name = freshName(pattern.name.text, freshNodeId(ctx), pattern.name.span);
       return {
         pattern: C.cpvar(pattern.nodeId, name, pattern.span),
         bindings: [{ name, span: pattern.span }],
@@ -339,7 +348,7 @@ const resolvePattern = (ctx: ResolveContext, pattern: C.CPattern): PatternResult
     }
 
     case "CPAs": {
-      const name = freshName(pattern.name.text, pattern.name.span);
+      const name = freshName(pattern.name.text, freshNodeId(ctx), pattern.name.span);
       const inner = resolvePattern(ctx, pattern.pattern);
       return {
         pattern: C.cpas(pattern.nodeId, name, inner.pattern, pattern.span),
@@ -407,6 +416,7 @@ export type ResolveResult = {
 export const resolveProgram = (
   program: C.CProgram,
   fileRegistry: FileRegistry,
+  nodeIds?: NodeIdGenerator,
   preludeEnv: Map<string, Name> = new Map(),
   preludeConstructors: Set<string> = new Set(),
   preludeTypes: Set<string> = new Set(),
@@ -416,7 +426,12 @@ export const resolveProgram = (
   // Always create symbol table for tracking definitions and references
   const lsp: LSPTracking = { builder: createSymbolTableBuilder(), fileRegistry };
 
-  let ctx = createContext(preludeConstructors, preludeTypes, lsp);
+  let ctx = createContext(
+    preludeConstructors,
+    preludeTypes,
+    lsp,
+    nodeIds ?? createNodeIdGenerator(),
+  );
 
   // Add prelude bindings to initial environment
   ctx = { ...ctx, env: new Map([...ctx.env, ...preludeEnv]) };
@@ -449,7 +464,7 @@ export const resolveProgram = (
           newConstructors.add(con.name);
 
           // Create nameId for constructor and track definition
-          const conName = freshName(con.name, con.span);
+          const conName = freshName(con.name, freshNodeId(ctx), con.span);
           newConstructorIds.set(con.name, conName.id);
           addDefinition(ctx.lsp.builder, {
             nameId: conName.id,
@@ -479,7 +494,7 @@ export const resolveProgram = (
       }
 
       case "CDeclLet": {
-        const name = freshName(decl.name.text, decl.name.span);
+        const name = freshName(decl.name.text, freshNodeId(ctx), decl.name.span);
         bindingNames.set(decl.name.text, name);
         // Track definition
         addDefinition(ctx.lsp.builder, {
@@ -493,7 +508,7 @@ export const resolveProgram = (
 
       case "CDeclLetRec":
         for (const b of decl.bindings) {
-          const name = freshName(b.name.text, b.name.span);
+          const name = freshName(b.name.text, freshNodeId(ctx), b.name.span);
           bindingNames.set(b.name.text, name);
           // Track definition
           addDefinition(ctx.lsp.builder, {
@@ -506,7 +521,7 @@ export const resolveProgram = (
         break;
 
       case "CDeclForeign": {
-        const name = freshName(decl.name.text, decl.name.span);
+        const name = freshName(decl.name.text, freshNodeId(ctx), decl.name.span);
         bindingNames.set(decl.name.text, name);
         // Track definition
         addDefinition(ctx.lsp.builder, {
@@ -540,7 +555,9 @@ export const resolveProgram = (
         break;
 
       case "CDeclLet": {
-        const name = bindingNames.get(decl.name.text)!;
+        // bindingNames was populated in first pass for all CDeclLet declarations
+        const name = bindingNames.get(decl.name.text);
+        if (!name) break; // Defensive: should never happen
         const resolvedValue = resolveExpr(ctx, decl.value);
 
         // Track constructor aliases for use declarations
@@ -557,16 +574,23 @@ export const resolveProgram = (
       }
 
       case "CDeclLetRec": {
-        const resolvedBindings = decl.bindings.map((b) => ({
-          name: bindingNames.get(b.name.text)!,
-          value: resolveExpr(ctx, b.value),
-        }));
-        resolvedDecls.push(C.cdeclletrec(decl.nodeId, resolvedBindings, decl.span));
+        // bindingNames was populated in first pass for all CDeclLetRec bindings
+        const resolvedBindings: { name: C.Name; value: C.CExpr }[] = [];
+        for (const b of decl.bindings) {
+          const name = bindingNames.get(b.name.text);
+          if (!name) continue; // Defensive: should never happen
+          resolvedBindings.push({ name, value: resolveExpr(ctx, b.value) });
+        }
+        if (resolvedBindings.length > 0) {
+          resolvedDecls.push(C.cdeclletrec(decl.nodeId, resolvedBindings, decl.span));
+        }
         break;
       }
 
       case "CDeclForeign": {
-        const name = bindingNames.get(decl.name.text)!;
+        // bindingNames was populated in first pass for all CDeclForeign declarations
+        const name = bindingNames.get(decl.name.text);
+        if (!name) break; // Defensive: should never happen
         resolvedDecls.push(
           C.cdeclforeign(
             decl.nodeId,

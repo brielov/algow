@@ -98,6 +98,12 @@ const solveConstraints = (ctx: CheckContext, constraints: readonly Constraint[])
 // Declaration Processing
 // =============================================================================
 
+/**
+ * Output from type checking a program.
+ *
+ * Type information is stored in nodeTypeMap, a unified map from NodeId to Type.
+ * All expressions and bindings have NodeIds, so both can be looked up uniformly.
+ */
 export type CheckOutput = {
   readonly subst: Subst;
   readonly type: Type | null;
@@ -105,11 +111,9 @@ export type CheckOutput = {
   readonly diagnostics: readonly Diagnostic[];
   readonly typeEnv: TypeEnv;
   readonly constructorRegistry: ConstructorRegistry;
-  // Legacy: Map from Name.id to type (for bindings)
-  readonly typeMap: ReadonlyMap<number, Type>;
-  // Unified: Map from NodeId to instantiated type (for all expressions)
+  /** Unified type map: NodeId → Type (for all expressions and bindings) */
   readonly nodeTypeMap: ReadonlyMap<NodeId, Type>;
-  // Maps span.start to NodeId for LSP position lookups
+  /** Maps span.start to NodeId for LSP position-based lookups */
   readonly spanToNodeId: ReadonlyMap<number, NodeId>;
 };
 
@@ -198,7 +202,10 @@ export const checkProgram = (
   for (const scc of sccs) {
     if (scc.length === 1 && !isSelfRecursive(scc, depGraph)) {
       // Single non-recursive binding: infer and generalize immediately
-      const binding = bindingByName.get(scc[0]!)!;
+      const bindingName = scc[0];
+      const binding = bindingName ? bindingByName.get(bindingName) : undefined;
+      if (!binding) continue; // Defensive: SCC names come from bindingByName keys
+
       const [s, t, c] = inferExpr(ctx, applySubstEnv(subst, env), binding.value);
       subst = composeSubst(subst, s);
       allConstraints.push(...c);
@@ -209,7 +216,12 @@ export const checkProgram = (
       recordScheme(ctx, binding.name, generalizedScheme);
     } else {
       // Mutually recursive bindings: treat as letrec
-      const sccBindings = scc.map((name) => bindingByName.get(name)!);
+      const sccBindings: BindingInfo[] = [];
+      for (const name of scc) {
+        const binding = bindingByName.get(name);
+        if (binding) sccBindings.push(binding);
+      }
+      if (sccBindings.length === 0) continue; // Defensive: SCC should not be empty
 
       // Create fresh type variables for all bindings in the SCC
       const bindingTypes = new Map<string, Type>();
@@ -271,7 +283,6 @@ export const checkProgram = (
     diagnostics: ctx.diagnostics,
     typeEnv: env,
     constructorRegistry: ctx.registry,
-    typeMap: ctx.typeMap,
     nodeTypeMap: ctx.nodeTypeMap,
     spanToNodeId: ctx.spanToNodeId,
   };

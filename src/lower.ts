@@ -30,6 +30,7 @@ import {
   instantiate,
 } from "./types";
 import type { CheckOutput } from "./checker";
+import { type Diagnostic, internalError } from "./diagnostics";
 
 // =============================================================================
 // Lowering Context
@@ -40,14 +41,14 @@ type LowerContext = {
   varCounter: number;
   /** Substitution from type checker */
   subst: Subst;
-  /** Map from Name.id to type */
-  typeMap: ReadonlyMap<number, Type>;
-  /** Map from NodeId to instantiated type for expressions */
+  /** Unified type map: NodeId → Type (for all expressions and bindings) */
   nodeTypeMap: ReadonlyMap<NodeId, Type>;
   /** Type environment - used to lookup constructor types */
   typeEnv: TypeEnv;
   /** Set of async foreign function keys (Module.name) */
   asyncForeignFunctions: ReadonlySet<string>;
+  /** Collected diagnostics (internal errors) */
+  diagnostics: Diagnostic[];
 };
 
 const createContext = (
@@ -56,30 +57,52 @@ const createContext = (
 ): LowerContext => ({
   varCounter: 0,
   subst: checkOutput.subst,
-  typeMap: checkOutput.typeMap,
   nodeTypeMap: checkOutput.nodeTypeMap,
   typeEnv: checkOutput.typeEnv,
   asyncForeignFunctions,
+  diagnostics: [],
 });
 
-/** Generate a fresh name for temporaries */
+/**
+ * Generate a fresh name for temporaries.
+ * Uses negative IDs to avoid collision with resolved names.
+ * The nodeId is synthetic since lowering happens after type checking and
+ * types are already attached to IR nodes - these Names are never looked up.
+ */
 const syntheticSpan: Span = { fileId: 0, start: 0, end: 0 };
 const freshName = (ctx: LowerContext, prefix = "_t"): Name => {
   const id = --ctx.varCounter; // Use negative IDs to avoid collision
-  return { id, text: `${prefix}${-id}`, span: syntheticSpan };
+  return { id, nodeId: id, text: `${prefix}${-id}`, span: syntheticSpan };
+};
+
+/**
+ * Report an internal compiler error and return a fallback atom.
+ * This allows compilation to continue with a placeholder value.
+ */
+const reportICE = (ctx: LowerContext, span: Span, context: string, details: string): IR.Atom => {
+  ctx.diagnostics.push(internalError(span.start, span.end, context, details));
+  // Return a placeholder variable to allow compilation to continue
+  const name = freshName(ctx, "_ice");
+  return IR.avar(name, tvar("_error"));
 };
 
 // =============================================================================
 // Type Utilities
 // =============================================================================
 
-/** Look up the type of a name from the type map */
+/**
+ * Look up the type of a name.
+ * Uses nodeTypeMap (unified type storage indexed by NodeId).
+ */
 const lookupType = (ctx: LowerContext, name: Name): Type => {
-  const type = ctx.typeMap.get(name.id);
-  if (type) {
-    return applySubst(ctx.subst, type);
+  // Primary lookup: by nodeId in unified nodeTypeMap
+  if (name.nodeId >= 0) {
+    const type = ctx.nodeTypeMap.get(name.nodeId);
+    if (type) {
+      return applySubst(ctx.subst, type);
+    }
   }
-  // Fallback to type environment
+  // Fallback: type environment (for constructor types etc.)
   const scheme = ctx.typeEnv.get(`${name.id}:${name.text}`);
   if (scheme) {
     return applySubst(ctx.subst, scheme.type);
@@ -227,7 +250,7 @@ const normalize = (ctx: LowerContext, expr: C.CExpr): NormalizeResult => {
 
       // For expressions that are a chain of lets ending in an atom, extract bindings
       if (canExtractBindings(lowered)) {
-        const { bindings, finalAtom } = extractBindings(lowered);
+        const { bindings, finalAtom } = extractBindings(ctx, lowered, expr.span);
         return { bindings, atom: finalAtom };
       }
 
@@ -240,8 +263,14 @@ const normalize = (ctx: LowerContext, expr: C.CExpr): NormalizeResult => {
         return { bindings: [...letBindings, { name, binding }], atom: IR.avar(name, type) };
       }
 
-      // For other complex expressions, this shouldn't happen in well-formed IR
-      throw new Error(`Cannot normalize IR expression: ${finalExpr.kind}`);
+      // For other complex expressions, report ICE and return placeholder
+      const atom = reportICE(
+        ctx,
+        expr.span,
+        "normalize",
+        `unexpected IR expression kind: ${finalExpr.kind}`,
+      );
+      return { bindings: letBindings, atom };
     }
   }
 };
@@ -296,7 +325,9 @@ const canExtractBindings = (expr: IR.IRExpr): boolean => {
  * Returns the bindings and the final atom.
  */
 const extractBindings = (
+  ctx: LowerContext,
   expr: IR.IRExpr,
+  span: Span,
 ): { bindings: { name: Name; binding: IR.IRBinding }[]; finalAtom: IR.Atom } => {
   const bindings: { name: Name; binding: IR.IRBinding }[] = [];
   let current = expr;
@@ -318,7 +349,14 @@ const extractBindings = (
   }
 
   if (current.kind !== "IRAtom") {
-    throw new Error(`Expected atom at end of ANF expression, got ${current.kind}`);
+    // Report ICE and return placeholder atom
+    const atom = reportICE(
+      ctx,
+      span,
+      "extractBindings",
+      `expected atom at end of ANF expression, got ${current.kind}`,
+    );
+    return { bindings, finalAtom: atom };
   }
 
   return { bindings, finalAtom: current.atom };
@@ -460,7 +498,7 @@ const lowerLet = (ctx: LowerContext, expr: C.CLet): IR.IRExpr => {
 
   // Try to extract bindings ending in an atom
   if (canExtractBindings(valueIR)) {
-    const { bindings, finalAtom } = extractBindings(valueIR);
+    const { bindings, finalAtom } = extractBindings(ctx, valueIR, expr.span);
     const binding = IR.irbatom(finalAtom);
     const bodyIR = lowerExpr(ctx, expr.body);
     const result = IR.irlet(expr.name, binding, bodyIR);
@@ -476,8 +514,14 @@ const lowerLet = (ctx: LowerContext, expr: C.CLet): IR.IRExpr => {
     return wrapWithBindings(bindings, result);
   }
 
-  // Fallback: shouldn't happen for well-formed IR
-  throw new Error(`Cannot lower let with value: ${finalExpr.kind}`);
+  // Report ICE and return placeholder expression
+  const atom = reportICE(
+    ctx,
+    expr.span,
+    "lowerLet",
+    `unexpected IR expression kind: ${finalExpr.kind}`,
+  );
+  return IR.iratom(atom);
 };
 
 const lowerLetRec = (ctx: LowerContext, expr: C.CLetRec): IR.IRExpr => {
@@ -496,7 +540,7 @@ const lowerLetRec = (ctx: LowerContext, expr: C.CLetRec): IR.IRExpr => {
       irBindings.push({ name: b.name, binding: IR.irbatom(valueIR.atom) });
     } else {
       // Complex expression - extract the binding
-      const { bindings, finalAtom } = extractBindings(valueIR);
+      const { bindings, finalAtom } = extractBindings(ctx, valueIR, b.value.span);
       // Add any intermediate bindings
       for (const binding of bindings) {
         irBindings.push(binding);
@@ -939,7 +983,14 @@ const lowerPattern = (
       // Or-patterns should be expanded into multiple cases before reaching here.
       // This is handled in lowerMatch by expandOrPatterns.
       // If we get here, it means the expansion didn't happen, which is a bug.
-      throw new Error("Or-pattern should have been expanded before lowering");
+      reportICE(
+        ctx,
+        pattern.span,
+        "lowerPattern",
+        "or-pattern should have been expanded before lowering",
+      );
+      // Return a wildcard pattern as fallback to allow compilation to continue
+      return IR.irpwild();
     }
   }
 };
@@ -951,7 +1002,12 @@ const lowerPattern = (
 /**
  * Helper to convert an IR expression body into declarations bound to a name.
  */
-const lowerBodyToDecls = (body: IR.IRExpr, name: Name): IR.IRDecl[] => {
+const lowerBodyToDecls = (
+  ctx: LowerContext,
+  body: IR.IRExpr,
+  name: Name,
+  span: Span,
+): IR.IRDecl[] => {
   const decls: IR.IRDecl[] = [];
 
   if (body.kind === "IRAtom") {
@@ -960,7 +1016,7 @@ const lowerBodyToDecls = (body: IR.IRExpr, name: Name): IR.IRDecl[] => {
   }
 
   if (canExtractBindings(body)) {
-    const { bindings, finalAtom } = extractBindings(body);
+    const { bindings, finalAtom } = extractBindings(ctx, body, span);
     for (const b of bindings) {
       decls.push(IR.irdecllet(b.name, b.binding));
     }
@@ -970,7 +1026,7 @@ const lowerBodyToDecls = (body: IR.IRExpr, name: Name): IR.IRDecl[] => {
 
   if (body.kind === "IRLetRec") {
     decls.push(IR.irdeclletrec(body.bindings));
-    decls.push(...lowerBodyToDecls(body.body, name));
+    decls.push(...lowerBodyToDecls(ctx, body.body, name, span));
     return decls;
   }
 
@@ -997,12 +1053,15 @@ const lowerBodyToDecls = (body: IR.IRExpr, name: Name): IR.IRDecl[] => {
     // Recursively handle nested letrec
     if (finalExpr.kind === "IRLetRec") {
       decls.push(IR.irdeclletrec(finalExpr.bindings));
-      decls.push(...lowerBodyToDecls(finalExpr.body, name));
+      decls.push(...lowerBodyToDecls(ctx, finalExpr.body, name, span));
       return decls;
     }
   }
 
-  throw new Error(`Unexpected IR kind in body: ${body.kind}`);
+  // Report ICE and return placeholder declaration
+  const atom = reportICE(ctx, span, "lowerBodyToDecls", `unexpected IR kind: ${body.kind}`);
+  decls.push(IR.irdecllet(name, IR.irbatom(atom)));
+  return decls;
 };
 
 const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
@@ -1028,7 +1087,7 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
 
       // For expressions that are a chain of lets ending in an atom
       if (canExtractBindings(valueIR)) {
-        const { bindings, finalAtom } = extractBindings(valueIR);
+        const { bindings, finalAtom } = extractBindings(ctx, valueIR, decl.span);
         const decls: IR.IRDecl[] = [];
 
         // Emit all intermediate bindings as declarations
@@ -1071,12 +1130,13 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
         // Emit the letrec bindings as a CDeclLetRec
         decls.push(IR.irdeclletrec(valueIR.bindings));
         // Handle the body using the helper
-        decls.push(...lowerBodyToDecls(valueIR.body, decl.name));
+        decls.push(...lowerBodyToDecls(ctx, valueIR.body, decl.name, decl.span));
         return decls;
       }
 
-      // For other expressions
-      throw new Error(`Unexpected IR kind in decl: ${valueIR.kind}`);
+      // Report ICE and return placeholder declaration
+      const atom = reportICE(ctx, decl.span, "lowerDecl", `unexpected IR kind: ${valueIR.kind}`);
+      return [IR.irdecllet(decl.name, IR.irbatom(atom))];
     }
 
     case "CDeclLetRec": {
@@ -1091,7 +1151,7 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
         } else if (valueIR.kind === "IRAtom") {
           irBindings.push({ name: b.name, binding: IR.irbatom(valueIR.atom) });
         } else {
-          const { bindings, finalAtom } = extractBindings(valueIR);
+          const { bindings, finalAtom } = extractBindings(ctx, valueIR, b.value.span);
           for (const binding of bindings) {
             irBindings.push(binding);
           }
@@ -1113,8 +1173,11 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
       // Handle qualified names like "String.length"
       if (decl.name.text.includes(".")) {
         const parts = decl.name.text.split(".");
-        module = parts[0]!;
-        jsName = parts.slice(1).join(".");
+        // parts[0] is guaranteed by includes(".") check, but satisfy type checker
+        if (parts[0]) {
+          module = parts[0];
+          jsName = parts.slice(1).join(".");
+        }
       }
 
       const binding = IR.irbforeign(module, jsName, [], type, decl.isAsync);
@@ -1129,6 +1192,7 @@ const lowerDecl = (ctx: LowerContext, decl: C.CDecl): IR.IRDecl[] => {
 
 export type LowerResult = {
   program: IR.IRProgram;
+  diagnostics: readonly Diagnostic[];
 };
 
 /**
@@ -1156,5 +1220,6 @@ export const lowerProgram = (program: C.CProgram, checkOutput: CheckOutput): Low
 
   return {
     program: { decls: irDecls, main },
+    diagnostics: ctx.diagnostics,
   };
 };

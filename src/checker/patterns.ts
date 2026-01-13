@@ -136,21 +136,24 @@ export const inferPattern = (
       }
 
       case "CPRecord": {
-        // Create field types and build expected record type
-        const fieldTypes: [string, Type][] = [];
-        for (const f of pat.fields) {
-          fieldTypes.push([f.name, freshTypeVar()]);
-        }
+        // Create field entries with fresh type variables paired with patterns
+        const fieldEntries = pat.fields.map((f) => ({
+          name: f.name,
+          type: freshTypeVar(),
+          pattern: f.pattern,
+        }));
         const rowVar = freshTypeVar();
-        const recordType = trecord(fieldTypes, rowVar);
+        const recordType = trecord(
+          fieldEntries.map((e) => [e.name, e.type] as [string, Type]),
+          rowVar,
+        );
 
         // Unify with expected type
         let subst = unify(ctx, expected, recordType, pat.span);
 
-        // Infer each field pattern
-        for (const f of pat.fields) {
-          const fieldType = fieldTypes.find(([n]) => n === f.name)![1];
-          const s = infer(applySubst(subst, fieldType), f.pattern);
+        // Infer each field pattern (iterating over entries avoids lookup)
+        for (const entry of fieldEntries) {
+          const s = infer(applySubst(subst, entry.type), entry.pattern);
           subst = composeSubst(subst, s);
         }
         return subst;

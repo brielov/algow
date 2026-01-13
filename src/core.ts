@@ -7,9 +7,16 @@ import type { Literal, NodeId, Span } from "./surface";
 // Names (Section 5.1)
 // =============================================================================
 
-// Unique identifier for bindings - includes source span for LSP features
+/**
+ * Unique identifier for bindings.
+ * - id: unique number for this binding (used internally)
+ * - nodeId: AST node ID for this binding site (used for type lookup)
+ * - text: the name string
+ * - span: source location
+ */
 export type Name = {
   readonly id: number;
+  readonly nodeId: NodeId;
   readonly text: string;
   readonly span: Span;
 };
@@ -19,8 +26,8 @@ let _nextId = 0;
 export function resetNameCounter(): void {
   _nextId = 0;
 }
-export function freshName(text: string, span: Span): Name {
-  return { id: _nextId++, text, span };
+export function freshName(text: string, nodeId: NodeId, span: Span): Name {
+  return { id: _nextId++, nodeId, text, span };
 }
 
 // =============================================================================
