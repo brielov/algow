@@ -447,7 +447,11 @@ const formatLiteral = (lit: {
   }
 };
 
-const formatApp = (ctx: FormatContext, expr: Extract<SExpr, { kind: "SApp" }>, level: number): string => {
+const formatApp = (
+  ctx: FormatContext,
+  expr: Extract<SExpr, { kind: "SApp" }>,
+  level: number,
+): string => {
   const parts: SExpr[] = [];
   let current: SExpr = expr;
   while (current.kind === "SApp") {

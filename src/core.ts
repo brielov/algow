@@ -264,11 +264,16 @@ export type CDeclLet = {
   readonly name: Name;
   readonly value: CExpr;
   readonly span?: Span;
+  readonly nameSpan?: Span;
 };
 
 export type CDeclLetRec = {
   readonly kind: "CDeclLetRec";
-  readonly bindings: readonly { readonly name: Name; readonly value: CExpr }[];
+  readonly bindings: readonly {
+    readonly name: Name;
+    readonly value: CExpr;
+    readonly nameSpan?: Span;
+  }[];
   readonly span?: Span;
 };
 
@@ -280,6 +285,7 @@ export type CDeclForeign = {
   readonly type: CType;
   readonly isAsync: boolean;
   readonly span?: Span;
+  readonly nameSpan?: Span;
 };
 
 // =============================================================================
@@ -412,14 +418,15 @@ export const cdecltype = (
   constructors: readonly CConDecl[],
   span?: Span,
 ): CDeclType => ({ kind: "CDeclType", name, params, constructors, span });
-export const cdecllet = (name: Name, value: CExpr, span?: Span): CDeclLet => ({
+export const cdecllet = (name: Name, value: CExpr, span?: Span, nameSpan?: Span): CDeclLet => ({
   kind: "CDeclLet",
   name,
   value,
   span,
+  nameSpan,
 });
 export const cdeclletrec = (
-  bindings: readonly { name: Name; value: CExpr }[],
+  bindings: readonly { name: Name; value: CExpr; nameSpan?: Span }[],
   span?: Span,
 ): CDeclLetRec => ({ kind: "CDeclLetRec", bindings, span });
 export const cdeclforeign = (
@@ -429,4 +436,5 @@ export const cdeclforeign = (
   type: CType,
   isAsync: boolean,
   span?: Span,
-): CDeclForeign => ({ kind: "CDeclForeign", name, module, jsName, type, isAsync, span });
+  nameSpan?: Span,
+): CDeclForeign => ({ kind: "CDeclForeign", name, module, jsName, type, isAsync, span, nameSpan });

@@ -411,6 +411,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
   }
 
   let name: string;
+  let nameSpan: S.Span | undefined;
 
   // Support operator syntax: foreign (+) : type
   if (at(state, TokenKind.LParen)) {
@@ -419,6 +420,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
     if (isOperatorToken(opToken[0])) {
       advance(state);
       name = text(state, opToken);
+      nameSpan = tokenSpan(opToken);
     } else {
       error(state, "expected operator in parentheses");
       synchronize(state);
@@ -442,6 +444,8 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
       return null;
     }
     name = `${moduleName}.${text(state, funcToken)}`;
+    // For qualified names, use the func token span (that's the key identifier)
+    nameSpan = tokenSpan(funcToken);
   } else {
     const nameToken = expect(state, TokenKind.Lower, "expected foreign function name");
     if (!nameToken) {
@@ -449,6 +453,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
       return null;
     }
     name = text(state, nameToken);
+    nameSpan = tokenSpan(nameToken);
   }
 
   if (!expect(state, TokenKind.Colon, "expected ':' after foreign function name")) {
@@ -463,7 +468,7 @@ const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
     return null;
   }
 
-  return S.sdeclforeign(name, type, isAsync, span(start, state.current[1]));
+  return S.sdeclforeign(name, type, isAsync, span(start, state.current[1]), nameSpan);
 };
 
 const isOperatorToken = (kind: TokenKind): boolean =>
@@ -527,6 +532,7 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
     return { kind: "expr", expr: S.sint(0) };
   }
   const firstName = text(state, nameToken);
+  const firstNameSpan = tokenSpan(nameToken);
 
   // Parse parameters
   const params: string[] = [];
@@ -562,13 +568,16 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
   // Check for 'and' (mutual recursion) or 'in' (let expression)
   if (at(state, TokenKind.AndKw)) {
     // Mutual recursion: let rec f = ... and g = ...
-    const bindings: { name: string; value: S.SExpr }[] = [{ name: firstName, value: wrappedValue }];
+    const bindings: { name: string; value: S.SExpr; nameSpan?: S.Span }[] = [
+      { name: firstName, value: wrappedValue, nameSpan: firstNameSpan },
+    ];
 
     while (at(state, TokenKind.AndKw)) {
       advance(state); // 'and'
       const andNameToken = expect(state, TokenKind.Lower, "expected binding name");
       if (!andNameToken) break;
       const andName = text(state, andNameToken);
+      const andNameSpan = tokenSpan(andNameToken);
 
       const andParams: string[] = [];
       while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
@@ -594,7 +603,7 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
       expect(state, TokenKind.Eq, "expected '=' after parameters");
       const andValue = parseExpr(state);
       const wrappedAndValue = andParams.length > 0 ? S.sabs(andParams, andValue) : andValue;
-      bindings.push({ name: andName, value: wrappedAndValue });
+      bindings.push({ name: andName, value: wrappedAndValue, nameSpan: andNameSpan });
     }
 
     // Check for 'in' to make it an expression
@@ -634,12 +643,15 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
     return {
       kind: "decl",
       decl: S.sdeclletrec(
-        [{ name: firstName, value: wrappedValue }],
+        [{ name: firstName, value: wrappedValue, nameSpan: firstNameSpan }],
         span(start, state.current[1]),
       ),
     };
   }
-  return { kind: "decl", decl: S.sdecllet(firstName, wrappedValue, span(start, state.current[1])) };
+  return {
+    kind: "decl",
+    decl: S.sdecllet(firstName, wrappedValue, span(start, state.current[1]), firstNameSpan),
+  };
 };
 
 // =============================================================================

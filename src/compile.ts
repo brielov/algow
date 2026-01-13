@@ -535,11 +535,16 @@ const offsetDecl = (decl: SDecl, offset: number): SDecl => {
         ...decl,
         value: offsetExpr(decl.value, offset),
         span: offsetSpan(decl.span, offset),
+        nameSpan: offsetSpan(decl.nameSpan, offset),
       };
     case "SDeclLetRec":
       return {
         ...decl,
-        bindings: decl.bindings.map((b) => ({ ...b, value: offsetExpr(b.value, offset) })),
+        bindings: decl.bindings.map((b) => ({
+          ...b,
+          value: offsetExpr(b.value, offset),
+          nameSpan: offsetSpan(b.nameSpan, offset),
+        })),
         span: offsetSpan(decl.span, offset),
       };
     case "SDeclForeign":
@@ -547,6 +552,7 @@ const offsetDecl = (decl: SDecl, offset: number): SDecl => {
         ...decl,
         type: offsetType(decl.type, offset),
         span: offsetSpan(decl.span, offset),
+        nameSpan: offsetSpan(decl.nameSpan, offset),
       };
     case "SDeclModule":
       return {

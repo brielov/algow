@@ -366,12 +366,17 @@ export type SDeclLet = {
   readonly name: string;
   readonly value: SExpr;
   readonly span?: Span;
+  readonly nameSpan?: Span;
 };
 
 // Recursive let: let rec f = ... and g = ...
 export type SDeclLetRec = {
   readonly kind: "SDeclLetRec";
-  readonly bindings: readonly { readonly name: string; readonly value: SExpr }[];
+  readonly bindings: readonly {
+    readonly name: string;
+    readonly value: SExpr;
+    readonly nameSpan?: Span;
+  }[];
   readonly span?: Span;
 };
 
@@ -383,6 +388,7 @@ export type SDeclForeign = {
   readonly type: SType;
   readonly isAsync: boolean;
   readonly span?: Span;
+  readonly nameSpan?: Span;
 };
 
 // Module declaration: module Foo use ... end
@@ -593,14 +599,15 @@ export const sdecltypealias = (
   type: SType,
   span?: Span,
 ): SDeclTypeAlias => ({ kind: "SDeclTypeAlias", name, params, type, span });
-export const sdecllet = (name: string, value: SExpr, span?: Span): SDeclLet => ({
+export const sdecllet = (name: string, value: SExpr, span?: Span, nameSpan?: Span): SDeclLet => ({
   kind: "SDeclLet",
   name,
   value,
   span,
+  nameSpan,
 });
 export const sdeclletrec = (
-  bindings: readonly { name: string; value: SExpr }[],
+  bindings: readonly { name: string; value: SExpr; nameSpan?: Span }[],
   span?: Span,
 ): SDeclLetRec => ({ kind: "SDeclLetRec", bindings, span });
 export const sdeclforeign = (
@@ -608,12 +615,14 @@ export const sdeclforeign = (
   type: SType,
   isAsync: boolean,
   span?: Span,
+  nameSpan?: Span,
 ): SDeclForeign => ({
   kind: "SDeclForeign",
   name,
   type,
   isAsync,
   span,
+  nameSpan,
 });
 export const sdeclmodule = (
   name: string,

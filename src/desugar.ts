@@ -545,13 +545,19 @@ const desugarDecl = (decl: S.SDecl): C.CDecl | C.CDecl[] | null => {
       return null;
 
     case "SDeclLet":
-      return C.cdecllet({ id: -1, original: decl.name }, desugarExpr(decl.value), decl.span);
+      return C.cdecllet(
+        { id: -1, original: decl.name },
+        desugarExpr(decl.value),
+        decl.span,
+        decl.nameSpan,
+      );
 
     case "SDeclLetRec":
       return C.cdeclletrec(
         decl.bindings.map((b) => ({
           name: { id: -1, original: b.name },
           value: desugarExpr(b.value),
+          nameSpan: b.nameSpan,
         })),
         decl.span,
       );
@@ -564,6 +570,7 @@ const desugarDecl = (decl: S.SDecl): C.CDecl | C.CDecl[] | null => {
         desugarType(decl.type),
         decl.isAsync,
         decl.span,
+        decl.nameSpan,
       );
 
     case "SDeclUse": {
@@ -1091,6 +1098,7 @@ const desugarDeclInModuleWithImports = (
         desugarType(decl.type),
         decl.isAsync,
         decl.span,
+        decl.nameSpan,
       );
     }
 
@@ -1101,6 +1109,7 @@ const desugarDeclInModuleWithImports = (
         { id: -1, original: qualifiedName },
         desugarExprInModuleWithImports(decl.value, moduleName, moduleNames, importedNames),
         decl.span,
+        decl.nameSpan,
       );
     }
 
@@ -1110,6 +1119,7 @@ const desugarDeclInModuleWithImports = (
         decl.bindings.map((b) => ({
           name: { id: -1, original: `${moduleName}.${b.name}` },
           value: desugarExprInModuleWithImports(b.value, moduleName, moduleNames, importedNames),
+          nameSpan: b.nameSpan,
         })),
         decl.span,
       );

@@ -446,9 +446,10 @@ export const resolveProgram = (
       case "CDeclLet": {
         const name = freshName(decl.name.original);
         bindingNames.set(decl.name.original, name);
-        // Track definition for LSP
-        if (ctx.lsp && decl.span) {
-          const location = spanToLocation(ctx.lsp.fileRegistry, decl.span);
+        // Track definition for LSP (use nameSpan for precise hover, fallback to full span)
+        const letDefSpan = decl.nameSpan ?? decl.span;
+        if (ctx.lsp && letDefSpan) {
+          const location = spanToLocation(ctx.lsp.fileRegistry, letDefSpan);
           if (location) {
             addDefinition(ctx.lsp.builder, {
               nameId: name.id,
@@ -465,9 +466,10 @@ export const resolveProgram = (
         for (const b of decl.bindings) {
           const name = freshName(b.name.original);
           bindingNames.set(b.name.original, name);
-          // Track definition for LSP
-          if (ctx.lsp && b.value.span) {
-            const location = spanToLocation(ctx.lsp.fileRegistry, b.value.span);
+          // Track definition for LSP (use nameSpan for precise hover)
+          const recDefSpan = b.nameSpan ?? b.value.span;
+          if (ctx.lsp && recDefSpan) {
+            const location = spanToLocation(ctx.lsp.fileRegistry, recDefSpan);
             if (location) {
               addDefinition(ctx.lsp.builder, {
                 nameId: name.id,
@@ -483,9 +485,10 @@ export const resolveProgram = (
       case "CDeclForeign": {
         const name = freshName(decl.name.original);
         bindingNames.set(decl.name.original, name);
-        // Track definition for LSP
-        if (ctx.lsp && decl.span) {
-          const location = spanToLocation(ctx.lsp.fileRegistry, decl.span);
+        // Track definition for LSP (use nameSpan for precise hover, fallback to full span)
+        const foreignDefSpan = decl.nameSpan ?? decl.span;
+        if (ctx.lsp && foreignDefSpan) {
+          const location = spanToLocation(ctx.lsp.fileRegistry, foreignDefSpan);
           if (location) {
             addDefinition(ctx.lsp.builder, {
               nameId: name.id,
