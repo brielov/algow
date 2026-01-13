@@ -15,13 +15,8 @@ import { error as diagError } from "./diagnostics";
 import * as C from "./core";
 import { freshName, resetNameCounter, type Name } from "./core";
 import type { Span } from "./surface";
-import type { SymbolTableBuilder, SymbolKind, ScopeSnapshot } from "./lsp/symbols";
-import {
-  createSymbolTableBuilder,
-  addDefinition,
-  addReference,
-  addScopeSnapshot,
-} from "./lsp/symbols";
+import type { SymbolTableBuilder, SymbolKind } from "./lsp/symbols";
+import { createSymbolTableBuilder, addDefinition, addReference } from "./lsp/symbols";
 import type { FileRegistry } from "./files";
 
 // =============================================================================
@@ -142,16 +137,6 @@ const lookup = (ctx: ResolveContext, original: string, span?: C.CExpr["span"]): 
     diagError(span?.start ?? 0, span?.end ?? 0, `Unbound variable: ${original}`),
   );
   return null;
-};
-
-/** Record a scope snapshot at a given position (for autocomplete) */
-const _recordScope = (ctx: ResolveContext, offset: number): void => {
-  const snapshot: ScopeSnapshot = {
-    offset,
-    bindings: new Map(Array.from(ctx.env.entries()).map(([name, nameObj]) => [name, nameObj.id])),
-    constructors: new Set(ctx.constructors),
-  };
-  addScopeSnapshot(ctx.lsp.builder, snapshot);
 };
 
 // =============================================================================
@@ -415,6 +400,10 @@ export type ResolveResult = {
   symbolTableBuilder: SymbolTableBuilder;
 };
 
+/**
+ * Resolve names in a Core program.
+ * Assigns unique IDs to all name bindings and references, detecting unbound variables.
+ */
 export const resolveProgram = (
   program: C.CProgram,
   fileRegistry: FileRegistry,
@@ -601,35 +590,4 @@ export const resolveProgram = (
     diagnostics: ctx.diagnostics,
     symbolTableBuilder: ctx.lsp.builder,
   };
-};
-
-// =============================================================================
-// Utilities for Prelude
-// =============================================================================
-
-/**
- * Create prelude environment from a list of known names.
- * Used to provide built-in functions (map, filter, etc.) to user code.
- */
-export const createPreludeEnv = (names: readonly string[]): Map<string, Name> => {
-  const env = new Map<string, Name>();
-  for (const name of names) {
-    env.set(name, freshName(name, syntheticSpan));
-  }
-  return env;
-};
-
-/**
- * Create constructor set from type declarations.
- */
-export const createConstructorSet = (decls: readonly C.CDecl[]): Set<string> => {
-  const constructors = new Set<string>();
-  for (const decl of decls) {
-    if (decl.kind === "CDeclType") {
-      for (const con of decl.constructors) {
-        constructors.add(con.name);
-      }
-    }
-  }
-  return constructors;
 };

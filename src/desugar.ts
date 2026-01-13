@@ -40,12 +40,13 @@ const unresolvedName = (text: string, span: S.Span): C.Name => ({ id: -1, text, 
 // Expression Desugaring (Section 6.1)
 // =============================================================================
 
+/**
+ * Desugar a Surface expression to a Core expression.
+ * Eliminates syntactic sugar like if-then-else, list literals, do-notation.
+ */
 export const desugarExpr = (state: DesugarState, expr: S.SExpr): C.CExpr => {
   switch (expr.kind) {
     case "SVar":
-      // D⟦ SVar x ⟧ = CVar x
-      // Note: Name ID will be assigned during resolution
-      // Direct mapping: preserve nodeId from Surface AST
       return C.cvar(expr.nodeId, unresolvedName(expr.name.text, expr.name.span), expr.span);
 
     case "SLit":
@@ -1569,6 +1570,10 @@ const collectModuleExports = (decls: readonly S.SDecl[]): Map<string, Set<string
 // Program Desugaring
 // =============================================================================
 
+/**
+ * Desugar a Surface program to a Core program.
+ * Transforms all declarations and the main expression.
+ */
 export const desugarProgram = (program: S.SProgram): C.CProgram => {
   resetTempCounter();
   const state = createDesugarState();

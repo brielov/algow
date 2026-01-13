@@ -91,8 +91,6 @@ const printDiagnostics = (
   _sources: readonly SourceFile[],
 ): void => {
   for (const diag of diagnostics) {
-    // For now, print without file context since we combined sources
-    // TODO: Track source locations through compilation
     printDiagnostic(diag);
   }
 };

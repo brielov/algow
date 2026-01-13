@@ -1158,11 +1158,3 @@ export const lowerProgram = (program: C.CProgram, checkOutput: CheckOutput): Low
     program: { decls: irDecls, main },
   };
 };
-
-/**
- * Lower a single expression (for REPL/testing).
- */
-export const lowerExprOnly = (expr: C.CExpr, checkOutput: CheckOutput): IR.IRExpr => {
-  const ctx = createContext(checkOutput);
-  return lowerExpr(ctx, expr);
-};

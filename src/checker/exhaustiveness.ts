@@ -2,11 +2,27 @@
  * Exhaustiveness Checking for Pattern Matching
  *
  * Checks if a set of patterns exhaustively covers all possible values of a type.
+ * Recursively verifies constructor argument patterns are also exhaustive.
  */
 
 import type * as C from "../core";
-import type { Type } from "../types";
+import type { Type, TypeEnv } from "../types";
 import type { CheckContext } from "./context";
+
+// Type guard helpers
+const isCPTuple = (p: C.CPattern): p is C.CPTuple => p.kind === "CPTuple";
+const isDefined = <T>(x: T | undefined | null): x is T => x != null;
+
+/** Extract argument types from a constructor type (curried function type) */
+const getConstructorArgTypes = (conType: Type): Type[] => {
+  const argTypes: Type[] = [];
+  let current = conType;
+  while (current.kind === "TFun") {
+    argTypes.push(current.param);
+    current = current.ret;
+  }
+  return argTypes;
+};
 
 // =============================================================================
 // Exhaustiveness Checking
@@ -20,6 +36,7 @@ export const checkExhaustiveness = (
   ctx: CheckContext,
   type: Type,
   patterns: readonly C.CPattern[],
+  env: TypeEnv = new Map(),
 ): string[] => {
   // If any pattern is a wildcard or variable at the top level, it's exhaustive
   if (patterns.some((p) => p.kind === "CPWild" || p.kind === "CPVar")) {
@@ -43,21 +60,21 @@ export const checkExhaustiveness = (
       if (["int", "float", "string", "char"].includes(resolvedType.name)) {
         return ["_"];
       }
-      // Check ADT exhaustiveness
-      return checkAdtExhaustiveness(ctx, resolvedType.name, patterns);
+      // Check ADT exhaustiveness (no type args for TCon)
+      return checkAdtExhaustiveness(ctx, resolvedType.name, patterns, env, resolvedType);
     }
 
     case "TApp": {
       // Get the base type name for ADT checking
       const baseName = getBaseTypeName(resolvedType);
       if (baseName) {
-        return checkAdtExhaustiveness(ctx, baseName, patterns);
+        return checkAdtExhaustiveness(ctx, baseName, patterns, env, resolvedType);
       }
       return [];
     }
 
     case "TTuple": {
-      return checkTupleExhaustiveness(ctx, resolvedType.elements, patterns);
+      return checkTupleExhaustiveness(ctx, resolvedType.elements, patterns, env);
     }
 
     case "TFun":
@@ -110,11 +127,70 @@ const checkBoolExhaustiveness = (patterns: readonly C.CPattern[]): string[] => {
   return missing;
 };
 
+/** Extract type arguments from a type application (e.g., Box bool -> [bool]) */
+const getTypeArgs = (type: Type): Type[] => {
+  const args: Type[] = [];
+  let current = type;
+  while (current.kind === "TApp") {
+    args.unshift(current.arg);
+    current = current.con;
+  }
+  return args;
+};
+
+/** Substitute type parameters in constructor arg types with actual type args */
+const instantiateConstructorArgs = (
+  conScheme: { vars: readonly string[]; type: Type },
+  typeArgs: Type[],
+): Type[] => {
+  // Build substitution from type parameters to actual type args BEFORE instantiation
+  const subst = new Map<string, Type>();
+  for (let i = 0; i < conScheme.vars.length && i < typeArgs.length; i++) {
+    subst.set(conScheme.vars[i]!, typeArgs[i]!);
+  }
+
+  // Apply substitution to the original type (not instantiated) to get concrete arg types
+  const substitutedType = applyTypeSubst(conScheme.type, subst);
+  return getConstructorArgTypes(substitutedType);
+};
+
+/** Apply a type variable substitution */
+const applyTypeSubst = (type: Type, subst: Map<string, Type>): Type => {
+  switch (type.kind) {
+    case "TVar": {
+      const replacement = subst.get(type.name);
+      return replacement ?? type;
+    }
+    case "TCon":
+      return type;
+    case "TApp":
+      return {
+        kind: "TApp",
+        con: applyTypeSubst(type.con, subst),
+        arg: applyTypeSubst(type.arg, subst),
+      };
+    case "TFun":
+      return {
+        kind: "TFun",
+        param: applyTypeSubst(type.param, subst),
+        ret: applyTypeSubst(type.ret, subst),
+      };
+    case "TTuple":
+      return { kind: "TTuple", elements: type.elements.map((e) => applyTypeSubst(e, subst)) };
+    case "TRecord":
+      return type; // Records are more complex, skip for now
+    default:
+      return type;
+  }
+};
+
 /** Check exhaustiveness for ADT types */
 const checkAdtExhaustiveness = (
   ctx: CheckContext,
   typeName: string,
   patterns: readonly C.CPattern[],
+  env: TypeEnv,
+  scrutineeType?: Type,
 ): string[] => {
   const constructors = ctx.registry.get(typeName);
   if (!constructors) {
@@ -122,8 +198,11 @@ const checkAdtExhaustiveness = (
     return [];
   }
 
-  // Track which constructors are covered
-  const covered = new Map<string, C.CPattern[]>();
+  // Extract type arguments from the scrutinee type (e.g., Box bool -> [bool])
+  const typeArgs = scrutineeType ? getTypeArgs(scrutineeType) : [];
+
+  // Track which constructors are covered with their patterns
+  const covered = new Map<string, C.CPCon[]>();
   for (const con of constructors) {
     covered.set(con, []);
   }
@@ -161,14 +240,36 @@ const checkAdtExhaustiveness = (
     }
   }
 
-  // Check each constructor
+  // Check each constructor and its arguments
   const missing: string[] = [];
   for (const [conName, conPatterns] of covered) {
     if (conPatterns.length === 0) {
       missing.push(conName);
+      continue;
     }
-    // TODO: For constructors with arguments, we could recursively check
-    // if all argument patterns are exhaustive, but this is complex
+
+    // Look up constructor type to get argument types
+    const conScheme = env.get(conName);
+    if (!conScheme) continue;
+
+    // Get argument types with actual type arguments substituted
+    const argTypes = instantiateConstructorArgs(conScheme, typeArgs);
+
+    // If constructor has no arguments, it's covered
+    if (argTypes.length === 0) continue;
+
+    // Recursively check each argument position
+    for (let i = 0; i < argTypes.length; i++) {
+      const argPatterns = conPatterns.map((cp) => cp.args[i]).filter(isDefined);
+
+      const argMissing = checkExhaustiveness(ctx, argTypes[i]!, argPatterns, env);
+      if (argMissing.length > 0) {
+        // Build a description of the missing pattern
+        const args = argTypes.map((_, j) => (j === i ? argMissing[0] : "_"));
+        missing.push(`${conName}${args.length > 0 ? ` ${args.join(" ")}` : ""}`);
+        break; // Only report first missing for this constructor
+      }
+    }
   }
 
   return missing;
@@ -179,6 +280,7 @@ const checkTupleExhaustiveness = (
   ctx: CheckContext,
   elementTypes: readonly Type[],
   patterns: readonly C.CPattern[],
+  env: TypeEnv,
 ): string[] => {
   // If any pattern is a wildcard or variable, the tuple match is exhaustive
   if (patterns.some((p) => p.kind === "CPWild" || p.kind === "CPVar")) {
@@ -186,7 +288,7 @@ const checkTupleExhaustiveness = (
   }
 
   // Collect tuple patterns
-  const tuplePatterns = patterns.filter((p) => p.kind === "CPTuple") as C.CPTuple[];
+  const tuplePatterns = patterns.filter(isCPTuple);
 
   if (tuplePatterns.length === 0) {
     // No tuple patterns and no wildcards - not exhaustive
@@ -194,12 +296,9 @@ const checkTupleExhaustiveness = (
   }
 
   // For each position, check if it's covered
-  // This is a simplified check - full exhaustiveness for tuples is complex
   for (let i = 0; i < elementTypes.length; i++) {
-    const positionPatterns = tuplePatterns
-      .map((tp) => tp.elements[i])
-      .filter(Boolean) as C.CPattern[];
-    const missing = checkExhaustiveness(ctx, elementTypes[i]!, positionPatterns);
+    const positionPatterns = tuplePatterns.map((tp) => tp.elements[i]).filter(isDefined);
+    const missing = checkExhaustiveness(ctx, elementTypes[i]!, positionPatterns, env);
     if (missing.length > 0) {
       // Position not exhaustive
       const parts = elementTypes.map((_, j) => (j === i ? missing[0] : "_"));

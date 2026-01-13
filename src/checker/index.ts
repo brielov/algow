@@ -39,7 +39,7 @@ export { typeToString } from "../types";
 // Import from submodules
 import { type CheckContext, createContext, addError, recordScheme } from "./context";
 import { unify } from "./unify";
-import { inferExpr, type InferResult } from "./infer";
+import { inferExpr } from "./infer";
 import { type BindingInfo, buildDependencyGraph, findSCCs, isSelfRecursive } from "./scc";
 
 // Re-export types that consumers need
@@ -113,6 +113,10 @@ export type CheckOutput = {
   readonly spanToNodeId: ReadonlyMap<number, NodeId>;
 };
 
+/**
+ * Type check a Core program using Algorithm W.
+ * Infers types for all expressions and checks consistency.
+ */
 export const checkProgram = (
   program: C.CProgram,
   symbolTableBuilder: SymbolTableBuilder,

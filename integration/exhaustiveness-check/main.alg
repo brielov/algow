@@ -57,6 +57,24 @@ let classifyPair = pair ->
     when _ -> "general point"
   end
 
+-- GOOD: Exhaustive recursive check - constructor arguments fully covered
+type Box a = Boxed a | Empty
+
+let describeBoxedBool = box ->
+  match box
+    when Boxed true -> "boxed true"
+    when Boxed false -> "boxed false"
+    when Empty -> "empty"
+  end
+
+-- GOOD: Exhaustive nested ADT - Maybe (Maybe a) with wildcard inner
+let describeNestedMaybe = opt ->
+  match opt
+    when Nothing -> "nothing"
+    when Just Nothing -> "just nothing"
+    when Just (Just _) -> "just just something"
+  end
+
 -- Test the functions
 let result =
   let c1 = String.length (describeColor Red) in      -- 3
@@ -72,7 +90,14 @@ let result =
   let h2 = unwrapOr 0 (safeHead Nil) in              -- 0
   let p1 = String.length (classifyPair (0, 0)) in    -- 6
   let p2 = String.length (classifyPair (5, 0)) in    -- 9
-  c1 + c2 + c3 + r1 + r2 + u1 + u2 + b1 + b2 + h1 + h2 + p1 + p2
-  -- Expected: 3 + 5 + 4 + 1 + 0 + 42 + 99 + 1 + 0 + 10 + 0 + 6 + 9 = 180
+  -- Recursive exhaustiveness tests
+  let box1 = String.length (describeBoxedBool (Boxed true)) in   -- 10
+  let box2 = String.length (describeBoxedBool (Boxed false)) in  -- 11
+  let box3 = String.length (describeBoxedBool Empty) in          -- 5
+  let nest1 = String.length (describeNestedMaybe Nothing) in              -- 7
+  let nest2 = String.length (describeNestedMaybe (Just Nothing)) in       -- 12
+  let nest3 = String.length (describeNestedMaybe (Just (Just 1))) in      -- 19
+  c1 + c2 + c3 + r1 + r2 + u1 + u2 + b1 + b2 + h1 + h2 + p1 + p2 + box1 + box2 + box3 + nest1 + nest2 + nest3
+  -- Expected: 180 + 10 + 11 + 5 + 7 + 12 + 19 = 244
 
 let main = args -> IO.printLine (Int.toString result)

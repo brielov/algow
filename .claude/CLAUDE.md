@@ -30,8 +30,60 @@ Anything hacky, unclear, or speculative is unacceptable.
 - Duplicate logic
 - Leave dead code
 - Explain broken code with comments instead of fixing it
+- Ignore bugs, type errors, or lint violations discovered during the task
 
 If any of the above seems necessary → **STOP**.
+
+---
+
+## No “Preexisting Bug” Excuse
+
+If, while executing a task, you discover:
+
+- A bug
+- A logic error
+- A type error
+- A linting violation
+- A broken invariant
+- Undefined or inconsistent behavior
+
+**You must fix it. Period.**
+
+It is **not acceptable** to claim:
+
+- “This is a preexisting bug”
+- “This was already broken”
+- “This is out of scope”
+- “This is just a linting issue”
+
+If the code is wrong, unsafe, unclear, or inconsistent, it becomes part of the task.
+
+The only valid reasons **not** to fix an issue are:
+
+- The fix requires missing information → STOP and report what is missing
+- The fix would require a design decision outside the provided authority → STOP and explain the decision boundary
+
+Otherwise, discovered issues are **mandatory fixes**, not commentary.
+
+---
+
+## Scope Expansion Is Mandatory for Correctness
+
+Task scope is **not fixed** if correctness is at risk.
+
+If achieving correctness requires changes outside the original request, you **must expand the scope** to include them.
+
+This includes (but is not limited to):
+
+- Fixing upstream or downstream code
+- Refactoring incorrect abstractions
+- Adjusting types, interfaces, or invariants
+- Removing or rewriting flawed logic
+- Updating tests to reflect correct behavior
+
+Refusing to expand scope in the name of “staying on task” is a correctness failure.
+
+The task is defined by **what must be true for the code to be correct**, not by the initial prompt boundaries.
 
 ---
 
@@ -84,6 +136,7 @@ Before marking work complete:
 - Single responsibility per function/module
 - Consistent naming
 - Tests pass with zero skips
+- No known bugs, lint errors, or type violations remain
 
 If any item fails → **NOT DONE**.
 

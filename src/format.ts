@@ -557,6 +557,11 @@ const formatTypeAtom = (type: SType): string => {
 // Main API
 // =============================================================================
 
+/**
+ * Format source code with consistent style.
+ * @param source The source code to format
+ * @returns Formatted code or original if parsing fails
+ */
 export const format = (source: string): FormatResult => {
   const parseResult = parse(source);
 

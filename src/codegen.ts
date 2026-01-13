@@ -147,7 +147,7 @@ const getConstructorTag = (ctx: CodeGenContext, typeName: string, conName: strin
 // Atom Generation
 // =============================================================================
 
-const genAtom = (ctx: CodeGenContext, atom: IR.Atom): string => {
+const genAtom = (_ctx: CodeGenContext, atom: IR.Atom): string => {
   switch (atom.kind) {
     case "ALit": {
       const lit = atom.value;

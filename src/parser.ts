@@ -171,6 +171,12 @@ const parseLambda = (state: ParserState): S.SAbs => {
 // MAIN PARSE FUNCTION
 // =============================================================================
 
+/**
+ * Parse source code into a surface AST.
+ * @param source The source code to parse
+ * @param fileId The file ID for span tracking (default 0)
+ * @returns Parse result with AST and any syntax errors
+ */
 export const parse = (source: string, fileId: FileId = 0): ParseResult => {
   const state = createParser(source, fileId);
   const decls: S.SDecl[] = [];

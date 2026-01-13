@@ -50,8 +50,8 @@ const bindResultTo = (expr: IR.IRExpr, name: Name, cont: IR.IRExpr): IR.IRExpr =
 
 type KnownValue =
   | { kind: "lit"; value: Literal }
-  | { kind: "con"; name: string; args: IR.Atom[] }
-  | { kind: "tuple"; elements: IR.Atom[] };
+  | { kind: "con"; name: string; args: readonly IR.Atom[] }
+  | { kind: "tuple"; elements: readonly IR.Atom[] };
 
 type MatchResult = {
   bindings: { name: Name; atom: IR.Atom }[];

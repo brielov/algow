@@ -273,7 +273,7 @@ const inferMatch = (ctx: CheckContext, env: TypeEnv, expr: C.CMatch): InferResul
   if (!hasGuards) {
     const patterns = expr.cases.map((c) => c.pattern);
     const finalScrutineeType = applySubst(subst, scrutineeType);
-    const missing = checkExhaustiveness(ctx, finalScrutineeType, patterns);
+    const missing = checkExhaustiveness(ctx, finalScrutineeType, patterns, env);
     if (missing.length > 0) {
       addExhaustivenessWarning(ctx, missing, expr.span);
     }

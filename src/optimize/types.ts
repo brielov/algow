@@ -27,8 +27,8 @@ export type ConstEnv = Map<string, ConstValue>;
 /** Extended value tracking for constructor applications and lambdas */
 export type ExtendedValue =
   | { kind: "const"; value: ConstValue }
-  | { kind: "con"; name: string; args: IR.Atom[] }
-  | { kind: "tuple"; elements: IR.Atom[] }
+  | { kind: "con"; name: string; args: readonly IR.Atom[] }
+  | { kind: "tuple"; elements: readonly IR.Atom[] }
   | { kind: "atom"; atom: IR.Atom }
   | { kind: "lambda"; param: Name; body: IR.IRExpr; type: Type };
 
@@ -73,7 +73,7 @@ export const getExtendedValueFromBinding = (binding: IR.IRBinding): ExtendedValu
       return null;
 
     case "IRBTuple":
-      return { kind: "tuple", elements: binding.elements as IR.Atom[] };
+      return { kind: "tuple", elements: binding.elements };
 
     case "IRBLambda":
       // Track lambdas for beta reduction
