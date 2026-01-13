@@ -104,10 +104,7 @@ export const globalToLocal = (
 };
 
 /** Convert a global span to a Location */
-export const spanToLocation = (
-  registry: FileRegistry,
-  span: Span,
-): Location | null => {
+export const spanToLocation = (registry: FileRegistry, span: Span): Location | null => {
   const result = globalToLocal(registry, span.start);
   if (!result) return null;
 
@@ -142,10 +139,7 @@ export const localToGlobal = (
 };
 
 /** Convert a Location back to global span */
-export const locationToGlobalSpan = (
-  registry: FileRegistry,
-  location: Location,
-): Span | null => {
+export const locationToGlobalSpan = (registry: FileRegistry, location: Location): Span | null => {
   const file = registry.byId.get(location.fileId);
   if (!file) return null;
 
@@ -160,18 +154,12 @@ export const locationToGlobalSpan = (
 // =============================================================================
 
 /** Get file info by path */
-export const getFileByPath = (
-  registry: FileRegistry,
-  path: string,
-): FileInfo | null => {
+export const getFileByPath = (registry: FileRegistry, path: string): FileInfo | null => {
   return registry.files.get(path) ?? null;
 };
 
 /** Get file info by ID */
-export const getFileById = (
-  registry: FileRegistry,
-  id: FileId,
-): FileInfo | null => {
+export const getFileById = (registry: FileRegistry, id: FileId): FileInfo | null => {
   return registry.byId.get(id) ?? null;
 };
 

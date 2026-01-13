@@ -99,9 +99,7 @@ export const getDocumentContent = (manager: DocumentManager, uri: string): strin
 };
 
 /** Get all documents as SourceFile array for compilation */
-export const getSourceFiles = (
-  manager: DocumentManager,
-): { path: string; content: string }[] => {
+export const getSourceFiles = (manager: DocumentManager): { path: string; content: string }[] => {
   return getAllDocuments(manager).map((doc) => ({
     path: doc.path,
     content: doc.content,

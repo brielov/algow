@@ -112,12 +112,7 @@ const sendResponse = (server: LSPServer, id: number | string, result: unknown): 
 };
 
 /** Send an error response */
-const sendError = (
-  server: LSPServer,
-  id: number | string,
-  code: number,
-  message: string,
-): void => {
+const sendError = (server: LSPServer, id: number | string, code: number, message: string): void => {
   const response = createErrorResponse(id, code, message);
   server.write(encodeMessage(response));
 };
@@ -194,11 +189,7 @@ const handleNotification = (server: LSPServer, notification: NotificationMessage
 // Lifecycle Methods
 // =============================================================================
 
-const handleInitialize = (
-  server: LSPServer,
-  id: number | string,
-  _params: unknown,
-): void => {
+const handleInitialize = (server: LSPServer, id: number | string, _params: unknown): void => {
   sendResponse(server, id, {
     capabilities: {
       textDocumentSync: {
@@ -234,7 +225,9 @@ const handleShutdown = (server: LSPServer, id: number | string): void => {
 // =============================================================================
 
 const handleDidOpen = (server: LSPServer, params: unknown): void => {
-  const { textDocument } = params as { textDocument: { uri: string; text: string; version: number } };
+  const { textDocument } = params as {
+    textDocument: { uri: string; text: string; version: number };
+  };
   openDocument(server.documents, textDocument.uri, textDocument.text, textDocument.version);
   reanalyzeAndPublishDiagnostics(server);
 };
@@ -247,7 +240,12 @@ const handleDidChange = (server: LSPServer, params: unknown): void => {
 
   // We use full sync, so there's only one content change with the full text
   if (contentChanges.length > 0) {
-    updateDocument(server.documents, textDocument.uri, contentChanges[0]!.text, textDocument.version);
+    updateDocument(
+      server.documents,
+      textDocument.uri,
+      contentChanges[0]!.text,
+      textDocument.version,
+    );
     reanalyzeAndPublishDiagnostics(server);
   }
 };

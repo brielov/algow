@@ -10,7 +10,15 @@ import type { Diagnostic } from "../diagnostics";
 import { typeToString } from "../checker";
 import type { DocumentManager } from "./documents";
 import { getSourceFiles } from "./documents";
-import { buildLineIndex, offsetToPosition, positionToOffset, spanToRange, type LineIndex, type Position, type Range } from "./positions";
+import {
+  buildLineIndex,
+  offsetToPosition,
+  positionToOffset,
+  spanToRange,
+  type LineIndex,
+  type Position,
+  type Range,
+} from "./positions";
 import { findSymbolAt, getScopeAt, type SymbolDefinition, type SymbolTable } from "./symbols";
 import { getFileById, getFileByPath, type FileRegistry } from "./workspace";
 
@@ -110,7 +118,10 @@ export const findSymbolAtPosition = (
   result: AnalysisResult,
   path: string,
   position: Position,
-): { kind: "definition"; def: SymbolDefinition } | { kind: "reference"; targetId: number } | null => {
+):
+  | { kind: "definition"; def: SymbolDefinition }
+  | { kind: "reference"; targetId: number }
+  | null => {
   if (!result.symbolTable) return null;
 
   const file = getFileByPath(result.fileRegistry, path);

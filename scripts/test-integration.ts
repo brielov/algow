@@ -32,7 +32,7 @@ async function runWithTimeout(file: string): Promise<{ ok: boolean; output: stri
       resolve({ ok: false, output: `TIMEOUT after ${TIMEOUT_MS}ms` });
     }, TIMEOUT_MS);
 
-    proc.exited.then(async (code) => {
+    void proc.exited.then(async (code) => {
       clearTimeout(timeout);
       const stderr = await new Response(proc.stderr).text();
       resolve({ ok: code === 0, output: stderr });
@@ -65,4 +65,4 @@ async function main() {
   process.exit(failed > 0 ? 1 : 0);
 }
 
-main();
+void main();

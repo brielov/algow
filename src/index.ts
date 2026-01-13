@@ -207,14 +207,14 @@ program
       );
       process.exit(1);
     }
-    run(files, { typeCheckOnly: false, target: target as Target | undefined });
+    void run(files, { typeCheckOnly: false, target: target as Target | undefined });
   });
 
 program
   .command("check")
   .description("Type check source files")
   .argument("<files...>", "Source files or glob patterns")
-  .action((files) => run(files, { typeCheckOnly: true }));
+  .action((files) => void run(files, { typeCheckOnly: true }));
 
 program
   .command("run")

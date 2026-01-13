@@ -134,18 +134,12 @@ export const createSymbolTableBuilder = (): SymbolTableBuilder => ({
 });
 
 /** Add a definition to the builder */
-export const addDefinition = (
-  builder: SymbolTableBuilder,
-  def: SymbolDefinition,
-): void => {
+export const addDefinition = (builder: SymbolTableBuilder, def: SymbolDefinition): void => {
   builder.definitions.set(def.nameId, def);
 };
 
 /** Add a reference to the builder */
-export const addReference = (
-  builder: SymbolTableBuilder,
-  ref: SymbolReference,
-): void => {
+export const addReference = (builder: SymbolTableBuilder, ref: SymbolReference): void => {
   const existing = builder.references.get(ref.targetId);
   if (existing) {
     existing.push(ref);
@@ -155,10 +149,7 @@ export const addReference = (
 };
 
 /** Add a scope snapshot */
-export const addScopeSnapshot = (
-  builder: SymbolTableBuilder,
-  snapshot: ScopeSnapshot,
-): void => {
+export const addScopeSnapshot = (builder: SymbolTableBuilder, snapshot: ScopeSnapshot): void => {
   builder.scopeSnapshots.push(snapshot);
 };
 
@@ -216,7 +207,10 @@ export const findSymbolAt = (
   table: SymbolTable,
   fileId: FileId,
   offset: number,
-): { kind: "definition"; def: SymbolDefinition } | { kind: "reference"; ref: SymbolReference } | null => {
+):
+  | { kind: "definition"; def: SymbolDefinition }
+  | { kind: "reference"; ref: SymbolReference }
+  | null => {
   // Check definitions
   for (const def of table.definitions.values()) {
     if (
@@ -245,10 +239,7 @@ export const findSymbolAt = (
 };
 
 /** Get scope at a specific offset (for autocomplete) */
-export const getScopeAt = (
-  table: SymbolTable,
-  offset: number,
-): ScopeSnapshot | null => {
+export const getScopeAt = (table: SymbolTable, offset: number): ScopeSnapshot | null => {
   let best: ScopeSnapshot | null = null;
 
   for (const snapshot of table.scopeSnapshots) {
