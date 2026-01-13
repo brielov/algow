@@ -49,6 +49,7 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
         desugarExpr(expr.value),
         desugarExpr(expr.body),
         expr.span,
+        expr.nameSpan,
       );
 
     case "SLetRec":
@@ -57,6 +58,7 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
         expr.bindings.map((b) => ({
           name: { id: -1, original: b.name },
           value: desugarExpr(b.value),
+          nameSpan: b.nameSpan,
         })),
         desugarExpr(expr.body),
         expr.span,
@@ -120,7 +122,13 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
         if (expr.field[0] && expr.field[0] === expr.field[0].toUpperCase()) {
           return C.ccon(qualifiedName, expr.span);
         }
-        return C.cvar({ id: -1, original: qualifiedName }, expr.span);
+        // Pass module span (from the constructor) and member span (from the field)
+        return C.cvar(
+          { id: -1, original: qualifiedName },
+          expr.span,
+          expr.record.span,
+          expr.fieldSpan,
+        );
       }
       // D⟦ SField e f ⟧ = CField (D⟦e⟧) f
       return C.cfield(desugarExpr(expr.record), expr.field, expr.span);
@@ -200,7 +208,7 @@ export const desugarExpr = (expr: S.SExpr): C.CExpr => {
 // Helper Functions
 // =============================================================================
 
-const desugarAbs = (params: readonly string[], body: S.SExpr, span?: S.Span): C.CExpr => {
+const desugarAbs = (params: readonly S.SParam[], body: S.SExpr, span?: S.Span): C.CExpr => {
   if (params.length === 0) {
     return desugarExpr(body);
   }
@@ -208,7 +216,13 @@ const desugarAbs = (params: readonly string[], body: S.SExpr, span?: S.Span): C.
   // Build nested lambdas from right to left
   let result = desugarExpr(body);
   for (let i = params.length - 1; i >= 0; i--) {
-    result = C.cabs({ id: -1, original: params[i]! }, result, i === 0 ? span : undefined);
+    const param = params[i]!;
+    result = C.cabs(
+      { id: -1, original: param.name },
+      result,
+      i === 0 ? span : undefined,
+      param.span,
+    );
   }
   return result;
 };
@@ -535,6 +549,7 @@ const desugarDecl = (decl: S.SDecl): C.CDecl | C.CDecl[] | null => {
         decl.constructors.map((c) => ({
           name: c.name,
           fields: c.fields.map(desugarType),
+          span: c.span,
         })),
         decl.span,
       );
@@ -728,6 +743,7 @@ const desugarExprInModuleWithImports = (
           shadowedImportedNames,
         ),
         expr.span,
+        expr.nameSpan,
       );
     }
 
@@ -745,6 +761,7 @@ const desugarExprInModuleWithImports = (
         expr.bindings.map((b) => ({
           name: { id: -1, original: b.name },
           value: recurseWithShadow(b.value),
+          nameSpan: b.nameSpan,
         })),
         recurseWithShadow(expr.body),
         expr.span,
@@ -839,7 +856,13 @@ const desugarExprInModuleWithImports = (
         if (expr.field[0] && expr.field[0] === expr.field[0].toUpperCase()) {
           return C.ccon(qualifiedName, expr.span);
         }
-        return C.cvar({ id: -1, original: qualifiedName }, expr.span);
+        // Pass module span (from the constructor) and member span (from the field)
+        return C.cvar(
+          { id: -1, original: qualifiedName },
+          expr.span,
+          expr.record.span,
+          expr.fieldSpan,
+        );
       }
       return C.cfield(recurse(expr.record), expr.field, expr.span);
 
@@ -913,7 +936,7 @@ const desugarExprInModuleWithImports = (
 };
 
 const desugarAbsInModuleWithImports = (
-  params: readonly string[],
+  params: readonly S.SParam[],
   body: S.SExpr,
   moduleName: string,
   moduleNames: Set<string>,
@@ -928,8 +951,8 @@ const desugarAbsInModuleWithImports = (
   const shadowedModuleNames = new Set(moduleNames);
   const shadowedImportedNames = new Map(importedNames);
   for (const param of params) {
-    shadowedModuleNames.delete(param);
-    shadowedImportedNames.delete(param);
+    shadowedModuleNames.delete(param.name);
+    shadowedImportedNames.delete(param.name);
   }
 
   let result = desugarExprInModuleWithImports(
@@ -939,7 +962,13 @@ const desugarAbsInModuleWithImports = (
     shadowedImportedNames,
   );
   for (let i = params.length - 1; i >= 0; i--) {
-    result = C.cabs({ id: -1, original: params[i]! }, result, i === 0 ? span : undefined);
+    const param = params[i]!;
+    result = C.cabs(
+      { id: -1, original: param.name },
+      result,
+      i === 0 ? span : undefined,
+      param.span,
+    );
   }
   return result;
 };
@@ -1133,6 +1162,7 @@ const desugarDeclInModuleWithImports = (
         decl.constructors.map((c) => ({
           name: `${moduleName}.${c.name}`,
           fields: c.fields.map(desugarType),
+          span: c.span,
         })),
         decl.span,
       );

@@ -410,6 +410,7 @@ const offsetExpr = (expr: SExpr, offset: number): SExpr => {
     case "SAbs":
       return {
         ...expr,
+        params: expr.params.map((p) => ({ ...p, span: offsetSpan(p.span, offset) })),
         body: offsetExpr(expr.body, offset),
         span: offsetSpan(expr.span, offset),
       };
@@ -419,11 +420,16 @@ const offsetExpr = (expr: SExpr, offset: number): SExpr => {
         value: offsetExpr(expr.value, offset),
         body: offsetExpr(expr.body, offset),
         span: offsetSpan(expr.span, offset),
+        nameSpan: offsetSpan(expr.nameSpan, offset),
       };
     case "SLetRec":
       return {
         ...expr,
-        bindings: expr.bindings.map((b) => ({ ...b, value: offsetExpr(b.value, offset) })),
+        bindings: expr.bindings.map((b) => ({
+          ...b,
+          value: offsetExpr(b.value, offset),
+          nameSpan: offsetSpan(b.nameSpan, offset),
+        })),
         body: offsetExpr(expr.body, offset),
         span: offsetSpan(expr.span, offset),
       };
@@ -468,6 +474,7 @@ const offsetExpr = (expr: SExpr, offset: number): SExpr => {
         ...expr,
         record: offsetExpr(expr.record, offset),
         span: offsetSpan(expr.span, offset),
+        fieldSpan: offsetSpan(expr.fieldSpan, offset),
       };
     case "SList":
       return {
@@ -521,6 +528,7 @@ const offsetDecl = (decl: SDecl, offset: number): SDecl => {
         constructors: decl.constructors.map((c) => ({
           ...c,
           fields: c.fields.map((f) => offsetType(f, offset)),
+          span: offsetSpan(c.span, offset),
         })),
         span: offsetSpan(decl.span, offset),
       };

@@ -258,10 +258,10 @@ let testCons =
 -- =============================================================================
 
 let testChars =
-  let c1 = "a" in
-  let c2 = "Z" in
-  let c3 = "5" in
-  let c4 = " " in
+  let c1 = 'a' in
+  let c2 = 'Z' in
+  let c3 = '5' in
+  let c4 = ' ' in
   let a = if Char.isAlpha c1 then 1 else 0 in        -- 1
   let b = if Char.isAlpha c3 then 1 else 0 in        -- 0
   let c = if Char.isDigit c3 then 1 else 0 in        -- 1

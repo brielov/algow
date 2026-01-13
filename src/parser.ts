@@ -141,11 +141,11 @@ const isLambdaStart = (state: ParserState): boolean => {
 
 const parseLambda = (state: ParserState): S.SAbs => {
   const start = state.current[1];
-  const params: string[] = [];
+  const params: S.SParam[] = [];
 
   while (at(state, TokenKind.Lower) && !at(state, TokenKind.Arrow)) {
     const token = advance(state);
-    params.push(text(state, token));
+    params.push({ name: text(state, token), span: tokenSpan(token) });
   }
 
   expect(state, TokenKind.Arrow, "expected '->'");
@@ -385,6 +385,7 @@ const parseConstructor = (state: ParserState): S.SConDecl | null => {
   const nameToken = expect(state, TokenKind.Upper, "expected constructor name");
   if (!nameToken) return null;
   const name = text(state, nameToken);
+  const conSpan = tokenSpan(nameToken);
 
   const fields: S.SType[] = [];
   while (
@@ -397,7 +398,7 @@ const parseConstructor = (state: ParserState): S.SConDecl | null => {
     else break;
   }
 
-  return { name, fields };
+  return { name, fields, span: conSpan };
 };
 
 const parseForeignDecl = (state: ParserState): S.SDeclForeign | null => {
@@ -535,20 +536,21 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
   const firstNameSpan = tokenSpan(nameToken);
 
   // Parse parameters
-  const params: string[] = [];
+  const params: S.SParam[] = [];
   while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
     if (at(state, TokenKind.LParen)) {
       // Skip typed parameter for now
       advance(state);
       const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-      if (paramToken) params.push(text(state, paramToken));
+      if (paramToken) params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
       if (at(state, TokenKind.Colon)) {
         advance(state);
         parseType(state); // Skip type annotation
       }
       expect(state, TokenKind.RParen, "expected ')'");
     } else {
-      params.push(text(state, advance(state)));
+      const paramToken = advance(state);
+      params.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
     }
   }
 
@@ -579,19 +581,20 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
       const andName = text(state, andNameToken);
       const andNameSpan = tokenSpan(andNameToken);
 
-      const andParams: string[] = [];
+      const andParams: S.SParam[] = [];
       while (at(state, TokenKind.Lower) || at(state, TokenKind.LParen)) {
         if (at(state, TokenKind.LParen)) {
           advance(state);
           const paramToken = expect(state, TokenKind.Lower, "expected parameter name");
-          if (paramToken) andParams.push(text(state, paramToken));
+          if (paramToken) andParams.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
           if (at(state, TokenKind.Colon)) {
             advance(state);
             parseType(state);
           }
           expect(state, TokenKind.RParen, "expected ')'");
         } else {
-          andParams.push(text(state, advance(state)));
+          const paramToken = advance(state);
+          andParams.push({ name: text(state, paramToken), span: tokenSpan(paramToken) });
         }
       }
 
@@ -626,7 +629,7 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
       return {
         kind: "expr",
         expr: S.sletrec(
-          [{ name: firstName, value: wrappedValue }],
+          [{ name: firstName, value: wrappedValue, nameSpan: firstNameSpan }],
           body,
           span(start, body.span?.end ?? state.current[1]),
         ),
@@ -634,7 +637,13 @@ const parseLetDeclOrExpr = (state: ParserState): LetResult => {
     }
     return {
       kind: "expr",
-      expr: S.slet(firstName, wrappedValue, body, span(start, body.span?.end ?? state.current[1])),
+      expr: S.slet(
+        firstName,
+        wrappedValue,
+        body,
+        span(start, body.span?.end ?? state.current[1]),
+        firstNameSpan,
+      ),
     };
   }
 
@@ -920,7 +929,7 @@ const parseInfix = (
       if (at(state, TokenKind.Int)) {
         const indexToken = advance(state);
         const field = text(state, indexToken);
-        return S.sfield(left, field, span(start, indexToken[2]));
+        return S.sfield(left, field, span(start, indexToken[2]), tokenSpan(indexToken));
       }
 
       // Record field access: record.field OR qualified constructor: Module.Constructor
@@ -936,7 +945,8 @@ const parseInfix = (
       }
       const field = fieldToken ? text(state, fieldToken) : "?";
       const end = fieldToken ? fieldToken[2] : state.current[1];
-      return S.sfield(left, field, span(start, end));
+      const fieldSpan = fieldToken ? tokenSpan(fieldToken) : undefined;
+      return S.sfield(left, field, span(start, end), fieldSpan);
     }
 
     default: {

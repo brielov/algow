@@ -71,10 +71,16 @@ export type SApp = {
   readonly span?: Span;
 };
 
+// Parameter with optional span for LSP tracking
+export type SParam = {
+  readonly name: string;
+  readonly span?: Span;
+};
+
 // Multi-param lambda (desugars to nested single-param)
 export type SAbs = {
   readonly kind: "SAbs";
-  readonly params: readonly string[];
+  readonly params: readonly SParam[];
   readonly body: SExpr;
   readonly span?: Span;
 };
@@ -85,11 +91,16 @@ export type SLet = {
   readonly value: SExpr;
   readonly body: SExpr;
   readonly span?: Span;
+  readonly nameSpan?: Span;
 };
 
 export type SLetRec = {
   readonly kind: "SLetRec";
-  readonly bindings: readonly { readonly name: string; readonly value: SExpr }[];
+  readonly bindings: readonly {
+    readonly name: string;
+    readonly value: SExpr;
+    readonly nameSpan?: Span;
+  }[];
   readonly body: SExpr;
   readonly span?: Span;
 };
@@ -145,6 +156,7 @@ export type SField = {
   readonly record: SExpr;
   readonly field: string;
   readonly span?: Span;
+  readonly fieldSpan?: Span;
 };
 
 // List literal [1, 2, 3] - desugars to nested Cons
@@ -349,6 +361,7 @@ export type SDeclType = {
 export type SConDecl = {
   readonly name: string;
   readonly fields: readonly SType[];
+  readonly span?: Span;
 };
 
 // Type alias: type Point = { x : int, y : int }
@@ -434,21 +447,28 @@ export const sapp = (func: SExpr, arg: SExpr, span?: Span): SApp => ({
   arg,
   span,
 });
-export const sabs = (params: readonly string[], body: SExpr, span?: Span): SAbs => ({
+export const sabs = (params: readonly SParam[], body: SExpr, span?: Span): SAbs => ({
   kind: "SAbs",
   params,
   body,
   span,
 });
-export const slet = (name: string, value: SExpr, body: SExpr, span?: Span): SLet => ({
+export const slet = (
+  name: string,
+  value: SExpr,
+  body: SExpr,
+  span?: Span,
+  nameSpan?: Span,
+): SLet => ({
   kind: "SLet",
   name,
   value,
   body,
   span,
+  nameSpan,
 });
 export const sletrec = (
-  bindings: readonly { name: string; value: SExpr }[],
+  bindings: readonly { name: string; value: SExpr; nameSpan?: Span }[],
   body: SExpr,
   span?: Span,
 ): SLetRec => ({ kind: "SLetRec", bindings, body, span });
@@ -480,11 +500,12 @@ export const srecordUpdate = (
   fields: readonly { name: string; value: SExpr }[],
   span?: Span,
 ): SRecordUpdate => ({ kind: "SRecordUpdate", record, fields, span });
-export const sfield = (record: SExpr, field: string, span?: Span): SField => ({
+export const sfield = (record: SExpr, field: string, span?: Span, fieldSpan?: Span): SField => ({
   kind: "SField",
   record,
   field,
   span,
+  fieldSpan,
 });
 export const slist = (elements: readonly SExpr[], span?: Span): SList => ({
   kind: "SList",

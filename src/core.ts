@@ -46,6 +46,9 @@ export type CVar = {
   readonly kind: "CVar";
   readonly name: Name;
   readonly span?: Span;
+  // For qualified names (Module.member), track the spans separately
+  readonly moduleSpan?: Span;
+  readonly memberSpan?: Span;
 };
 
 export type CLit = {
@@ -67,6 +70,7 @@ export type CAbs = {
   readonly param: Name;
   readonly body: CExpr;
   readonly span?: Span;
+  readonly paramSpan?: Span;
 };
 
 export type CLet = {
@@ -75,11 +79,16 @@ export type CLet = {
   readonly value: CExpr;
   readonly body: CExpr;
   readonly span?: Span;
+  readonly nameSpan?: Span;
 };
 
 export type CLetRec = {
   readonly kind: "CLetRec";
-  readonly bindings: readonly { readonly name: Name; readonly value: CExpr }[];
+  readonly bindings: readonly {
+    readonly name: Name;
+    readonly value: CExpr;
+    readonly nameSpan?: Span;
+  }[];
   readonly body: CExpr;
   readonly span?: Span;
 };
@@ -257,6 +266,7 @@ export type CDeclType = {
 export type CConDecl = {
   readonly name: string;
   readonly fields: readonly CType[];
+  readonly span?: Span;
 };
 
 export type CDeclLet = {
@@ -301,7 +311,13 @@ export type CProgram = {
 // Smart Constructors
 // =============================================================================
 
-export const cvar = (name: Name, span?: Span): CVar => ({ kind: "CVar", name, span });
+export const cvar = (name: Name, span?: Span, moduleSpan?: Span, memberSpan?: Span): CVar => ({
+  kind: "CVar",
+  name,
+  span,
+  moduleSpan,
+  memberSpan,
+});
 export const clit = (value: Literal, span?: Span): CLit => ({ kind: "CLit", value, span });
 export const capp = (func: CExpr, arg: CExpr, span?: Span): CApp => ({
   kind: "CApp",
@@ -309,21 +325,29 @@ export const capp = (func: CExpr, arg: CExpr, span?: Span): CApp => ({
   arg,
   span,
 });
-export const cabs = (param: Name, body: CExpr, span?: Span): CAbs => ({
+export const cabs = (param: Name, body: CExpr, span?: Span, paramSpan?: Span): CAbs => ({
   kind: "CAbs",
   param,
   body,
   span,
+  paramSpan,
 });
-export const clet = (name: Name, value: CExpr, body: CExpr, span?: Span): CLet => ({
+export const clet = (
+  name: Name,
+  value: CExpr,
+  body: CExpr,
+  span?: Span,
+  nameSpan?: Span,
+): CLet => ({
   kind: "CLet",
   name,
   value,
   body,
   span,
+  nameSpan,
 });
 export const cletrec = (
-  bindings: readonly { name: Name; value: CExpr }[],
+  bindings: readonly { name: Name; value: CExpr; nameSpan?: Span }[],
   body: CExpr,
   span?: Span,
 ): CLetRec => ({ kind: "CLetRec", bindings, body, span });
