@@ -10,12 +10,6 @@ $foreign.IO = {
     console.log(s);
     return null;
   },
-  args: (_) => {
-    const args = Deno.args;
-    let result = null;
-    for (let i = args.length - 1; i >= 0; i--) result = { h: args[i], t: result };
-    return result;
-  },
   exit: (code) => {
     Deno.exit(code);
   },

@@ -11,7 +11,6 @@ $foreign.IO = {
     console.log(s);
     return null;
   },
-  args: $unavailable("browser", "IO", "args"),
   exit: $unavailable("browser", "IO", "exit"),
   getEnv: $unavailable("browser", "IO", "getEnv"),
 };

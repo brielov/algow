@@ -459,4 +459,4 @@ let result =
   testDivideAndConquer                      -- 47
                                             -- Total: 61355
 
-result
+let main = args -> IO.printLine (Int.toString result)

@@ -311,4 +311,4 @@ let result =
   testLambdas                                -- 101
                                              -- Total: 1754
 
-result
+let main = args -> IO.printLine (Int.toString result)

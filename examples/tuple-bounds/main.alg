@@ -48,4 +48,4 @@ let result =
   newFirst + newSecond              -- 2 + 1 = 3
   -- Total: 10 + 5 + 6 + 2 + 42 + 6 + 1 + 3 = 75
 
-result
+let main = args -> IO.printLine (Int.toString result)

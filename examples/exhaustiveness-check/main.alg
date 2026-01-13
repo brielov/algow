@@ -75,4 +75,4 @@ let result =
   c1 + c2 + c3 + r1 + r2 + u1 + u2 + b1 + b2 + h1 + h2 + p1 + p2
   -- Expected: 3 + 5 + 4 + 1 + 0 + 42 + 99 + 1 + 0 + 10 + 0 + 6 + 9 = 180
 
-result
+let main = args -> IO.printLine (Int.toString result)

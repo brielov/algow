@@ -426,4 +426,4 @@ let result =
   testComplexTypes                          -- 44
                                             -- Total: 1151
 
-result
+let main = args -> IO.printLine (Int.toString result)

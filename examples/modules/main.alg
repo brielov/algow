@@ -195,4 +195,4 @@ let testCounter =
 
 let result = testMath + testVec2 + testStack + testQueue + testCounter
 
-result
+let main = args -> IO.printLine (Int.toString result)

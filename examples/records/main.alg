@@ -286,4 +286,4 @@ let result =
   testComplexRecordOps                      -- 386
                                             -- Total: 2149
 
-result
+let main = args -> IO.printLine (Int.toString result)

@@ -213,4 +213,4 @@ let result =
   testTreeAlgorithms                        -- 1345689
                                             -- Total: 1482028
 
-result
+let main = args -> IO.printLine (Int.toString result)

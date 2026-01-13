@@ -745,6 +745,25 @@ export type CodeGenOutput = {
 };
 
 /**
+ * Find the main function's JS name from declarations.
+ */
+const findMainName = (decls: readonly IR.IRDecl[]): string | null => {
+  for (const decl of decls) {
+    if (decl.kind === "IRDeclLet" && decl.name.original === "main") {
+      return nameToJs(decl.name);
+    }
+    if (decl.kind === "IRDeclLetRec") {
+      for (const b of decl.bindings) {
+        if (b.name.original === "main") {
+          return nameToJs(b.name);
+        }
+      }
+    }
+  }
+  return null;
+};
+
+/**
  * Generate JavaScript from IR program.
  */
 export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}): CodeGenOutput => {
@@ -756,20 +775,27 @@ export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}):
     genDecl(ctx, decl);
   }
 
-  // Generate main expression
-  let mainCode = "";
-  if (program.main) {
-    mainCode = genExpr(ctx, program.main);
-  }
+  // Find the main function
+  const mainName = findMainName(program.decls);
 
   // Combine runtime + generated code
   const runtime = getRuntime(target);
+
+  // Target-specific argv access
+  const argvExpr =
+    target === "deno"
+      ? "Deno.args"
+      : target === "browser" || target === "cloudflare"
+        ? "[]"
+        : "process.argv.slice(2)";
+
   const code = [
     runtime,
     "// Generated code",
     ...ctx.lines,
-    program.main ? `const $result = ${mainCode};` : "",
-    program.main ? "console.log($result);" : "",
+    // Build argv as a List (linked list) and call main
+    mainName ? `const $argv = ${argvExpr}.reduceRight((t, h) => ({ h, t }), null);` : "",
+    mainName ? `${mainName}($argv);` : "",
   ]
     .filter(Boolean)
     .join("\n");

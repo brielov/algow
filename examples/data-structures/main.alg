@@ -155,4 +155,4 @@ let testAssoc =
 
 let result = testBST + testStack + testQueue + testAssoc  -- 30
 
-result
+let main = args -> IO.printLine (Int.toString result)

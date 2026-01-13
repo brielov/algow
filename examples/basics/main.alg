@@ -311,4 +311,4 @@ let result =
   testIntConversion        -- 177
                            -- Total: 1233
 
-result
+let main = args -> IO.printLine (Int.toString result)

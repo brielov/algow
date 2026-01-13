@@ -51,4 +51,4 @@ let result =
   avg1 + avg2               -- 20 + 0 = 20
   -- Total: 20 + 4 + 20 = 44
 
-result
+let main = args -> IO.printLine (Int.toString result)

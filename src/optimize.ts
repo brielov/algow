@@ -2551,11 +2551,14 @@ const resolveTransitiveInlines = (env: InlineEnv): void => {
 
 /**
  * Collect trivial atom bindings from declarations (for global inlining).
+ * Never inline the 'main' function as it's the program entry point.
  */
 const collectGlobalInlines = (decls: readonly IR.IRDecl[]): InlineEnv => {
   const env: InlineEnv = new Map();
   for (const decl of decls) {
     if (decl.kind === "IRDeclLet" && decl.binding.kind === "IRBAtom") {
+      // Never inline 'main' - it's the entry point
+      if (decl.name.original === "main") continue;
       env.set(nameKey(decl.name), decl.binding.atom);
     }
   }

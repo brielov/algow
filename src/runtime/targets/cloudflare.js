@@ -10,7 +10,6 @@ $foreign.IO = {
     console.log(s);
     return null;
   },
-  args: (_) => null, // Workers don't have args, return empty list
   exit: $unavailable("cloudflare", "IO", "exit"),
   getEnv: (name) => {
     // Cloudflare Workers can access env via globalThis

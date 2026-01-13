@@ -70,4 +70,4 @@ let result =
   (if startsWithZeroOrOne [5, 2, 3] then 1 else 0)   -- 0
   -- Total: 1 + 0 + 1 + 1 + 0 + 1 + 1 + 42 + 0 + 0 + 1 + 1 + 0 + 1 + 1 + 0 = 51
 
-result
+let main = args -> IO.printLine (Int.toString result)

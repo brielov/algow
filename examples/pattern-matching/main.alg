@@ -460,4 +460,4 @@ let result =
   testMatchAsValue                           -- 276
                                              -- Total: 900
 
-result
+let main = args -> IO.printLine (Int.toString result)

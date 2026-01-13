@@ -10,12 +10,6 @@ $foreign.IO = {
     console.log(s);
     return null;
   },
-  args: (_) => {
-    const args = process.argv.slice(2);
-    let result = null;
-    for (let i = args.length - 1; i >= 0; i--) result = { h: args[i], t: result };
-    return result;
-  },
   exit: (code) => {
     process.exit(code);
   },

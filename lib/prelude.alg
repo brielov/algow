@@ -403,7 +403,6 @@ end
 module IO
   foreign print : string -> unit
   foreign printLine : string -> unit
-  foreign args : unit -> List string
   foreign exit : int -> unit
   foreign getEnv : string -> Maybe string
 end
