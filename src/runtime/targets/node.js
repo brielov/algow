@@ -18,8 +18,9 @@ $foreign.IO = {
   },
   getEnv: (name) => {
     const value = process.env[name];
-    return value === undefined ? null : [0, value];
+    return value === undefined ? [0] : [1, value];
   },
+  getArgs: process.argv.slice(2).reduceRight((t, h) => ({ h, t }), null),
 };
 
 $foreign.File = {

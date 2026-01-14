@@ -1168,22 +1168,13 @@ export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}):
   // Combine runtime + generated code wrapped in IIFE for encapsulation
   const runtime = getRuntime(target);
 
-  // Target-specific argv access
-  const argvExpr =
-    target === "deno"
-      ? "Deno.args"
-      : target === "browser" || target === "cloudflare"
-        ? "[]"
-        : "process.argv.slice(2)";
-
   // Build IIFE body
   const body = [
     runtime,
     "// Generated code",
     ...ctx.lines,
-    // Build argv as a List (linked list) and call main (await since functions are async)
-    mainName ? `const $argv = ${argvExpr}.reduceRight((t, h) => ({ h, t }), null);` : "",
-    mainName ? `await ${mainName}($argv);` : "",
+    // Call main with unit (null)
+    mainName ? `await ${mainName}(null);` : "",
   ]
     .filter(Boolean)
     .join("\n");

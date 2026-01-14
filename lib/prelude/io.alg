@@ -13,6 +13,7 @@ module IO
   foreign printLine : a -> unit
   foreign exit : int -> unit
   foreign getEnv : string -> Maybe string
+  foreign getArgs : List string
 end
 
 module Debug

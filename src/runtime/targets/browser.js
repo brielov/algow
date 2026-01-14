@@ -13,6 +13,7 @@ $foreign.IO = {
   },
   exit: $unavailable("browser", "IO", "exit"),
   getEnv: $unavailable("browser", "IO", "getEnv"),
+  getArgs: null,
 };
 
 // File system is not available in browser

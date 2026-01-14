@@ -16,8 +16,9 @@ $foreign.IO = {
   },
   getEnv: (name) => {
     const value = Deno.env.get(name);
-    return value === undefined ? null : [0, value];
+    return value === undefined ? [0] : [1, value];
   },
+  getArgs: Deno.args.reduceRight((t, h) => ({ h, t }), null),
 };
 
 // Map Deno errors to IOError

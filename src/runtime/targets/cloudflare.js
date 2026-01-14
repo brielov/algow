@@ -15,8 +15,9 @@ $foreign.IO = {
     // Cloudflare Workers can access env via globalThis
     // This requires the env to be bound in wrangler.toml
     const value = globalThis[name];
-    return value === undefined ? null : [0, String(value)];
+    return value === undefined ? [0] : [1, String(value)];
   },
+  getArgs: null,
 };
 
 // File system is not available in Cloudflare Workers
