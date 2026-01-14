@@ -371,9 +371,9 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
 
     case "SIf": {
       const cond = formatExpr(ctx, expr.cond, level, Prec.Lowest);
-      const thenBr = formatExpr(ctx, expr.thenBranch, level, Prec.Lowest);
-      const elseBr = formatExpr(ctx, expr.elseBranch, level, Prec.Lowest);
-      return `if ${cond} then ${thenBr} else ${elseBr}`;
+      const thenBr = formatExpr(ctx, expr.thenBranch, level + 1, Prec.Lowest);
+      const elseBr = formatExpr(ctx, expr.elseBranch, level + 1, Prec.Lowest);
+      return `if ${cond}\n${ind(level + 1)}then ${thenBr}\n${ind(level + 1)}else ${elseBr}`;
     }
 
     case "SMatch": {
@@ -404,9 +404,21 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
     case "SField":
       return `${formatExpr(ctx, expr.record, level, Prec.Atom)}.${expr.field}`;
 
-    case "SList":
+    case "SList": {
       if (expr.elements.length === 0) return "[]";
-      return `[${expr.elements.map((e) => formatExpr(ctx, e, level, Prec.Lowest)).join(", ")}]`;
+      const elements = expr.elements.map((e) => formatExpr(ctx, e, level + 1, Prec.Lowest));
+      const singleLine = `[${elements.join(", ")}]`;
+      // Keep short lists on one line
+      if (singleLine.length <= 100) return singleLine;
+      // Multi-line with leading commas
+      const [first, ...rest] = elements;
+      const lines = [`[ ${first}`];
+      for (const el of rest) {
+        lines.push(`${ind(level + 1)}, ${el}`);
+      }
+      lines.push(`${ind(level + 1)}]`);
+      return lines.join("\n");
+    }
 
     case "SPipe":
       return `${formatExpr(ctx, expr.left, level, Prec.Pipe)} |> ${formatExpr(ctx, expr.right, level, Prec.Pipe + 1)}`;
@@ -446,8 +458,12 @@ const formatLiteral = (lit: {
 }): string => {
   switch (lit.kind) {
     case "int":
-    case "float":
       return String(lit.value);
+    case "float": {
+      const s = String(lit.value);
+      // Ensure float always has decimal point (0 -> 0.0)
+      return s.includes(".") || s.includes("e") ? s : s + ".0";
+    }
     case "string":
       return JSON.stringify(lit.value);
     case "char":
