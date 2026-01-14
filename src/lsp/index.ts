@@ -17,11 +17,14 @@ export const startLspServer = (): void => {
   // Create message reader
   const reader = createMessageReader();
 
-  // Handle stdin data
-  process.stdin.on("data", (chunk: Buffer) => {
-    const messages = feedData(reader, chunk);
-    for (const message of messages) {
-      handleMessage(server, message);
+  // Handle stdin using readable event (more reliable than data event in bun)
+  process.stdin.on("readable", () => {
+    let chunk: Buffer | null;
+    while ((chunk = process.stdin.read() as Buffer | null) !== null) {
+      const messages = feedData(reader, chunk);
+      for (const message of messages) {
+        handleMessage(server, message);
+      }
     }
   });
 

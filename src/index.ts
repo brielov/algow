@@ -21,6 +21,7 @@ import {
 } from "./compile";
 import type { Diagnostic } from "./diagnostics";
 import { format } from "./format";
+import { startLspServer } from "./lsp";
 import { prelude } from "./prelude";
 
 // =============================================================================
@@ -421,8 +422,8 @@ program
 program
   .command("lsp")
   .description("Start the Language Server Protocol server")
-  .action(async () => {
-    const { startLspServer } = await import("./lsp");
+  .option("--stdio", "Use stdio transport (default, accepted for compatibility)")
+  .action(() => {
     startLspServer();
   });
 

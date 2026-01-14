@@ -3,7 +3,6 @@ import * as path from "path";
 import { workspace, window, commands, StatusBarAlignment, type ExtensionContext } from "vscode";
 import {
   LanguageClient,
-  TransportKind,
   type LanguageClientOptions,
   type ServerOptions,
 } from "vscode-languageclient/node";
@@ -63,18 +62,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     }
   }
 
-  // Server options
+  // Server options (stdio is default, no need to specify transport)
   const serverOptions: ServerOptions = {
-    run: {
-      command: serverCommand,
-      args: serverArgs,
-      transport: TransportKind.stdio,
-    },
-    debug: {
-      command: serverCommand,
-      args: serverArgs,
-      transport: TransportKind.stdio,
-    },
+    run: { command: serverCommand, args: serverArgs },
+    debug: { command: serverCommand, args: serverArgs },
   };
 
   // Client options
