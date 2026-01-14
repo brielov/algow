@@ -392,7 +392,9 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
 
     case "SRecord": {
       if (expr.fields.length === 0) return "{}";
-      const fields = expr.fields.map((f) => `${f.name} = ${formatExpr(ctx, f.value, level + 1, Prec.Lowest)}`);
+      const fields = expr.fields.map(
+        (f) => `${f.name} = ${formatExpr(ctx, f.value, level + 1, Prec.Lowest)}`,
+      );
       const singleLine = `{ ${fields.join(", ")} }`;
       // Keep short records on one line
       if (singleLine.length <= 80) return singleLine;
@@ -408,7 +410,9 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
 
     case "SRecordUpdate": {
       const rec = formatExpr(ctx, expr.record, level, Prec.Lowest);
-      const fields = expr.fields.map((f) => `${f.name} = ${formatExpr(ctx, f.value, level + 1, Prec.Lowest)}`);
+      const fields = expr.fields.map(
+        (f) => `${f.name} = ${formatExpr(ctx, f.value, level + 1, Prec.Lowest)}`,
+      );
       const singleLine = `{ ${rec} | ${fields.join(", ")} }`;
       // Keep short updates on one line
       if (singleLine.length <= 80) return singleLine;

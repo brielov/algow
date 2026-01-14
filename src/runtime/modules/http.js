@@ -3,7 +3,7 @@
 // Either tags: Left=0, Right=1
 
 // Convert Headers to Algow List (string, string)
-const $headersToList = (headers) => {
+const $Http_headersToList = (headers) => {
   let list = null;
   const entries = [...headers.entries()].reverse();
   for (const [key, value] of entries) {
@@ -13,11 +13,11 @@ const $headersToList = (headers) => {
 };
 
 // Make HTTP request
-const $httpRequest = async (url, options = {}) => {
+const $Http_request = async (url, options = {}) => {
   try {
     const response = await fetch(url, options);
     const body = await response.text();
-    const headers = $headersToList(response.headers);
+    const headers = $Http_headersToList(response.headers);
     if (!response.ok) {
       // Left HttpStatusError (tag 3)
       return [0, [3, response.status, body]];
@@ -38,19 +38,20 @@ const $httpRequest = async (url, options = {}) => {
   }
 };
 
-$foreign.Http = {
-  get: (url) => $httpRequest(url),
-  post: (url) => (body) =>
-    $httpRequest(url, {
-      method: "POST",
-      body,
-      headers: { "Content-Type": "text/plain" },
-    }),
-  put: (url) => (body) =>
-    $httpRequest(url, {
-      method: "PUT",
-      body,
-      headers: { "Content-Type": "text/plain" },
-    }),
-  delete: (url) => $httpRequest(url, { method: "DELETE" }),
-};
+const $Http_get = (url) => $Http_request(url);
+
+const $Http_post = (url) => (body) =>
+  $Http_request(url, {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "text/plain" },
+  });
+
+const $Http_put = (url) => (body) =>
+  $Http_request(url, {
+    method: "PUT",
+    body,
+    headers: { "Content-Type": "text/plain" },
+  });
+
+const $Http_delete = (url) => $Http_request(url, { method: "DELETE" });

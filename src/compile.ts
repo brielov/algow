@@ -261,8 +261,17 @@ export const compile = async (
   let code = output.code;
   if (minify) {
     const result = await terserMinify(code, {
-      compress: { dead_code: true, unused: true },
-      mangle: true,
+      compress: {
+        dead_code: true,
+        unused: true,
+        toplevel: true,
+        passes: 3, // Multiple passes for better DCE
+        pure_getters: true,
+        side_effects: true,
+      },
+      mangle: {
+        toplevel: true,
+      },
     });
     if (result.code) {
       code = result.code;

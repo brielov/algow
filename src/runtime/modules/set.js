@@ -1,30 +1,39 @@
 // Set module - cross-platform
-$foreign.Set = {
-  empty: new Set(),
-  singleton: (v) => new Set([v]),
-  insert: (v) => (s) => new Set(s).add(v),
-  delete: (v) => (s) => {
-    const s2 = new Set(s);
-    s2.delete(v);
-    return s2;
-  },
-  member: (v) => (s) => s.has(v),
-  size: (s) => s.size,
-  toList: (s) => {
-    let result = null;
-    for (const v of [...s].reverse()) result = { h: v, t: result };
-    return result;
-  },
-  fromList: (list) => {
-    const s = new Set();
-    let current = list;
-    while (current !== null) {
-      s.add(current.h);
-      current = current.t;
-    }
-    return s;
-  },
-  union: (s1) => (s2) => s1.union(s2),
-  intersect: (s1) => (s2) => s1.intersection(s2),
-  difference: (s1) => (s2) => s1.difference(s2),
+
+const $Set_empty = /*#__PURE__*/ new Set();
+
+const $Set_singleton = (v) => new Set([v]);
+
+const $Set_insert = (v) => (s) => new Set(s).add(v);
+
+const $Set_delete = (v) => (s) => {
+  const s2 = new Set(s);
+  s2.delete(v);
+  return s2;
 };
+
+const $Set_member = (v) => (s) => s.has(v);
+
+const $Set_size = (s) => s.size;
+
+const $Set_toList = (s) => {
+  let result = null;
+  for (const v of [...s].reverse()) result = { h: v, t: result };
+  return result;
+};
+
+const $Set_fromList = (list) => {
+  const s = new Set();
+  let current = list;
+  while (current !== null) {
+    s.add(current.h);
+    current = current.t;
+  }
+  return s;
+};
+
+const $Set_union = (s1) => (s2) => s1.union(s2);
+
+const $Set_intersect = (s1) => (s2) => s1.intersection(s2);
+
+const $Set_difference = (s1) => (s2) => s1.difference(s2);

@@ -1,7 +1,7 @@
 /**
  * Code Generation (Section 12)
  *
- * Generates JavaScript from ANF IR.
+ * Generates JavaScript from ANF IR with tree-shaking and effect analysis.
  *
  * Value representations (from SPEC.md):
  * - Lists: Nil → null, Cons h t → { h, t }
@@ -14,6 +14,7 @@
 import type * as IR from "./ir";
 import type { Name } from "./core";
 import { getRuntime, type Target, DEFAULT_TARGET } from "./runtime";
+import { analyzeEffects, type EffectAnalysis } from "./effects";
 
 // Re-export Target type for external use
 export type { Target } from "./runtime";
@@ -24,9 +25,6 @@ export { TARGETS, DEFAULT_TARGET, isValidTarget } from "./runtime";
 // =============================================================================
 
 type TagMap = Map<string, number>;
-
-/** Context determines how code should be generated */
-type GenContext = "expr" | "stmt";
 
 type CodeGenContext = {
   /** Current indentation level */
@@ -39,17 +37,20 @@ type CodeGenContext = {
   declaredNames: Set<string>;
   /** Counter for fresh scrutinee variables */
   scrutineeCounter: number;
-  /** Whether we're generating in expression or statement context */
-  genContext: GenContext;
+  /** Effect analysis results */
+  effects: EffectAnalysis;
+  /** Target platform */
+  target: Target;
 };
 
-const createContext = (): CodeGenContext => ({
+const createContext = (effects: EffectAnalysis, target: Target): CodeGenContext => ({
   indent: 0,
   lines: [],
   tagMap: new Map(),
   declaredNames: new Set(),
   scrutineeCounter: 0,
-  genContext: "stmt",
+  effects,
+  target,
 });
 
 const emit = (ctx: CodeGenContext, code: string): void => {
@@ -186,7 +187,7 @@ const genAtom = (_ctx: CodeGenContext, atom: IR.Atom): string => {
 // Binding Generation
 // =============================================================================
 
-const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
+const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding, declId?: number): string => {
   switch (binding.kind) {
     case "IRBAtom":
       return genAtom(ctx, binding.atom);
@@ -205,8 +206,11 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
       }
       const func = genAtom(ctx, binding.func);
       const arg = genAtom(ctx, binding.arg);
-      // Await function calls (all user functions are async)
-      return `await ${func}(${arg})`;
+      // Only await if the callee function is async
+      if (binding.func.kind === "AVar" && ctx.effects.asyncFunctions.has(binding.func.name.id)) {
+        return `await ${func}(${arg})`;
+      }
+      return `${func}(${arg})`;
     }
 
     case "IRBBinOp": {
@@ -253,15 +257,17 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
     }
 
     case "IRBLambda":
-      return genLambda(ctx, binding);
+      return genLambda(ctx, binding, declId);
 
     case "IRBForeign": {
+      const foreignName = `$${binding.module}_${binding.name}`;
+
       // Foreign function reference
       if (binding.args.length === 0) {
-        return `$foreign["${binding.module}"]["${binding.name}"]`;
+        return foreignName;
       }
       // Foreign function call with args
-      let result = `$foreign["${binding.module}"]["${binding.name}"]`;
+      let result = foreignName;
       for (const arg of binding.args) {
         result = `${result}(${genAtom(ctx, arg)})`;
       }
@@ -285,17 +291,19 @@ const genBinding = (ctx: CodeGenContext, binding: IR.IRBinding): string => {
   }
 };
 
-const genLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
+const genLambda = (ctx: CodeGenContext, binding: IR.IRBLambda, declId?: number): string => {
   const param = nameToJs(binding.param);
 
   // Check for tail recursion
   if (binding.tailRecursive) {
-    return genTailRecursiveLambda(ctx, binding);
+    return genTailRecursiveLambda(ctx, binding, declId);
   }
 
-  // Check if body requires await
-  const needsAwait = exprRequiresAwait(binding.body);
-  const asyncPrefix = needsAwait ? "async " : "";
+  // Check if this lambda is async based on effect analysis
+  // Use declId if provided (from declaration), otherwise fall back to param.id
+  const funcId = declId ?? binding.param.id;
+  const isAsync = ctx.effects.asyncFunctions.has(funcId);
+  const asyncPrefix = isAsync ? "async " : "";
 
   // Generate body using statement generation (includes return)
   ctx.indent++;
@@ -328,7 +336,79 @@ const genLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
   return `${asyncPrefix}(${param}) => {\n${body}\n${"  ".repeat(ctx.indent)}}`;
 };
 
-const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): string => {
+/**
+ * Generate a named function expression for self-recursive functions.
+ * This allows terser to eliminate unused recursive functions.
+ */
+const genNamedFunction = (
+  ctx: CodeGenContext,
+  fnName: string,
+  binding: IR.IRBLambda,
+  declId: number,
+): string => {
+  // Collect all parameters (curried function)
+  const params: string[] = [];
+  let current: IR.IRBLambda = binding;
+  let innerBody: IR.IRExpr = binding.body;
+
+  params.push(nameToJs(current.param));
+
+  // Flatten nested lambdas to get all params
+  while (innerBody.kind === "IRLet" && innerBody.binding.kind === "IRBLambda") {
+    params.push(nameToJs(innerBody.binding.param));
+    current = innerBody.binding;
+    innerBody = innerBody.binding.body;
+  }
+
+  // Check if async using the declaration ID
+  const isAsync = ctx.effects.asyncFunctions.has(declId);
+  const asyncPrefix = isAsync ? "async " : "";
+
+  // For single-param functions, generate: function name(p) { ... }
+  // For multi-param (curried), generate: function name(p1) { return function(p2) { ... }; }
+  if (params.length === 1) {
+    // Generate body
+    ctx.indent++;
+    const bodyLines: string[] = [];
+    const savedLines = ctx.lines;
+    const savedDeclared = new Set(ctx.declaredNames);
+    ctx.lines = bodyLines;
+
+    genExprAsStatements(ctx, binding.body);
+
+    ctx.lines = savedLines;
+    ctx.declaredNames = savedDeclared;
+    ctx.indent--;
+
+    const indentation = "  ".repeat(ctx.indent + 1);
+    const body = bodyLines.map((l) => indentation + l.trimStart()).join("\n");
+    return `${asyncPrefix}function ${fnName}(${params[0]}) {\n${body}\n${"  ".repeat(ctx.indent)}}`;
+  }
+
+  // Multi-param: wrap in curried arrow functions but use named function for outermost
+  // function name(p1) { return (p2) => (p3) => { ... }; }
+  ctx.indent++;
+  const bodyLines: string[] = [];
+  const savedLines = ctx.lines;
+  const savedDeclared = new Set(ctx.declaredNames);
+  ctx.lines = bodyLines;
+
+  genExprAsStatements(ctx, binding.body);
+
+  ctx.lines = savedLines;
+  ctx.declaredNames = savedDeclared;
+  ctx.indent--;
+
+  const indentation = "  ".repeat(ctx.indent + 1);
+  const body = bodyLines.map((l) => indentation + l.trimStart()).join("\n");
+  return `${asyncPrefix}function ${fnName}(${params[0]}) {\n${body}\n${"  ".repeat(ctx.indent)}}`;
+};
+
+const genTailRecursiveLambda = (
+  ctx: CodeGenContext,
+  binding: IR.IRBLambda,
+  declId?: number,
+): string => {
   const tco = binding.tailRecursive!;
   const params = tco.params.map(nameToJs);
 
@@ -338,9 +418,10 @@ const genTailRecursiveLambda = (ctx: CodeGenContext, binding: IR.IRBLambda): str
     innerBody = innerBody.binding.body;
   }
 
-  // Check if body requires await
-  const needsAwait = exprRequiresAwait(innerBody);
-  const asyncPrefix = needsAwait ? "async " : "";
+  // Check if this lambda is async
+  const funcId = declId ?? binding.param.id;
+  const isAsync = ctx.effects.asyncFunctions.has(funcId);
+  const asyncPrefix = isAsync ? "async " : "";
 
   // Generate loop body using statement generation
   ctx.indent += 2; // Account for function + while nesting
@@ -592,53 +673,6 @@ const genMatchAsStatements = (ctx: CodeGenContext, match: IR.IRMatch): void => {
 };
 
 // =============================================================================
-// Async Detection
-// =============================================================================
-
-/** Check if an expression requires await (contains function calls or async foreign) */
-const exprRequiresAwait = (expr: IR.IRExpr): boolean => {
-  switch (expr.kind) {
-    case "IRAtom":
-      return false;
-    case "IRLet":
-      return bindingRequiresAwait(expr.binding) || exprRequiresAwait(expr.body);
-    case "IRLetRec":
-      return (
-        expr.bindings.some((b) => bindingRequiresAwait(b.binding)) || exprRequiresAwait(expr.body)
-      );
-    case "IRMatch":
-      return expr.cases.some(
-        (c) => (c.guard && exprRequiresAwait(c.guard)) || exprRequiresAwait(c.body),
-      );
-  }
-};
-
-const bindingRequiresAwait = (binding: IR.IRBinding): boolean => {
-  switch (binding.kind) {
-    case "IRBAtom":
-    case "IRBBinOp":
-    case "IRBTuple":
-    case "IRBRecord":
-    case "IRBRecordUpdate":
-    case "IRBField":
-      return false;
-    case "IRBApp":
-      // Function applications require await (all user functions are async)
-      // Exception: constructor applications don't require await
-      return binding.func.kind !== "ACon";
-    case "IRBForeign":
-      return binding.isAsync;
-    case "IRBLambda":
-      // Lambda body may require await, but the lambda itself doesn't
-      return false;
-    case "IRBMatch":
-      return binding.cases.some(
-        (c) => (c.guard && exprRequiresAwait(c.guard)) || exprRequiresAwait(c.body),
-      );
-  }
-};
-
-// =============================================================================
 // Match Optimization Detection
 // =============================================================================
 
@@ -649,11 +683,7 @@ type TernaryMatch = {
   elseExpr: IR.IRExpr;
 };
 
-type SimpleMatch = {
-  kind: "simple";
-};
-
-type MatchOptimization = TernaryMatch | SimpleMatch | null;
+type MatchOptimization = TernaryMatch | null;
 
 /** Check if a match can be optimized to a ternary expression */
 const canOptimizeToTernary = (ctx: CodeGenContext, match: IR.IRMatch): MatchOptimization => {
@@ -719,6 +749,62 @@ const canOptimizeToTernary = (ctx: CodeGenContext, match: IR.IRMatch): MatchOpti
 // Match Generation
 // =============================================================================
 
+/** Check if match body requires await */
+const matchRequiresAwait = (ctx: CodeGenContext, match: IR.IRMatch): boolean => {
+  for (const case_ of match.cases) {
+    if (case_.guard && exprRequiresAwait(ctx, case_.guard)) return true;
+    if (exprRequiresAwait(ctx, case_.body)) return true;
+  }
+  return false;
+};
+
+/** Check if an expression requires await */
+const exprRequiresAwait = (ctx: CodeGenContext, expr: IR.IRExpr): boolean => {
+  switch (expr.kind) {
+    case "IRAtom":
+      return false;
+    case "IRLet":
+      return bindingRequiresAwait(ctx, expr.binding) || exprRequiresAwait(ctx, expr.body);
+    case "IRLetRec":
+      return (
+        expr.bindings.some((b) => bindingRequiresAwait(ctx, b.binding)) ||
+        exprRequiresAwait(ctx, expr.body)
+      );
+    case "IRMatch":
+      return matchRequiresAwait(ctx, expr);
+  }
+};
+
+const bindingRequiresAwait = (ctx: CodeGenContext, binding: IR.IRBinding): boolean => {
+  switch (binding.kind) {
+    case "IRBAtom":
+    case "IRBBinOp":
+    case "IRBTuple":
+    case "IRBRecord":
+    case "IRBRecordUpdate":
+    case "IRBField":
+      return false;
+    case "IRBApp":
+      // Only await if the callee is async
+      if (binding.func.kind === "AVar") {
+        return ctx.effects.asyncFunctions.has(binding.func.name.id);
+      }
+      return false;
+    case "IRBForeign":
+      return binding.isAsync;
+    case "IRBLambda":
+      // Lambda body may require await, but the lambda itself doesn't
+      return false;
+    case "IRBMatch":
+      return matchRequiresAwait(ctx, {
+        kind: "IRMatch",
+        scrutinee: binding.scrutinee,
+        cases: binding.cases,
+        type: binding.type,
+      });
+  }
+};
+
 const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   // Try ternary optimization first
   const ternaryOpt = canOptimizeToTernary(ctx, match);
@@ -727,9 +813,7 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
   }
 
   // Check if any case body requires await
-  const needsAwait = match.cases.some(
-    (c) => (c.guard && exprRequiresAwait(c.guard)) || exprRequiresAwait(c.body),
-  );
+  const needsAwait = matchRequiresAwait(ctx, match);
 
   // Generate optimized match
   return genMatchFull(ctx, match, needsAwait);
@@ -738,9 +822,6 @@ const genMatch = (ctx: CodeGenContext, match: IR.IRMatch): string => {
 /** Generate a ternary expression for simple two-branch matches */
 const genTernaryMatch = (ctx: CodeGenContext, opt: TernaryMatch): string => {
   // Generate then and else expressions
-  const savedContext = ctx.genContext;
-  ctx.genContext = "expr";
-
   const thenLines: string[] = [];
   const savedLines = ctx.lines;
   ctx.lines = thenLines;
@@ -752,12 +833,10 @@ const genTernaryMatch = (ctx: CodeGenContext, opt: TernaryMatch): string => {
   const elseResult = genExpr(ctx, opt.elseExpr);
   ctx.lines = savedLines;
 
-  ctx.genContext = savedContext;
-
   // If either branch has intermediate lines, fall back to IIFE
   if (thenLines.length > 0 || elseLines.length > 0) {
     // Check if await needed
-    const needsAwait = exprRequiresAwait(opt.thenExpr) || exprRequiresAwait(opt.elseExpr);
+    const needsAwait = exprRequiresAwait(ctx, opt.thenExpr) || exprRequiresAwait(ctx, opt.elseExpr);
     const asyncPrefix = needsAwait ? "async " : "";
     const awaitPrefix = needsAwait ? "await " : "";
 
@@ -1093,14 +1172,24 @@ const genDecl = (ctx: CodeGenContext, decl: IR.IRDecl): void => {
 
     case "IRDeclLet": {
       const jsName = nameToJs(decl.name);
-      const binding = genBinding(ctx, decl.binding);
+      const binding = genBinding(ctx, decl.binding, decl.name.id);
       emit(ctx, `const ${jsName} = ${binding};`);
       ctx.declaredNames.add(jsName);
       break;
     }
 
     case "IRDeclLetRec": {
-      // Declare all first
+      // Single self-recursive lambda: use named function expression for better DCE
+      if (decl.bindings.length === 1 && decl.bindings[0]!.binding.kind === "IRBLambda") {
+        const { name, binding } = decl.bindings[0]!;
+        const jsName = nameToJs(name);
+        const lambdaCode = genNamedFunction(ctx, jsName, binding as IR.IRBLambda, name.id);
+        emit(ctx, `const ${jsName} = ${lambdaCode};`);
+        ctx.declaredNames.add(jsName);
+        break;
+      }
+
+      // Multiple bindings (mutual recursion): use let + assign pattern
       for (const { name } of decl.bindings) {
         const jsName = nameToJs(name);
         if (!ctx.declaredNames.has(jsName)) {
@@ -1108,9 +1197,8 @@ const genDecl = (ctx: CodeGenContext, decl: IR.IRDecl): void => {
           ctx.declaredNames.add(jsName);
         }
       }
-      // Then assign
       for (const { name, binding } of decl.bindings) {
-        const bindingCode = genBinding(ctx, binding);
+        const bindingCode = genBinding(ctx, binding, name.id);
         emit(ctx, `${nameToJs(name)} = ${bindingCode};`);
       }
       break;
@@ -1132,17 +1220,19 @@ export type CodeGenOutput = {
 };
 
 /**
- * Find the main function's JS name from declarations.
+ * Find the main function's JS name and id from declarations.
  */
-const findMainName = (decls: readonly IR.IRDecl[]): string | null => {
+const findMain = (
+  decls: readonly IR.IRDecl[],
+): { jsName: string; id: number; isAsync: boolean } | null => {
   for (const decl of decls) {
     if (decl.kind === "IRDeclLet" && decl.name.text === "main") {
-      return nameToJs(decl.name);
+      return { jsName: nameToJs(decl.name), id: decl.name.id, isAsync: false };
     }
     if (decl.kind === "IRDeclLetRec") {
       for (const b of decl.bindings) {
         if (b.name.text === "main") {
-          return nameToJs(b.name);
+          return { jsName: nameToJs(b.name), id: b.name.id, isAsync: false };
         }
       }
     }
@@ -1155,7 +1245,11 @@ const findMainName = (decls: readonly IR.IRDecl[]): string | null => {
  */
 export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}): CodeGenOutput => {
   const { target = DEFAULT_TARGET } = options;
-  const ctx = createContext();
+
+  // Run effect analysis
+  const effects = analyzeEffects(program);
+
+  const ctx = createContext(effects, target);
 
   // Generate declarations
   for (const decl of program.decls) {
@@ -1163,24 +1257,44 @@ export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}):
   }
 
   // Find the main function
-  const mainName = findMainName(program.decls);
+  const main = findMain(program.decls);
+  const isMainAsync = main ? effects.asyncFunctions.has(main.id) : false;
 
-  // Combine runtime + generated code wrapped in IIFE for encapsulation
+  // Get full runtime - terser will eliminate unused functions
   const runtime = getRuntime(target);
 
-  // Build IIFE body
-  const body = [
-    runtime,
-    "// Generated code",
-    ...ctx.lines,
-    // Call main with unit (null)
-    mainName ? `await ${mainName}(null);` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  // Build output
+  const parts: string[] = ['"use strict";'];
 
-  // Wrap in async IIFE
-  const code = `(async () => {\n"use strict";\n${body}\n})();\n`;
+  // Add runtime
+  parts.push("");
+  parts.push("// Runtime");
+  parts.push(runtime);
+
+  // Add generated code
+  if (ctx.lines.length > 0) {
+    parts.push("");
+    parts.push("// Generated code");
+    parts.push(...ctx.lines);
+  }
+
+  // Call main with unit (null)
+  if (main) {
+    parts.push("");
+    if (isMainAsync) {
+      parts.push(`await ${main.jsName}(null);`);
+    } else {
+      parts.push(`${main.jsName}(null);`);
+    }
+  }
+
+  // If async, wrap in IIFE to avoid CommonJS + top-level await conflict
+  if (isMainAsync) {
+    const code = `(async () => {\n${parts.join("\n")}\n})();\n`;
+    return { code };
+  }
+
+  const code = parts.join("\n") + "\n";
 
   return { code };
 };
@@ -1194,7 +1308,15 @@ export const generateExprJS = (
   options: CodeGenOptions = {},
 ): CodeGenOutput => {
   const { target = DEFAULT_TARGET } = options;
-  const ctx = createContext();
+
+  // Create a minimal program for effect analysis
+  const program: IR.IRProgram = {
+    decls: typeDecls,
+    main: expr,
+  };
+  const effects = analyzeEffects(program);
+
+  const ctx = createContext(effects, target);
 
   // Process type declarations for tag assignments
   for (const decl of typeDecls) {
@@ -1207,17 +1329,30 @@ export const generateExprJS = (
 
   const result = genExpr(ctx, expr);
 
+  // Get full runtime - terser will eliminate unused functions
   const runtime = getRuntime(target);
-  const body = [
-    runtime,
-    "// Generated code",
-    ...ctx.lines,
-    `const $result = ${result};`,
-    "console.log($result);",
-  ].join("\n");
 
-  // Wrap in async IIFE
-  const code = `(async () => {\n"use strict";\n${body}\n})();\n`;
+  // Check if expression requires await
+  const needsAwait = exprRequiresAwait(ctx, expr);
 
-  return { code };
+  // Build output
+  const parts: string[] = ['"use strict";'];
+
+  parts.push("");
+  parts.push("// Runtime");
+  parts.push(runtime);
+
+  parts.push("");
+  parts.push("// Generated code");
+  parts.push(...ctx.lines);
+  parts.push(`const $result = ${result};`);
+  parts.push("console.log($result);");
+
+  // If async, wrap in top-level await IIFE for compatibility
+  if (needsAwait) {
+    const code = `(async () => {\n${parts.join("\n")}\n})();\n`;
+    return { code };
+  }
+
+  return { code: parts.join("\n") + "\n" };
 };

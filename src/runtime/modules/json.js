@@ -3,7 +3,7 @@
 // Either tags: Left=0, Right=1
 
 // Convert JS value to JsonValue
-const $jsToJson = (v) => {
+const $Json_jsToJson = (v) => {
   if (v === null) return [0]; // JsonNull
   if (typeof v === "boolean") return [1, v]; // JsonBool
   if (typeof v === "number") return [2, v]; // JsonNumber
@@ -12,7 +12,7 @@ const $jsToJson = (v) => {
     // JsonArray - convert JS array to Algow List of JsonValue
     let list = null;
     for (let i = v.length - 1; i >= 0; i--) {
-      list = { h: $jsToJson(v[i]), t: list };
+      list = { h: $Json_jsToJson(v[i]), t: list };
     }
     return [4, list];
   }
@@ -22,7 +22,7 @@ const $jsToJson = (v) => {
     let list = null;
     for (let i = entries.length - 1; i >= 0; i--) {
       const [key, val] = entries[i];
-      list = { h: [key, $jsToJson(val)], t: list };
+      list = { h: [key, $Json_jsToJson(val)], t: list };
     }
     return [5, list];
   }
@@ -30,7 +30,7 @@ const $jsToJson = (v) => {
 };
 
 // Convert Algow value to JS value for JSON.stringify
-const $algowToJs = (v) => {
+const $Json_algowToJs = (v) => {
   // null = Nil or Nothing
   if (v === null) return null;
 
@@ -42,7 +42,7 @@ const $algowToJs = (v) => {
     const arr = [];
     let cur = v;
     while (cur !== null) {
-      arr.push($algowToJs(cur.h));
+      arr.push($Json_algowToJs(cur.h));
       cur = cur.t;
     }
     return arr;
@@ -56,30 +56,29 @@ const $algowToJs = (v) => {
       // ADT: encode as { _tag: number, ...fields }
       const obj = { _tag: v[0] };
       for (let i = 1; i < v.length; i++) {
-        obj["_" + (i - 1)] = $algowToJs(v[i]);
+        obj["_" + (i - 1)] = $Json_algowToJs(v[i]);
       }
       return obj;
     }
     // Tuple: encode as array
-    return v.map($algowToJs);
+    return v.map($Json_algowToJs);
   }
 
   // Record: plain object
   const obj = {};
   for (const key of Object.keys(v)) {
-    obj[key] = $algowToJs(v[key]);
+    obj[key] = $Json_algowToJs(v[key]);
   }
   return obj;
 };
 
-$foreign.Json = {
-  decode: (s) => {
-    try {
-      const parsed = JSON.parse(s);
-      return [1, $jsToJson(parsed)]; // Right JsonValue
-    } catch (e) {
-      return [0, e.message]; // Left string
-    }
-  },
-  encode: (v) => JSON.stringify($algowToJs(v)),
+const $Json_decode = (s) => {
+  try {
+    const parsed = JSON.parse(s);
+    return [1, $Json_jsToJson(parsed)]; // Right JsonValue
+  } catch (e) {
+    return [0, e.message]; // Left string
+  }
 };
+
+const $Json_encode = (v) => JSON.stringify($Json_algowToJs(v));

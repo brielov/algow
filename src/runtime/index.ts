@@ -1,13 +1,11 @@
 /**
- * Runtime Builder
+ * Runtime Module
  *
- * Assembles the runtime from modular components based on the target platform.
- * All runtimes are imported as text for bundling compatibility.
+ * Provides runtime code for each target platform.
+ * All functions use $-prefixed names for terser DCE compatibility.
  */
 
-// Import runtime modules as text (works with bun build --compile)
-// Bun's `with { type: "text" }` imports files as strings, but TypeScript
-// doesn't recognize this, so we cast to string to satisfy the type checker.
+// Import runtime modules as text
 import _base from "./base.js" with { type: "text" };
 import _string from "./modules/string.js" with { type: "text" };
 import _char from "./modules/char.js" with { type: "text" };
@@ -32,30 +30,6 @@ import _denoTarget from "./targets/deno.js" with { type: "text" };
 import _browserTarget from "./targets/browser.js" with { type: "text" };
 import _cloudflareTarget from "./targets/cloudflare.js" with { type: "text" };
 
-const base = _base as string;
-const string = _string as string;
-const char = _char as string;
-const int = _int as string;
-const float = _float as string;
-const debug = _debug as string;
-const map = _map as string;
-const set = _set as string;
-const path = _path as string;
-const json = _json as string;
-const http = _http as string;
-const bool = _bool as string;
-const random = _random as string;
-const duration = _duration as string;
-const date = _date as string;
-const time = _time as string;
-const datetime = _datetime as string;
-const test = _test as string;
-const regex = _regex as string;
-const nodeTarget = _nodeTarget as string;
-const denoTarget = _denoTarget as string;
-const browserTarget = _browserTarget as string;
-const cloudflareTarget = _cloudflareTarget as string;
-
 export type Target = "node" | "deno" | "browser" | "cloudflare";
 
 export const TARGETS: readonly Target[] = ["node", "deno", "browser", "cloudflare"] as const;
@@ -66,39 +40,40 @@ export const isValidTarget = (target: string): target is Target => {
   return TARGETS.includes(target as Target);
 };
 
-// Cross-platform modules shared by all targets
-const crossPlatform: string = [
-  base,
-  string,
-  char,
-  int,
-  float,
-  debug,
-  map,
-  set,
-  path,
-  json,
-  http,
-  bool,
-  random,
-  duration,
-  date,
-  time,
-  datetime,
-  test,
-  regex,
+// Cross-platform modules (shared across all targets)
+const crossPlatform = [
+  _base,
+  _string,
+  _char,
+  _int,
+  _float,
+  _debug,
+  _map,
+  _set,
+  _path,
+  _json,
+  _http,
+  _bool,
+  _random,
+  _duration,
+  _date,
+  _time,
+  _datetime,
+  _test,
+  _regex,
 ].join("\n");
 
-// Pre-built runtimes for each target
+// Full runtime for each target (cross-platform + target-specific)
 const RUNTIMES: Record<Target, string> = {
-  node: `${crossPlatform}\n${nodeTarget}`,
-  deno: `${crossPlatform}\n${denoTarget}`,
-  browser: `${crossPlatform}\n${browserTarget}`,
-  cloudflare: `${crossPlatform}\n${cloudflareTarget}`,
+  node: `${crossPlatform}\n${_nodeTarget}`,
+  deno: `${crossPlatform}\n${_denoTarget}`,
+  browser: `${crossPlatform}\n${_browserTarget}`,
+  cloudflare: `${crossPlatform}\n${_cloudflareTarget}`,
 };
 
 /**
- * Get the runtime code for a specific target platform.
+ * Get the full runtime code for a target.
+ * Terser with toplevel=true will eliminate unused functions.
  */
 export const getRuntime = (target: Target): string => {
   return RUNTIMES[target];

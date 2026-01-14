@@ -1,41 +1,41 @@
 // Target: Cloudflare Workers
 // Limited IO, no File/Dir access
 
-$foreign.IO = {
-  print: (v) => {
-    console.log($show(v));
-    return null;
-  },
-  printLine: (v) => {
-    console.log($show(v));
-    return null;
-  },
-  exit: $unavailable("cloudflare", "IO", "exit"),
-  getEnv: (name) => {
-    // Cloudflare Workers can access env via globalThis
-    // This requires the env to be bound in wrangler.toml
-    const value = globalThis[name];
-    return value === undefined ? [0] : [1, String(value)];
-  },
-  getArgs: null,
+// IO module
+const $IO_print = (v) => {
+  console.log($show(v));
+  return null;
 };
 
-// File system is not available in Cloudflare Workers
-$foreign.File = {
-  read: $unavailable("cloudflare", "File", "read"),
-  write: $unavailable("cloudflare", "File", "write"),
-  append: $unavailable("cloudflare", "File", "append"),
-  remove: $unavailable("cloudflare", "File", "remove"),
-  copy: $unavailable("cloudflare", "File", "copy"),
-  rename: $unavailable("cloudflare", "File", "rename"),
-  touch: $unavailable("cloudflare", "File", "touch"),
-  exists: $unavailable("cloudflare", "File", "exists"),
-  size: $unavailable("cloudflare", "File", "size"),
+const $IO_printLine = (v) => {
+  console.log($show(v));
+  return null;
 };
 
-$foreign.Dir = {
-  create: $unavailable("cloudflare", "Dir", "create"),
-  remove: $unavailable("cloudflare", "Dir", "remove"),
-  list: $unavailable("cloudflare", "Dir", "list"),
-  exists: $unavailable("cloudflare", "Dir", "exists"),
+const $IO_exit = $unavailable("cloudflare", "IO", "exit");
+
+const $IO_getEnv = (name) => {
+  // Cloudflare Workers can access env via globalThis
+  // This requires the env to be bound in wrangler.toml
+  const value = globalThis[name];
+  return value === undefined ? [0] : [1, String(value)];
 };
+
+const $IO_getArgs = null;
+
+// File module - not available in Cloudflare Workers
+const $File_read = $unavailable("cloudflare", "File", "read");
+const $File_write = $unavailable("cloudflare", "File", "write");
+const $File_append = $unavailable("cloudflare", "File", "append");
+const $File_remove = $unavailable("cloudflare", "File", "remove");
+const $File_copy = $unavailable("cloudflare", "File", "copy");
+const $File_rename = $unavailable("cloudflare", "File", "rename");
+const $File_touch = $unavailable("cloudflare", "File", "touch");
+const $File_exists = $unavailable("cloudflare", "File", "exists");
+const $File_size = $unavailable("cloudflare", "File", "size");
+
+// Dir module - not available in Cloudflare Workers
+const $Dir_create = $unavailable("cloudflare", "Dir", "create");
+const $Dir_remove = $unavailable("cloudflare", "Dir", "remove");
+const $Dir_list = $unavailable("cloudflare", "Dir", "list");
+const $Dir_exists = $unavailable("cloudflare", "Dir", "exists");

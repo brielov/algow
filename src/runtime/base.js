@@ -1,8 +1,6 @@
-// Algow Runtime - Base
-// These utilities are injected into generated code, not used directly here
-/* eslint-disable no-unused-vars */
+// Algow Runtime - Base Functions
+// Each function is a standalone const for tree-shaking
 
-// Deep structural equality
 const $eq = (a, b) => {
   if (a === b) return true;
   if (typeof a !== typeof b) return false;
@@ -26,25 +24,14 @@ const $eq = (a, b) => {
   return keysA.every((k) => k in b && $eq(a[k], b[k]));
 };
 
-// Map errno codes to IOError constructors
-// IOError = FileNotFound(0) | PermissionDenied(1) | IsDirectory(2) | NotDirectory(3) | AlreadyExists(4) | NotEmpty(5) | UnknownError(6)
-const $ioError = (err, path) => {
-  const code = err.code;
-  if (code === "ENOENT") return [0, path]; // FileNotFound
-  if (code === "EACCES" || code === "EPERM") return [1, path]; // PermissionDenied
-  if (code === "EISDIR") return [2, path]; // IsDirectory
-  if (code === "ENOTDIR") return [3, path]; // NotDirectory
-  if (code === "EEXIST") return [4, path]; // AlreadyExists
-  if (code === "ENOTEMPTY") return [5, path]; // NotEmpty
-  return [6, err.message]; // UnknownError
+const $showInner = (v) => {
+  if (typeof v === "string") {
+    // Use split/join instead of regex to avoid parser issues
+    return '"' + v.split("\\").join("\\\\").split('"').join('\\"') + '"';
+  }
+  return $show(v);
 };
 
-// Stub generator for unavailable features
-const $unavailable = (target, module, fn) => () => {
-  throw new Error(`${module}.${fn} is not available in target "${target}"`);
-};
-
-// Convert any Algow value to a printable string
 const $show = (v) => {
   // Primitives
   if (typeof v === "string") return v;
@@ -86,11 +73,17 @@ const $show = (v) => {
   return "{ " + fields + " }";
 };
 
-// Inner show (for nested values) - strings are quoted
-const $showInner = (v) => {
-  if (typeof v === "string") return '"' + v.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
-  return $show(v);
+const $ioError = (err, path) => {
+  const code = err.code;
+  if (code === "ENOENT") return [0, path]; // FileNotFound
+  if (code === "EACCES" || code === "EPERM") return [1, path]; // PermissionDenied
+  if (code === "EISDIR") return [2, path]; // IsDirectory
+  if (code === "ENOTDIR") return [3, path]; // NotDirectory
+  if (code === "EEXIST") return [4, path]; // AlreadyExists
+  if (code === "ENOTEMPTY") return [5, path]; // NotEmpty
+  return [6, err.message]; // UnknownError
 };
 
-// Foreign function registry
-const $foreign = {};
+const $unavailable = (target, module, fn) => () => {
+  throw new Error(`${module}.${fn} is not available in target "${target}"`);
+};

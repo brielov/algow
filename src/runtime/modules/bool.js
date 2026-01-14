@@ -1,7 +1,9 @@
 // Bool module - cross-platform
-$foreign.Bool = {
-  negate: (a) => !a,
-  both: (a) => (b) => a && b,
-  either: (a) => (b) => a || b,
-  xor: (a) => (b) => (a && !b) || (!a && b),
-};
+
+const $Bool_negate = (a) => !a;
+
+const $Bool_both = (a) => (b) => a && b;
+
+const $Bool_either = (a) => (b) => a || b;
+
+const $Bool_xor = (a) => (b) => (a && !b) || (!a && b);

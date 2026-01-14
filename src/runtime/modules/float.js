@@ -1,29 +1,50 @@
 // Float module - cross-platform
-$foreign.Float = {
-  add: (a) => (b) => a + b,
-  sub: (a) => (b) => a - b,
-  mul: (a) => (b) => a * b,
-  div: (a) => (b) => a / b,
-  neg: (a) => -a,
-  abs: (a) => Math.abs(a),
-  eq: (a) => (b) => a === b,
-  lt: (a) => (b) => a < b,
-  le: (a) => (b) => a <= b,
-  gt: (a) => (b) => a > b,
-  ge: (a) => (b) => a >= b,
-  floor: (a) => Math.floor(a),
-  ceil: (a) => Math.ceil(a),
-  round: (a) => Math.round(a),
-  sqrt: (a) => Math.sqrt(a),
-  pow: (a) => (b) => Math.pow(a, b),
-  sin: (a) => Math.sin(a),
-  cos: (a) => Math.cos(a),
-  tan: (a) => Math.tan(a),
-  log: (a) => Math.log(a),
-  exp: (a) => Math.exp(a),
-  toString: (a) => String(a),
-  fromString: (s) => {
-    const n = parseFloat(s);
-    return Number.isNaN(n) ? [0] : [1, n];
-  },
+
+const $Float_add = (a) => (b) => a + b;
+
+const $Float_sub = (a) => (b) => a - b;
+
+const $Float_mul = (a) => (b) => a * b;
+
+const $Float_div = (a) => (b) => a / b;
+
+const $Float_neg = (a) => -a;
+
+const $Float_abs = (a) => Math.abs(a);
+
+const $Float_eq = (a) => (b) => a === b;
+
+const $Float_lt = (a) => (b) => a < b;
+
+const $Float_le = (a) => (b) => a <= b;
+
+const $Float_gt = (a) => (b) => a > b;
+
+const $Float_ge = (a) => (b) => a >= b;
+
+const $Float_floor = (a) => Math.floor(a);
+
+const $Float_ceil = (a) => Math.ceil(a);
+
+const $Float_round = (a) => Math.round(a);
+
+const $Float_sqrt = (a) => Math.sqrt(a);
+
+const $Float_pow = (a) => (b) => Math.pow(a, b);
+
+const $Float_sin = (a) => Math.sin(a);
+
+const $Float_cos = (a) => Math.cos(a);
+
+const $Float_tan = (a) => Math.tan(a);
+
+const $Float_log = (a) => Math.log(a);
+
+const $Float_exp = (a) => Math.exp(a);
+
+const $Float_toString = (a) => String(a);
+
+const $Float_fromString = (s) => {
+  const n = parseFloat(s);
+  return Number.isNaN(n) ? [0] : [1, n];
 };
