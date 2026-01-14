@@ -16,9 +16,17 @@ import _time from "../lib/prelude/time.alg" with { type: "text" };
 import type { SourceFile } from "./compile";
 
 /** Combined prelude content */
-export const preludeContent = [_core, _primitives, _io, _data, _http, _time, _random, _regex, _test].join(
-  "\n",
-);
+export const preludeContent = [
+  _core,
+  _primitives,
+  _io,
+  _data,
+  _http,
+  _time,
+  _random,
+  _regex,
+  _test,
+].join("\n");
 
 /** Prelude as a SourceFile */
 export const prelude: SourceFile = { path: "<prelude>", content: preludeContent };

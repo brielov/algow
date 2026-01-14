@@ -1,7 +1,6 @@
 // Algow Runtime - Base
 // These utilities are injected into generated code, not used directly here
 /* eslint-disable no-unused-vars */
-"use strict";
 
 // Deep structural equality
 const $eq = (a, b) => {

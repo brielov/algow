@@ -53,8 +53,7 @@ $foreign.Regex = {
     return toList(matches);
   },
 
-  replace: (pattern) => (replacement) => (s) =>
-    s.replace(parsePattern(pattern), replacement),
+  replace: (pattern) => (replacement) => (s) => s.replace(parsePattern(pattern), replacement),
 
   replaceAll: (pattern) => (replacement) => (s) =>
     s.replaceAll(parsePattern(pattern, "g"), replacement),
@@ -68,7 +67,7 @@ $foreign.Regex = {
     const head = parts.slice(0, limit - 1);
     const tail = parts.slice(limit - 1).join(
       // Re-match to get the actual delimiter for rejoining
-      s.match(parsePattern(pattern))?.[0] ?? ""
+      s.match(parsePattern(pattern))?.[0] ?? "",
     );
     return toList([...head, tail]);
   },

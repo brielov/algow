@@ -1165,7 +1165,7 @@ export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}):
   // Find the main function
   const mainName = findMainName(program.decls);
 
-  // Combine runtime + generated code
+  // Combine runtime + generated code wrapped in IIFE for encapsulation
   const runtime = getRuntime(target);
 
   // Target-specific argv access
@@ -1176,7 +1176,8 @@ export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}):
         ? "[]"
         : "process.argv.slice(2)";
 
-  const code = [
+  // Build IIFE body
+  const body = [
     runtime,
     "// Generated code",
     ...ctx.lines,
@@ -1186,6 +1187,9 @@ export const generateJS = (program: IR.IRProgram, options: CodeGenOptions = {}):
   ]
     .filter(Boolean)
     .join("\n");
+
+  // Wrap in async IIFE
+  const code = `(async () => {\n"use strict";\n${body}\n})();\n`;
 
   return { code };
 };
@@ -1213,13 +1217,16 @@ export const generateExprJS = (
   const result = genExpr(ctx, expr);
 
   const runtime = getRuntime(target);
-  const code = [
+  const body = [
     runtime,
     "// Generated code",
     ...ctx.lines,
     `const $result = ${result};`,
     "console.log($result);",
   ].join("\n");
+
+  // Wrap in async IIFE
+  const code = `(async () => {\n"use strict";\n${body}\n})();\n`;
 
   return { code };
 };
