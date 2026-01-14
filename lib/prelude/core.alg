@@ -111,6 +111,12 @@ module Maybe
         when Nothing -> Nil
         when Just x -> Cons x Nil
       end
+  let toEither =
+    err m ->
+      match m
+        when Nothing -> Left err
+        when Just x -> Right x
+      end
 end
 
 module Either
@@ -157,6 +163,12 @@ module Either
       match m
         when Nothing -> Left err
         when Just x -> Right x
+      end
+  let toMaybe =
+    e ->
+      match e
+        when Left a -> Nothing
+        when Right b -> Just b
       end
 end
 
@@ -358,4 +370,11 @@ module List
     end
   let intercalate =
     sep xss -> concat (intersperse sep xss)
+  let rec forEach = f xs ->
+    match xs
+      when Nil -> ()
+      when Cons x rest ->
+        let unused = f x in
+        forEach f rest
+    end
 end
