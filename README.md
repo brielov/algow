@@ -32,7 +32,7 @@ A small, experimental programming language with Hindley-Milner type inference th
 - A-Normal Form intermediate representation
 - Basic optimizations (constant folding, dead code elimination)
 - Comprehensive standard library (prelude)
-- Required `main : List String -> a` entry point with command-line arguments
+- Required `main : unit -> a` entry point (use `IO.getArgs` for command-line arguments)
 
 ## Quick Start
 

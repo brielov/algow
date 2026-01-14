@@ -79,30 +79,21 @@ type ParsedFile = {
 
 /**
  * Check if a type is a valid main signature.
- * Main must be a function. If the parameter type is fully resolved,
- * it must be List String. If it's a type variable (polymorphic), we accept it.
+ * Main must be a function that takes unit: `unit -> a`
+ * If the parameter type is a type variable (polymorphic), we also accept it.
  */
 const isValidMainSignature = (type: Type): boolean => {
   if (type.kind !== "TFun") return false;
 
-  // Check param is List String or a type variable
   const param = type.param;
 
   // Type variable is ok (polymorphic main)
   if (param.kind === "TVar") return true;
 
-  // If not TApp, reject (we already handled TVar above)
-  if (param.kind !== "TApp") return false;
+  // Must be unit
+  if (param.kind !== "TCon") return false;
 
-  // Must be List String (type system uses lowercase "string")
-  if (param.con.kind !== "TCon" || param.con.name !== "List") return false;
-
-  // List argument can be String/string or a type variable
-  if (param.arg.kind === "TVar") return true;
-  if (param.arg.kind !== "TCon") return false;
-
-  // Accept both "String" and "string" (internal representation)
-  return param.arg.name === "String" || param.arg.name === "string";
+  return param.name === "unit";
 };
 
 /**
@@ -224,7 +215,7 @@ export const compile = async (
   if (!mainScheme) {
     allDiagnostics.push({
       severity: "error",
-      message: "No 'main' function found. Every program must define: main : List String -> a",
+      message: "No 'main' function found. Every program must define: main : unit -> a",
       start: 0,
       end: 0,
     });
@@ -235,7 +226,7 @@ export const compile = async (
   if (!isValidMainSignature(mainType)) {
     allDiagnostics.push({
       severity: "error",
-      message: `'main' must have signature 'List String -> a', but got: ${typeToString(mainType)}`,
+      message: `'main' must have signature 'unit -> a', but got: ${typeToString(mainType)}`,
       start: 0,
       end: 0,
     });
