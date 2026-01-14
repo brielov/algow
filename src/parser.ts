@@ -142,7 +142,23 @@ const isLambdaStart = (state: ParserState): boolean => {
   const savedPos = state.lexer.pos;
   const savedCurrent = state.current;
 
-  while (at(state, TokenKind.Lower)) {
+  // Check for () -> ... (unit parameter)
+  if (at(state, TokenKind.LParen)) {
+    advance(state);
+    if (at(state, TokenKind.RParen)) {
+      advance(state);
+      const isLambda = at(state, TokenKind.Arrow);
+      state.lexer.pos = savedPos;
+      state.current = savedCurrent;
+      return isLambda;
+    }
+    state.lexer.pos = savedPos;
+    state.current = savedCurrent;
+    return false;
+  }
+
+  // Check for _ -> ... or name -> ... patterns
+  while (at(state, TokenKind.Lower) || at(state, TokenKind.Underscore)) {
     advance(state);
   }
 
@@ -154,13 +170,32 @@ const isLambdaStart = (state: ParserState): boolean => {
   return isLambda;
 };
 
+let wildcardCounter = 0;
+
 const parseLambda = (state: ParserState): S.SAbs => {
   const start = state.current[1];
   const params: S.SParam[] = [];
 
-  while (at(state, TokenKind.Lower) && !at(state, TokenKind.Arrow)) {
-    const token = advance(state);
-    params.push(S.sparam(S.unresolvedName(text(state, token), tokenSpan(state, token))));
+  // Handle () -> ... (unit parameter)
+  if (at(state, TokenKind.LParen)) {
+    const lparenToken = advance(state);
+    expect(state, TokenKind.RParen, "expected ')'");
+    const name = `$unit${wildcardCounter++}`;
+    params.push(S.sparam(S.unresolvedName(name, tokenSpan(state, lparenToken))));
+  } else {
+    // Handle regular parameters and wildcards
+    while (
+      (at(state, TokenKind.Lower) || at(state, TokenKind.Underscore)) &&
+      !at(state, TokenKind.Arrow)
+    ) {
+      const token = advance(state);
+      if (token[0] === TokenKind.Underscore) {
+        const name = `$_${wildcardCounter++}`;
+        params.push(S.sparam(S.unresolvedName(name, tokenSpan(state, token))));
+      } else {
+        params.push(S.sparam(S.unresolvedName(text(state, token), tokenSpan(state, token))));
+      }
+    }
   }
 
   expect(state, TokenKind.Arrow, "expected '->'");
@@ -923,13 +958,27 @@ const parsePrefixImpl = (state: ParserState, allowLambda: boolean): S.SExpr => {
       );
     }
 
+    case TokenKind.Underscore: {
+      if (allowLambda && isLambdaStart(state)) {
+        return parseLambda(state);
+      }
+      error(state, "unexpected token: Underscore");
+      const errorSpan = tokenSpan(state, state.current);
+      advance(state);
+      return S.sint(nextNodeId(state), 0, errorSpan);
+    }
+
     case TokenKind.Upper: {
       advance(state);
       return S.scon(nextNodeId(state), text(state, token), tokenSpan(state, token));
     }
 
-    case TokenKind.LParen:
+    case TokenKind.LParen: {
+      if (allowLambda && isLambdaStart(state)) {
+        return parseLambda(state);
+      }
       return parseParenOrTuple(state);
+    }
 
     case TokenKind.Minus: {
       advance(state);
