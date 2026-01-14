@@ -14,6 +14,7 @@ import {
   tStr,
   tChar,
   tBool,
+  tUnit,
   ttuple,
   trecord,
   freshTypeVar,
@@ -112,6 +113,10 @@ export const inferPattern = (
       }
 
       case "CPTuple": {
+        // Empty tuple pattern () matches unit
+        if (pat.elements.length === 0) {
+          return unify(ctx, expected, tUnit, pat.span);
+        }
         if (expected.kind === "TTuple") {
           if (expected.elements.length !== pat.elements.length) {
             addError(ctx, `Tuple pattern arity mismatch`, pat.span);

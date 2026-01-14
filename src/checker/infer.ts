@@ -16,6 +16,7 @@ import {
   tStr,
   tChar,
   tBool,
+  tUnit,
   tfun,
   ttuple,
   trecord,
@@ -294,6 +295,11 @@ const inferCon = (ctx: CheckContext, env: TypeEnv, expr: C.CCon): InferResult =>
 };
 
 const inferTuple = (ctx: CheckContext, env: TypeEnv, expr: C.CTuple): InferResult => {
+  // Empty tuple () is unit
+  if (expr.elements.length === 0) {
+    return [new Map(), tUnit, []];
+  }
+
   let subst: Subst = new Map();
   const allConstraints: Constraint[] = [];
   const elementTypes: Type[] = [];

@@ -295,7 +295,7 @@ export const instantiate = (s: Scheme): Type => {
 // =============================================================================
 
 export const instances: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ["Eq", new Set(["int", "float", "string", "bool", "char"])],
+  ["Eq", new Set(["int", "float", "string", "bool", "char", "unit"])],
   ["Ord", new Set(["int", "float", "string", "char"])],
   ["Num", new Set(["int", "float"])],
 ]);
