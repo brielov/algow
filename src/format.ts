@@ -401,8 +401,12 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
       return `{ ${rec} | ${fields} }`;
     }
 
-    case "SField":
-      return `${formatExpr(ctx, expr.record, level, Prec.Atom)}.${expr.field}`;
+    case "SField": {
+      // Chained field access needs explicit parens: (nested.0).0 not nested.0.0
+      const record = formatExpr(ctx, expr.record, level, Prec.Atom);
+      const needsParens = expr.record.kind === "SField";
+      return needsParens ? `(${record}).${expr.field}` : `${record}.${expr.field}`;
+    }
 
     case "SList": {
       if (expr.elements.length === 0) return "[]";
@@ -444,7 +448,7 @@ const formatExprInner = (ctx: FormatContext, expr: SExpr, level: number): string
           }
         })
         .join("\n");
-      return `do\n${stmts}\n${ind(level)}end`;
+      return `do[${expr.moduleName}]\n${stmts}\n${ind(level)}end`;
     }
 
     case "SAnnot":
@@ -466,8 +470,30 @@ const formatLiteral = (lit: {
     }
     case "string":
       return JSON.stringify(lit.value);
-    case "char":
-      return `'${lit.value === "'" ? "\\'" : lit.value === "\\" ? "\\\\" : lit.value}'`;
+    case "char": {
+      const ch = lit.value as string;
+      let escaped: string;
+      switch (ch) {
+        case "\n":
+          escaped = "\\n";
+          break;
+        case "\t":
+          escaped = "\\t";
+          break;
+        case "\r":
+          escaped = "\\r";
+          break;
+        case "\\":
+          escaped = "\\\\";
+          break;
+        case "'":
+          escaped = "\\'";
+          break;
+        default:
+          escaped = ch;
+      }
+      return `'${escaped}'`;
+    }
     case "bool":
       return lit.value ? "true" : "false";
   }
